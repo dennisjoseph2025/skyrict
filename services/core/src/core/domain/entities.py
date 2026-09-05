@@ -816,6 +816,9 @@ class AccountCodeSuggestion:
     side: str = "debit"
     contra_code: str = ""
     contra_name: str = ""
+    id: uuid.UUID | None = None
+    status: str = "pending"  # "pending" | "accepted" | "dismissed"
+    feature: str = "account_suggest"
 
 
 @dataclass(frozen=True)
@@ -948,8 +951,23 @@ class AiFinanceSuggestion:
     suggested_name: str
     confidence: Decimal
     status: str = "pending"  # "pending" | "accepted" | "dismissed"
+    feature: str = "account_suggest"
     id: uuid.UUID | None = None
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class AiFinanceQualityScore:
+    """Acceptance-rate snapshot for one suggestion feature (window)."""
+
+    tenant_id: uuid.UUID
+    feature: str
+    window_days: int
+    sample_count: int
+    acceptance_rate: Decimal | None
+    below_threshold: bool
+    id: uuid.UUID | None = None
+    computed_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------

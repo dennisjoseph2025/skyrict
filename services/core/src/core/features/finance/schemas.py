@@ -308,6 +308,29 @@ class AccountCodeSuggestionResponse(BaseModel):
     side: str = "debit"
     contra_code: str = ""
     contra_name: str = ""
+    id: uuid.UUID | None = None
+    status: str = "pending"
+    feature: str = "account_suggest"
+
+
+class SuggestionQualityScoreResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    feature: str
+    window_days: int
+    sample_count: int
+    acceptance_rate: Decimal | None = None
+    below_threshold: bool
+    computed_at: datetime | None = None
+
+
+class SuggestionQualityResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    window_days: int
+    overall_acceptance_rate: Decimal | None = None
+    low_quality: bool
+    features: list[SuggestionQualityScoreResponse]
 
 
 class WorkingCapitalAlertResponse(BaseModel):

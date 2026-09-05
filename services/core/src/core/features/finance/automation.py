@@ -40,6 +40,7 @@ from core.core.exceptions import AiServiceUnavailableError
 from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
+    AiFinanceQualityScore,
     AiFinanceSuggestion,
     AnomalyNarration,
     ChartOfAccount,
@@ -72,6 +73,7 @@ from core.features.finance.schemas import (
     ReminderGenerateRequest,
     RevenueConcentrationResponse,
     SuggestAccountCodeRequest,
+    SuggestionQualityResponse,
     TenantSettingsResponse,
     WorkingCapitalAlertResponse,
     WorkingCapitalSeriesResponse,
@@ -141,8 +143,9 @@ class FinanceAutomationService:
             suggestion = ai or await self.repo.suggest_account_code(tenant_id, description)
         else:
             suggestion = await self.repo.suggest_account_code(tenant_id, description)
+        persisted: AiFinanceSuggestion | None = None
         if suggestion.suggested_code:
-            await self.repo.upsert_ai_suggestion(
+            persisted = await self.repo.upsert_ai_suggestion(
                 tenant_id,
                 AiFinanceSuggestion(
                     tenant_id=tenant_id,
@@ -159,7 +162,81 @@ class FinanceAutomationService:
                 target="finance:suggestion",
                 details={"code": suggestion.suggested_code},
             )
-        return suggestion
+        if persisted is None:
+            return suggestion
+        return AccountCodeSuggestion(
+            description=suggestion.description,
+            suggested_code=suggestion.suggested_code,
+            suggested_name=suggestion.suggested_name,
+            confidence=suggestion.confidence,
+            reasoning=suggestion.reasoning,
+            amount=suggestion.amount,
+            side=suggestion.side,
+            contra_code=suggestion.contra_code,
+            contra_name=suggestion.contra_name,
+            id=persisted.id,
+            status=persisted.status,
+            feature=persisted.feature,
+        )
+
+    async def accept_suggestion(self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID) -> AiFinanceSuggestion:
+        result = await self.repo.review_ai_suggestion(tenant_id, suggestion_id, accepted=True)
+        if result is None:
+            raise NotFoundError("Suggestion not found")
+        return result
+
+    async def dismiss_suggestion(self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID) -> AiFinanceSuggestion:
+        result = await self.repo.review_ai_suggestion(tenant_id, suggestion_id, accepted=False)
+        if result is None:
+            raise NotFoundError("Suggestion not found")
+        return result
+
+    async def suggestion_quality(
+        self, tenant_id: uuid.UUID, window_days: int = 30
+    ) -> Any:
+        counts = await self.repo.suggestion_acceptance_counts(tenant_id, window_days)
+        from decimal import Decimal
+
+        feature_scores = []
+        total_accepted = 0
+        total_decisions = 0
+        for feature, accepted, dismissed in counts:
+            total_accepted += accepted
+            total_decisions += accepted + dismissed
+            rate = Decimal(accepted) / Decimal(accepted + dismissed) if accepted + dismissed > 0 else None
+            below = rate is not None and rate < Decimal("0.30")
+            score = AiFinanceQualityScore(
+                tenant_id=tenant_id,
+                feature=feature,
+                window_days=window_days,
+                sample_count=accepted + dismissed,
+                acceptance_rate=rate,
+                below_threshold=below,
+            )
+            persisted_score = await self.repo.upsert_ai_quality_score(tenant_id, score)
+            feature_scores.append(persisted_score)
+        overall_rate = Decimal(total_accepted) / Decimal(total_decisions) if total_decisions > 0 else None
+        from core.features.finance.schemas import (
+            SuggestionQualityResponse,
+            SuggestionQualityScoreResponse,
+        )
+
+        return SuggestionQualityResponse(
+            window_days=window_days,
+            overall_acceptance_rate=overall_rate,
+            low_quality=any(s.below_threshold for s in feature_scores),
+            features=[
+                SuggestionQualityScoreResponse(
+                    feature=s.feature,
+                    window_days=s.window_days,
+                    sample_count=s.sample_count,
+                    acceptance_rate=s.acceptance_rate,
+                    below_threshold=s.below_threshold,
+                    computed_at=s.computed_at,
+                )
+                for s in feature_scores
+            ],
+        )
 
     async def working_capital_alert(self, tenant_id: uuid.UUID, as_of: date) -> Any:
         return await self.repo.working_capital_alert(tenant_id, as_of)
@@ -772,3 +849,62 @@ async def batch_reminders(
             ]
         )
     )
+
+
+@router.post(
+    "/suggestions/{suggestion_id}/accept",
+    response_model=ResponseEnvelope[AccountCodeSuggestionResponse],
+)
+async def accept_suggestion(
+    suggestion_id: uuid.UUID,
+    current_user: dict[str, Any] = Depends(require_finance_ai_write),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[AccountCodeSuggestionResponse]:
+    suggestion = await svc.accept_suggestion(_tenant_id(current_user), suggestion_id)
+    return ResponseEnvelope(
+        data=AccountCodeSuggestionResponse(
+            description=suggestion.description,
+            suggested_code=suggestion.suggested_code,
+            suggested_name=suggestion.suggested_name,
+            confidence=suggestion.confidence,
+            id=suggestion.id,
+            status=suggestion.status,
+            feature=suggestion.feature,
+        )
+    )
+
+
+@router.post(
+    "/suggestions/{suggestion_id}/dismiss",
+    response_model=ResponseEnvelope[AccountCodeSuggestionResponse],
+)
+async def dismiss_suggestion(
+    suggestion_id: uuid.UUID,
+    current_user: dict[str, Any] = Depends(require_finance_ai_write),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[AccountCodeSuggestionResponse]:
+    suggestion = await svc.dismiss_suggestion(_tenant_id(current_user), suggestion_id)
+    return ResponseEnvelope(
+        data=AccountCodeSuggestionResponse(
+            description=suggestion.description,
+            suggested_code=suggestion.suggested_code,
+            suggested_name=suggestion.suggested_name,
+            confidence=suggestion.confidence,
+            id=suggestion.id,
+            status=suggestion.status,
+            feature=suggestion.feature,
+        )
+    )
+
+
+@router.get(
+    "/suggestions/quality",
+    response_model=ResponseEnvelope[SuggestionQualityResponse],
+)
+async def suggestion_quality(
+    window_days: int = Query(default=30, ge=1, le=365),
+    current_user: dict[str, Any] = Depends(require_finance_ai_read),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[SuggestionQualityResponse]:
+    result = await svc.suggestion_quality(_tenant_id(current_user), window_days)
+    return ResponseEnvelope(data=result)

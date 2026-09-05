@@ -41,6 +41,7 @@ from core.core.constants import INVOICE_PREFIX, PAYMENT_PREFIX
 from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
+    AiFinanceQualityScore,
     AiFinanceSuggestion,
     ArAging,
     ArAgingBucket,
@@ -80,6 +81,7 @@ from core.domain.entities import (
 )
 from core.domain.value_objects import AccountType, EntryStatus, InvoiceStatus, PaymentStatus
 from core.features.finance.models.ai_finance_anomaly import AiFinanceAnomalyModel
+from core.features.finance.models.ai_finance_quality_score import AiFinanceQualityScoreModel
 from core.features.finance.models.ai_finance_suggestion import AiFinanceSuggestionModel
 from core.features.finance.models.chart_of_account import ErpChartOfAccountModel
 from core.features.finance.models.fiscal_period import ErpFiscalPeriodModel
@@ -271,6 +273,7 @@ def _ai_suggestion_from_orm(model: AiFinanceSuggestionModel) -> AiFinanceSuggest
         suggested_name=model.suggested_name,
         confidence=model.confidence,
         status=model.status,
+        feature=model.feature,
         id=model.id,
         created_at=model.created_at,
     )
@@ -1736,12 +1739,14 @@ class FinanceRepository:
         stmt = select(AiFinanceSuggestionModel).where(
             AiFinanceSuggestionModel.tenant_id == tenant_id,
             AiFinanceSuggestionModel.description == suggestion.description,
+            AiFinanceSuggestionModel.feature == suggestion.feature,
         )
         model = (await self.session.execute(stmt)).scalar_one_or_none()
         if model is None:
             model = AiFinanceSuggestionModel(
                 tenant_id=tenant_id,
                 description=suggestion.description,
+                feature=suggestion.feature,
                 suggested_code=suggestion.suggested_code,
                 suggested_name=suggestion.suggested_name,
                 confidence=suggestion.confidence,
@@ -1754,6 +1759,92 @@ class FinanceRepository:
         await self.session.flush()
         await self.session.refresh(model)
         return _ai_suggestion_from_orm(model)
+
+    async def get_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion | None:
+        stmt = select(AiFinanceSuggestionModel).where(
+            AiFinanceSuggestionModel.tenant_id == tenant_id,
+            AiFinanceSuggestionModel.id == suggestion_id,
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            return None
+        return _ai_suggestion_from_orm(model)
+
+    async def review_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID, *, accepted: bool
+    ) -> AiFinanceSuggestion | None:
+        stmt = select(AiFinanceSuggestionModel).where(
+            AiFinanceSuggestionModel.tenant_id == tenant_id,
+            AiFinanceSuggestionModel.id == suggestion_id,
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            return None
+        model.status = "accepted" if accepted else "dismissed"
+        await self.session.flush()
+        await self.session.refresh(model)
+        return _ai_suggestion_from_orm(model)
+
+    async def suggestion_acceptance_counts(
+        self, tenant_id: uuid.UUID, window_days: int
+    ) -> Sequence[tuple[str, int, int]]:
+        cutoff = datetime.now(UTC) - timedelta(days=window_days)
+        stmt = (
+            select(
+                AiFinanceSuggestionModel.feature,
+                func.count(AiFinanceSuggestionModel.id).filter(
+                    AiFinanceSuggestionModel.status == "accepted"
+                ),
+                func.count(AiFinanceSuggestionModel.id).filter(
+                    AiFinanceSuggestionModel.status == "dismissed"
+                ),
+            )
+            .where(
+                AiFinanceSuggestionModel.tenant_id == tenant_id,
+                AiFinanceSuggestionModel.created_at >= cutoff,
+            )
+            .group_by(AiFinanceSuggestionModel.feature)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [(str(row[0]), int(row[1]), int(row[2])) for row in rows]
+
+    async def upsert_ai_quality_score(
+        self, tenant_id: uuid.UUID, score: AiFinanceQualityScore
+    ) -> AiFinanceQualityScore:
+        stmt = select(AiFinanceQualityScoreModel).where(
+            AiFinanceQualityScoreModel.tenant_id == tenant_id,
+            AiFinanceQualityScoreModel.feature == score.feature,
+            AiFinanceQualityScoreModel.window_days == score.window_days,
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            model = AiFinanceQualityScoreModel(
+                tenant_id=tenant_id,
+                feature=score.feature,
+                window_days=score.window_days,
+                sample_count=score.sample_count,
+                acceptance_rate=score.acceptance_rate,
+                below_threshold=score.below_threshold,
+            )
+            self.session.add(model)
+        else:
+            model.sample_count = score.sample_count
+            model.acceptance_rate = score.acceptance_rate
+            model.below_threshold = score.below_threshold
+        await self.session.flush()
+        await self.session.refresh(model)
+        return AiFinanceQualityScore(
+            tenant_id=model.tenant_id,
+            feature=model.feature,
+            window_days=model.window_days,
+            sample_count=model.sample_count,
+            acceptance_rate=model.acceptance_rate,
+            below_threshold=model.below_threshold,
+            id=model.id,
+            computed_at=model.computed_at,
+        )
 
     async def upsert_ai_anomaly(
         self, tenant_id: uuid.UUID, anomaly: AiFinanceAnomaly

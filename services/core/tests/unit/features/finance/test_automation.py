@@ -24,6 +24,7 @@ from core.core.exceptions import AiServiceUnavailableError
 from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
+    AiFinanceSuggestion,
     AnomalyNarration,
     ChartOfAccount,
     Invoice,
@@ -53,6 +54,11 @@ class StubRepo:
         self.invoice_calls: list[tuple[object, object]] = []
         self.overdue_invoices: list[Invoice] = []
         self.overdue_calls: list[object] = []
+        # SKY-67 acceptance telemetry stub state
+        self.reviewed_suggestion: AiFinanceSuggestion | None = None
+        self.review_calls: list[tuple[object, object, bool]] = []
+        self.acceptance_counts: list[tuple[str, int, int]] = []
+        self.quality_upserts: list[object] = []
 
     async def get_journal_entry(self, entry_id, tenant_id):
         return self.journal_entry
@@ -82,6 +88,17 @@ class StubRepo:
 
     async def upsert_ai_suggestion(self, tenant_id, suggestion):
         pass
+
+    async def review_ai_suggestion(self, tenant_id, suggestion_id, *, accepted):
+        self.review_calls.append((tenant_id, suggestion_id, accepted))
+        return self.reviewed_suggestion
+
+    async def suggestion_acceptance_counts(self, tenant_id, window_days):
+        return self.acceptance_counts
+
+    async def upsert_ai_quality_score(self, tenant_id, score):
+        self.quality_upserts.append(score)
+        return score
 
     # --- FIN-AI-001 additions ---
 
@@ -636,3 +653,84 @@ async def test_batch_reminders_falls_back_per_invoice_when_ai_fails() -> None:
 
     assert reminders[0].model_used == ""
     assert len(audit.logs) == 0
+
+
+async def test_accept_suggestion_marks_accepted() -> None:
+    repo = StubRepo()
+    repo.reviewed_suggestion = AiFinanceSuggestion(
+        tenant_id=_TENANT,
+        description="rent",
+        suggested_code="5000",
+        suggested_name="Rent Expense",
+        confidence=Decimal("0.9"),
+        status="accepted",
+        id=uuid.uuid4(),
+    )
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.accept_suggestion(_TENANT, uuid.uuid4())
+
+    assert result.status == "accepted"
+    assert repo.review_calls == [(_TENANT, repo.review_calls[0][1], True)]
+
+
+async def test_dismiss_suggestion_marks_dismissed() -> None:
+    repo = StubRepo()
+    repo.reviewed_suggestion = AiFinanceSuggestion(
+        tenant_id=_TENANT,
+        description="rent",
+        suggested_code="5000",
+        suggested_name="Rent Expense",
+        confidence=Decimal("0.9"),
+        status="dismissed",
+        id=uuid.uuid4(),
+    )
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.dismiss_suggestion(_TENANT, uuid.uuid4())
+
+    assert result.status == "dismissed"
+    assert repo.review_calls[0][2] is False
+
+
+async def test_accept_suggestion_raises_when_missing() -> None:
+    repo = StubRepo()
+    repo.reviewed_suggestion = None
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    with pytest.raises(NotFoundError):
+        await svc.accept_suggestion(_TENANT, uuid.uuid4())
+
+
+async def test_suggestion_quality_computes_rates_and_persists_scores() -> None:
+    repo = StubRepo()
+    repo.acceptance_counts = [
+        ("account_suggest", 2, 8),  # 20% -> below threshold
+        ("draft_entry", 9, 1),  # 90% -> above threshold
+    ]
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.suggestion_quality(_TENANT, window_days=30)
+
+    assert len(result.features) == 2
+    assert len(repo.quality_upserts) == 2
+    scores = {s.feature: s for s in result.features}
+    assert scores["account_suggest"].acceptance_rate == Decimal("0.2")
+    assert scores["account_suggest"].below_threshold is True
+    assert scores["draft_entry"].below_threshold is False
+    assert result.overall_acceptance_rate == Decimal("0.55")  # 11/20
+    assert result.low_quality is True
+    assert result.window_days == 30
+
+
+async def test_suggestion_quality_no_signal_is_not_low_quality() -> None:
+    repo = StubRepo()
+    repo.acceptance_counts = []
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.suggestion_quality(_TENANT, window_days=30)
+
+    assert result.features == []
+    assert result.overall_acceptance_rate is None
+    assert result.low_quality is False
+    assert repo.quality_upserts == []

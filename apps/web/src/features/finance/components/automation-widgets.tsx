@@ -31,6 +31,8 @@ import {
 } from "@/lib/finance/format";
 import { cn } from "@/lib/utils";
 import {
+    acceptSuggestion,
+    dismissSuggestion,
     narrateAnomaly,
     suggestAccountCode,
     type Account,
@@ -811,6 +813,9 @@ export function SuggestAccountCode({
 
     function goToJournalEntry() {
         if (!suggestion || !suggestion.suggested_code) return;
+        if (suggestion.id && suggestion.status === "pending") {
+            void acceptSuggestion(suggestion.id);
+        }
         const params = new URLSearchParams({
             draft_memo: suggestion.description || description,
             draft_account: suggestion.suggested_code,
@@ -825,6 +830,17 @@ export function SuggestAccountCode({
         router.push(
             `/dashboard/erp/finance/journal-entries?${params.toString()}`,
         );
+    }
+
+    function dismissCurrent() {
+        if (!suggestion || !suggestion.id || suggestion.status !== "pending") {
+            return;
+        }
+        void dismissSuggestion(suggestion.id).then((updated) => {
+            setSuggestion((prev) =>
+                prev ? { ...prev, status: updated.status } : prev,
+            );
+        });
     }
 
     return (
@@ -953,6 +969,33 @@ export function SuggestAccountCode({
                         <SquarePen aria-hidden="true" className="size-3.5" />
                         Create journal entry
                     </Button>
+                    {suggestion.id && suggestion.status === "pending" ? (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="mt-2 ml-2 text-muted-foreground"
+                            onClick={dismissCurrent}
+                        >
+                            <CircleX aria-hidden="true" className="size-3.5" />
+                            Dismiss
+                        </Button>
+                    ) : null}
+                    {suggestion.id && suggestion.status === "accepted" ? (
+                        <span className="mt-2 ml-2 inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+                            <CircleCheck
+                                aria-hidden="true"
+                                className="size-3.5"
+                            />
+                            Accepted
+                        </span>
+                    ) : null}
+                    {suggestion.id && suggestion.status === "dismissed" ? (
+                        <span className="mt-2 ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <CircleX aria-hidden="true" className="size-3.5" />
+                            Dismissed
+                        </span>
+                    ) : null}
                 </div>
             ) : null}
         </div>

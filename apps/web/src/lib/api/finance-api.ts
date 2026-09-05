@@ -438,6 +438,25 @@ export interface AccountCodeSuggestion {
     side: "debit" | "credit";
     contra_code: string;
     contra_name: string;
+    id?: string | null;
+    status?: string;
+    feature?: string;
+}
+
+export interface SuggestionQualityScore {
+    feature: string;
+    window_days: number;
+    sample_count: number;
+    acceptance_rate: number | null;
+    below_threshold: boolean;
+    computed_at: string | null;
+}
+
+export interface SuggestionQuality {
+    window_days: number;
+    overall_acceptance_rate: number | null;
+    low_quality: boolean;
+    features: SuggestionQualityScore[];
 }
 
 export interface WorkingCapitalAlert {
@@ -526,6 +545,34 @@ export function suggestAccountCode(
     return apiPost<AccountCodeSuggestion>(
         `${AUTOMATION}/suggest-account-code`,
         { description },
+    );
+}
+
+export function acceptSuggestion(
+    suggestionId: string,
+): Promise<AccountCodeSuggestion> {
+    return apiPost<AccountCodeSuggestion>(
+        `${AUTOMATION}/suggestions/${suggestionId}/accept`,
+        {},
+    );
+}
+
+export function dismissSuggestion(
+    suggestionId: string,
+): Promise<AccountCodeSuggestion> {
+    return apiPost<AccountCodeSuggestion>(
+        `${AUTOMATION}/suggestions/${suggestionId}/dismiss`,
+        {},
+    );
+}
+
+export function getSuggestionQuality(
+    windowDays = 30,
+): Promise<SuggestionQuality> {
+    return apiFetch<SuggestionQuality>(
+        `${AUTOMATION}/suggestions/quality${queryString({
+            window_days: windowDays,
+        })}`,
     );
 }
 

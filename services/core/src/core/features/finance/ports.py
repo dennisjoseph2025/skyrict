@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from core.domain.entities import (
         AccountCodeSuggestion,
         AiFinanceAnomaly,
+        AiFinanceQualityScore,
         AiFinanceSuggestion,
         ArAging,
         AuditReadiness,
@@ -299,6 +300,22 @@ class FinanceRepositoryPort(Protocol):
     async def upsert_ai_suggestion(
         self, tenant_id: uuid.UUID, suggestion: AiFinanceSuggestion
     ) -> AiFinanceSuggestion: ...
+
+    async def get_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion | None: ...
+
+    async def review_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID, *, accepted: bool
+    ) -> AiFinanceSuggestion | None: ...
+
+    async def upsert_ai_quality_score(
+        self, tenant_id: uuid.UUID, score: AiFinanceQualityScore
+    ) -> AiFinanceQualityScore: ...
+
+    async def suggestion_acceptance_counts(
+        self, tenant_id: uuid.UUID, window_days: int
+    ) -> Sequence[tuple[str, int, int]]: ...
 
     async def upsert_ai_anomaly(
         self, tenant_id: uuid.UUID, anomaly: AiFinanceAnomaly
