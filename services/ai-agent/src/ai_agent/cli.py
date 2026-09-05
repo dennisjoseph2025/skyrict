@@ -309,5 +309,59 @@ def eval_hr_models(
     typer.echo(f"recorded {len(rows)} eval metric(s) -> {core_url}")
 
 
+@app.command()
+def eval_finance(
+    config: str = typer.Option(
+        str(_PACKAGE_ROOT / "tests" / "eval" / "finance_prompts.yaml"),
+        "--config",
+        help="path to the finance prompt eval registry (YAML)",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="compute + print only; do not persist ai_finance_eval_runs"
+    ),
+) -> None:
+    """Evaluate the finance AI prompts against the labeled seed set (FIN-AI-002).
+
+    Drives every case in ``tests/eval/finance_prompts.yaml`` through the REAL
+    production prompt functions (a1_suggest / a2_draft / a7_narrate / a8_remind)
+    and prints one line per feature. WARNS (never fails) when precision drops
+    below the registry threshold, and persists a row per feature to
+    ``ai_finance_eval_runs`` for the historical record.
+    """
+    import asyncio
+
+    from ai_agent.core.config import settings
+    from ai_agent.core.llm_router import LlmRouter
+    from ai_agent.core.providers import build_providers_from_settings
+    from ai_agent.features.finance_eval.harness import persist_metrics, run_registry
+
+    llm_router = LlmRouter(build_providers_from_settings(settings))
+    metrics = asyncio.run(run_registry(config, llm_router))
+    for metric in metrics:
+        verdict = "PASS" if metric.met_threshold else "WARN"
+        typer.echo(
+            f"[{verdict}] {metric.feature} precision={metric.precision:.4f} "
+            f"(considered={metric.considered}, abstained={metric.abstained}, "
+            f"threshold={metric.threshold:.2f}, model={metric.model_used or 'none'})"
+        )
+    underperforming = [m for m in metrics if not m.met_threshold]
+    for metric in underperforming:
+        typer.echo(
+            f"WARNING {metric.feature} precision {metric.precision:.4f} "
+            f"< {metric.threshold:.2f}",
+            err=True,
+        )
+
+    if dry_run:
+        typer.echo("dry-run: results not persisted")
+        return
+    try:
+        ids = asyncio.run(persist_metrics(metrics))
+    except Exception as exc:  # warn-not-fail: an eval is never a hard gate
+        typer.echo(f"WARNING failed to persist finance eval results: {exc}", err=True)
+        return
+    typer.echo(f"recorded {len(ids)} finance eval metric(s) -> ai_finance_eval_runs")
+
+
 if __name__ == "__main__":
     app()
