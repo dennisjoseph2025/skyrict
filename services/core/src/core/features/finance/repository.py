@@ -817,6 +817,15 @@ class FinanceRepository:
         seq = int((await self.session.execute(stmt)).scalar_one())
         return _document_number(INVOICE_PREFIX, year, seq)
 
+    async def count_invoices_since(
+        self, tenant_id: uuid.UUID, since: datetime
+    ) -> int:
+        stmt = select(func.count(ErpInvoiceModel.id)).where(
+            ErpInvoiceModel.tenant_id == tenant_id,
+            ErpInvoiceModel.invoice_date >= since.date(),
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
     async def next_payment_number(self, tenant_id: uuid.UUID, year: int) -> str:
         stmt = select(text("nextval('seq_erp_payment_number')"))
         seq = int((await self.session.execute(stmt)).scalar_one())

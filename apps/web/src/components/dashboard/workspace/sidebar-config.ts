@@ -352,6 +352,12 @@ export const erpNavGroups: NavGroup[] = [
                         icon: ScrollText,
                         permission: "erp.finance.read",
                     },
+                    {
+                        href: "/dashboard/erp/finance/settings",
+                        label: "Settings",
+                        icon: SlidersHorizontal,
+                        permission: "erp.finance.read",
+                    },
                 ],
             },
             {

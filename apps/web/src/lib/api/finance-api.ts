@@ -521,6 +521,14 @@ export interface FinanceAnomaly {
 
 export interface TenantSettings {
     working_capital_threshold: number;
+    invoice_numbering_scheme?: string | null;
+}
+
+export interface InvoiceNumberingScheme {
+    prefix: string;
+    scheme: string;
+    seq_width: number;
+    rationale: string;
 }
 
 export function getAging(asOf: string): Promise<ArAging> {
@@ -628,11 +636,23 @@ export function getAutomationSettings(): Promise<TenantSettings> {
 
 export function updateAutomationSettings(
     threshold: number,
+    invoiceNumberingScheme?: string,
 ): Promise<TenantSettings> {
     return apiFetch<TenantSettings>(`${AUTOMATION}/settings`, {
         method: "PUT",
-        body: JSON.stringify({ threshold }),
+        body: JSON.stringify({
+            threshold,
+            ...(invoiceNumberingScheme !== undefined
+                ? { invoice_numbering_scheme: invoiceNumberingScheme }
+                : {}),
+        }),
     });
+}
+
+export function recommendInvoiceNumberingScheme(): Promise<InvoiceNumberingScheme> {
+    return apiFetch<InvoiceNumberingScheme>(
+        `${AUTOMATION}/invoice-numbering-scheme`,
+    );
 }
 
 export function reverseJournalEntry(entryId: string): Promise<JournalEntry> {

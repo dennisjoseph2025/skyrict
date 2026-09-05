@@ -415,10 +415,21 @@ class SuggestionRequest(BaseModel):
 
 class WorkingCapitalSettingsRequest(BaseModel):
     threshold: Decimal = Field(..., gt=0)
+    invoice_numbering_scheme: str | None = Field(default=None, max_length=64)
 
 
 class TenantSettingsResponse(BaseModel):
     working_capital_threshold: Decimal
+    invoice_numbering_scheme: str | None = None
+
+
+class InvoiceNumberingSchemeResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    prefix: str
+    scheme: str
+    seq_width: int
+    rationale: str
 
 
 class SuggestAccountCodeRequest(BaseModel):

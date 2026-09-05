@@ -42,7 +42,7 @@ class StubRepo:
     def __init__(self) -> None:
         self.journal_entry: JournalEntry | None = None
         self.reversed_calls: list[tuple[object, object, object, object]] = []
-        self.setting_value: str | None = None
+        self.settings: dict[str, str] = {}
         self.setting_writes: list[tuple[object, str, str]] = []
         self.accounts: list[ChartOfAccount] = []
         self.keyword_result: AccountCodeSuggestion | None = None
@@ -59,6 +59,8 @@ class StubRepo:
         self.review_calls: list[tuple[object, object, bool]] = []
         self.acceptance_counts: list[tuple[str, int, int]] = []
         self.quality_upserts: list[object] = []
+        # C6 numbering-scheme stub state
+        self.invoice_count = 0
 
     async def get_journal_entry(self, entry_id, tenant_id):
         return self.journal_entry
@@ -68,12 +70,16 @@ class StubRepo:
         return self.journal_entry
 
     async def get_tenant_setting(self, tenant_id, key):
-        return SimpleNamespace(value=self.setting_value) if self.setting_value is not None else None
+        value = self.settings.get(key)
+        return SimpleNamespace(value=value) if value is not None else None
 
     async def upsert_tenant_setting(self, tenant_id, key, value):
         self.setting_writes.append((tenant_id, key, value))
-        self.setting_value = value
+        self.settings[key] = value
         return SimpleNamespace(value=value)
+
+    async def count_invoices_since(self, tenant_id, since):
+        return self.invoice_count
 
     async def list_accounts(self, tenant_id):
         return self.accounts
@@ -191,6 +197,47 @@ async def test_settings_roundtrip_persists_threshold() -> None:
     persisted = await svc.get_settings(object())
     assert persisted.working_capital_threshold == Decimal("2.0")
     assert len(repo.setting_writes) == 1
+
+
+async def test_settings_roundtrip_persists_numbering_scheme() -> None:
+    repo = StubRepo()
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    got = await svc.put_settings(
+        object(), Decimal("1.5"), invoice_numbering_scheme="INV-2026-######"
+    )
+
+    assert got.invoice_numbering_scheme == "INV-2026-######"
+    assert any(key == "invoice_numbering_scheme" for _, key, _ in repo.setting_writes)
+
+
+async def test_settings_put_without_scheme_preserves_existing() -> None:
+    repo = StubRepo()
+    repo.settings["invoice_numbering_scheme"] = "FAC-2026-#####"
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    got = await svc.put_settings(object(), Decimal("2.0"))
+
+    assert got.invoice_numbering_scheme == "FAC-2026-#####"
+    assert len(repo.setting_writes) == 1  # only the threshold write happened
+
+
+async def test_recommend_numbering_scheme_scales_width_with_volume() -> None:
+    base = date(2026, 6, 1)
+    for volume, expected_width, expected_scheme in [
+        (500, 5, "INV-2026-#####"),
+        (50_000, 6, "INV-2026-######"),
+        (150_000, 7, "INV-2026-#######"),
+    ]:
+        repo = StubRepo()
+        repo.invoice_count = volume
+        svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+        got = await svc.recommend_numbering_scheme(object(), today=base)
+
+        assert got.seq_width == expected_width
+        assert got.scheme == expected_scheme
+        assert "INV" in got.prefix
 
 
 def _account(code: str, name: str) -> ChartOfAccount:

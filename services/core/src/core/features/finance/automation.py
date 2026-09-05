@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -36,6 +36,7 @@ from core.core.audit_events import (
     FINANCE_DUPLICATE_SUGGESTION_CREATED,
     FINANCE_JOURNAL_ENTRY_REVERSED,
 )
+from core.core.constants import INVOICE_PREFIX
 from core.core.exceptions import AiServiceUnavailableError
 from core.domain.entities import (
     AccountCodeSuggestion,
@@ -66,6 +67,7 @@ from core.features.finance.schemas import (
     DraftEntryResponse,
     DuplicateGroupResponse,
     HealthScoreResponse,
+    InvoiceNumberingSchemeResponse,
     JournalEntryResponse,
     PaymentMethodAnalyticsResponse,
     ReminderDraftLineResponse,
@@ -362,13 +364,58 @@ class FinanceAutomationService:
     async def get_settings(self, tenant_id: uuid.UUID) -> TenantSettingsResponse:
         setting = await self.repo.get_tenant_setting(tenant_id, "working_capital_threshold")
         value = setting.value if setting else "1.5"
-        return TenantSettingsResponse(working_capital_threshold=Decimal(value))
+        scheme = await self.repo.get_tenant_setting(tenant_id, "invoice_numbering_scheme")
+        return TenantSettingsResponse(
+            working_capital_threshold=Decimal(value),
+            invoice_numbering_scheme=scheme.value if scheme else None,
+        )
 
-    async def put_settings(self, tenant_id: uuid.UUID, threshold: Any) -> TenantSettingsResponse:
+    async def put_settings(
+        self,
+        tenant_id: uuid.UUID,
+        threshold: Decimal,
+        invoice_numbering_scheme: str | None = None,
+    ) -> TenantSettingsResponse:
         await self.repo.upsert_tenant_setting(
             tenant_id, "working_capital_threshold", str(threshold)
         )
-        return TenantSettingsResponse(working_capital_threshold=Decimal(str(threshold)))
+        if invoice_numbering_scheme is not None:
+            await self.repo.upsert_tenant_setting(
+                tenant_id, "invoice_numbering_scheme", invoice_numbering_scheme
+            )
+        return await self.get_settings(tenant_id)
+
+    async def recommend_numbering_scheme(
+        self, tenant_id: uuid.UUID, today: date | None = None
+    ) -> InvoiceNumberingSchemeResponse:
+        """Suggest a sequence width this year's volume won't overflow in ~10 years.
+
+        Deterministic rule keyed off this year's invoice volume (spec C6).
+        ``next_invoice_number`` keeps emitting INV-YYYY-##### today -- applying
+        the suggested scheme is a separate future step, so this never renumbers
+        active invoices.
+        """
+        if today is None:
+            today = date.today()
+        since = datetime(today.year, 1, 1, tzinfo=UTC)
+        volume = await self.repo.count_invoices_since(tenant_id, since)
+        if volume >= 100_000:
+            seq_width = 7
+        elif volume >= 10_000:
+            seq_width = 6
+        else:
+            seq_width = 5
+        scheme = f"{INVOICE_PREFIX}-{today.year}-{'#' * seq_width}"
+        rationale = (
+            f"{volume:,} invoices this year. A {seq_width}-digit sequence "
+            f"leaves room for the next ~10 years at the current volume."
+        )
+        return InvoiceNumberingSchemeResponse(
+            prefix=INVOICE_PREFIX,
+            scheme=scheme,
+            seq_width=seq_width,
+            rationale=rationale,
+        )
 
     async def draft_journal_entry(self, tenant_id: uuid.UUID, description: str) -> DraftEntry:
         accounts = await self.repo.list_accounts(tenant_id)
@@ -757,8 +804,24 @@ async def put_settings(
     current_user: dict[str, Any] = Depends(require_finance_write),
     svc: FinanceAutomationService = Depends(get_finance_automation_service),
 ) -> ResponseEnvelope[TenantSettingsResponse]:
-    settings = await svc.put_settings(_tenant_id(current_user), body.threshold)
+    settings = await svc.put_settings(
+        _tenant_id(current_user),
+        body.threshold,
+        invoice_numbering_scheme=body.invoice_numbering_scheme,
+    )
     return ResponseEnvelope(data=settings)
+
+
+@router.get(
+    "/invoice-numbering-scheme",
+    response_model=ResponseEnvelope[InvoiceNumberingSchemeResponse],
+)
+async def invoice_numbering_scheme(
+    current_user: dict[str, Any] = Depends(require_finance_ai_read),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[InvoiceNumberingSchemeResponse]:
+    suggestion = await svc.recommend_numbering_scheme(_tenant_id(current_user))
+    return ResponseEnvelope(data=suggestion)
 
 
 # ---------------------------------------------------------------------------
