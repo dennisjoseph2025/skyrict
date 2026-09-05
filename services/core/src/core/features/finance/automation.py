@@ -41,6 +41,7 @@ from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
     AiFinanceSuggestion,
+    AnomalyNarration,
     ChartOfAccount,
     DraftEntry,
     DraftEntryLine,
@@ -100,6 +101,15 @@ def _user_id(current_user: dict[str, Any]) -> uuid.UUID:
 
 AiSuggester = Callable[[str, Sequence[ChartOfAccount]], Awaitable[AccountCodeSuggestion | None]]
 AiDrafter = Callable[[str, Sequence[ChartOfAccount]], Awaitable[DraftEntry | None]]
+AiNarrater = Callable[[str, str, str], Awaitable[AnomalyNarration | None]]
+AiReminder = Callable[
+    [str | None, str, Decimal, int, str], Awaitable[ReminderDraft | None]
+]
+
+
+def _narration_cites_figure(narration: str) -> bool:
+    """AI narration must quote at least one triggering figure (spec A7)."""
+    return any(ch.isdigit() for ch in narration)
 
 
 @dataclass
@@ -111,6 +121,8 @@ class FinanceAutomationService:
     customers: CustomerPort | None = field(default=None)
     ai_suggest: AiSuggester | None = field(default=None)
     ai_draft: AiDrafter | None = field(default=None)
+    ai_narrate: AiNarrater | None = field(default=None)
+    ai_remind: AiReminder | None = field(default=None)
 
     async def close_checklist(self, tenant_id: uuid.UUID, period_id: uuid.UUID) -> Any:
         return await self.repo.close_checklist(tenant_id, period_id)
@@ -335,19 +347,26 @@ class FinanceAutomationService:
         anomaly = await self.repo.get_ai_anomaly(tenant_id, anomaly_id)
         if anomaly is None:
             raise NotFoundError(f"Anomaly {anomaly_id} not found")
-        # AI narration requires the ai_suggest callable to be wired with
-        # the narrate function. This is handled in the deps factory.
         # Fallback: return a basic narration from the description
         narration = {
             "narration": f"Anomaly detected: {anomaly.anomaly_type} — {anomaly.description}",
             "model_used": "",
         }
+        if self.ai_narrate is not None:
+            try:
+                ai = await self.ai_narrate(
+                    anomaly.anomaly_type, anomaly.description, anomaly.severity
+                )
+            except AiServiceUnavailableError:
+                ai = None
+            if ai is not None and _narration_cites_figure(ai.narration):
+                narration = {"narration": ai.narration, "model_used": ai.model_used}
         await self.audit.log(
             tenant_id=tenant_id,
             user_id=None,
             action=FINANCE_AI_ANOMALY_NARRATED,
             target=f"finance:anomaly:{anomaly_id}",
-            details={"anomaly_type": anomaly.anomaly_type},
+            details={"anomaly_type": anomaly.anomaly_type, "model_used": narration["model_used"]},
         )
         return narration
 
@@ -369,12 +388,23 @@ class FinanceAutomationService:
             body=f"Please remit payment for invoice {invoice.invoice_number} totaling {invoice.total}.",
             model_used="",
         )
+        model_used = ""
+        if self.ai_remind is not None:
+            try:
+                ai = await self.ai_remind(
+                    None, invoice.invoice_number, invoice.total, days_overdue, tone
+                )
+            except AiServiceUnavailableError:
+                ai = None
+            if ai is not None and ai.subject and ai.body:
+                reminder = ai
+                model_used = ai.model_used
         await self.audit.log(
             tenant_id=tenant_id,
             user_id=None,
             action=FINANCE_AI_REMINDER_GENERATED,
             target=f"finance:invoice:{invoice_id}",
-            details={"invoice": invoice.invoice_number, "tone": tone},
+            details={"invoice": invoice.invoice_number, "tone": tone, "model_used": model_used},
         )
         return reminder
 
@@ -386,18 +416,36 @@ class FinanceAutomationService:
 
             days_overdue = (_date.today() - inv.due_date).days if inv.due_date else 0
             tone = "polite" if days_overdue < 30 else "firm" if days_overdue < 60 else "final"
-            reminders.append(
-                ReminderDraft(
-                    invoice_number=inv.invoice_number,
-                    customer_name=None,
-                    amount=inv.total,
-                    days_overdue=days_overdue,
-                    tone=tone,
-                    subject=f"Payment Reminder — Invoice {inv.invoice_number}",
-                    body=f"Please remit payment for invoice {inv.invoice_number} totaling {inv.total}.",
-                    model_used="",
-                )
+            reminder = ReminderDraft(
+                invoice_number=inv.invoice_number,
+                customer_name=None,
+                amount=inv.total,
+                days_overdue=days_overdue,
+                tone=tone,
+                subject=f"Payment Reminder — Invoice {inv.invoice_number}",
+                body=f"Please remit payment for invoice {inv.invoice_number} totaling {inv.total}.",
+                model_used="",
             )
+            model_used = ""
+            if self.ai_remind is not None:
+                try:
+                    ai = await self.ai_remind(
+                        None, inv.invoice_number, inv.total, days_overdue, tone
+                    )
+                except AiServiceUnavailableError:
+                    ai = None
+                if ai is not None and ai.subject and ai.body:
+                    reminder = ai
+                    model_used = ai.model_used
+            if model_used:
+                await self.audit.log(
+                    tenant_id=tenant_id,
+                    user_id=None,
+                    action=FINANCE_AI_REMINDER_GENERATED,
+                    target=f"finance:invoice:{inv.id}",
+                    details={"invoice": inv.invoice_number, "tone": tone, "model_used": model_used},
+                )
+            reminders.append(reminder)
         return reminders
 
 

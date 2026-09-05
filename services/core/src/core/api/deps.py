@@ -700,14 +700,23 @@ def get_finance_automation_service_with_ai(
 ) -> FinanceAutomationService:
     """Composition root for finance automation incl. AI account suggestions."""
     from collections.abc import Sequence
+    from decimal import Decimal
 
     from core.core.tenant_resolver import derive_tenant_slug
-    from core.domain.entities import AccountCodeSuggestion, ChartOfAccount, DraftEntry
+    from core.domain.entities import (
+        AccountCodeSuggestion,
+        AnomalyNarration,
+        ChartOfAccount,
+        DraftEntry,
+        ReminderDraft,
+    )
     from core.features.ai.router import get_ai_client
     from core.features.audit.repository import AuditRepository
     from core.features.crm.repository import CrmRepository
     from core.features.finance.ai_suggester import (
         draft_journal_entry_with_ai,
+        generate_reminder_with_ai,
+        narrate_anomaly_with_ai,
         suggest_account_code_with_ai,
     )
     from core.features.finance.automation import FinanceAutomationService
@@ -737,12 +746,44 @@ def get_finance_automation_service_with_ai(
             accounts=accounts,
         )
 
+    async def ai_narrate(
+        anomaly_type: str, description: str, severity: str
+    ) -> AnomalyNarration | None:
+        return await narrate_anomaly_with_ai(
+            client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            anomaly_type=anomaly_type,
+            description=description,
+            severity=severity,
+        )
+
+    async def ai_remind(
+        customer_name: str | None,
+        invoice_number: str,
+        amount: Decimal,
+        days_overdue: int,
+        tone: str,
+    ) -> ReminderDraft | None:
+        return await generate_reminder_with_ai(
+            client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            customer_name=customer_name,
+            invoice_number=invoice_number,
+            amount=float(amount),
+            days_overdue=days_overdue,
+            tone=tone,
+        )
+
     return FinanceAutomationService(
         repo=FinanceRepository(db),
         audit=cast("AuditSink", AuditRepository(db)),
         customers=CrmRepository(db),
         ai_suggest=ai_suggest,
         ai_draft=ai_draft,
+        ai_narrate=ai_narrate,
+        ai_remind=ai_remind,
     )
 
 

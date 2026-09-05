@@ -222,7 +222,7 @@ async def generate_reminder_with_ai(
     payload = {
         "customer_name": customer_name,
         "invoice_number": invoice_number,
-        "amount": amount,
+        "amount": float(amount),
         "days_overdue": days_overdue,
         "tone": tone,
     }

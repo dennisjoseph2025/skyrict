@@ -24,9 +24,11 @@ from core.core.exceptions import AiServiceUnavailableError
 from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
+    AnomalyNarration,
     ChartOfAccount,
     Invoice,
     JournalEntry,
+    ReminderDraft,
 )
 from core.domain.value_objects import AccountType, EntryStatus, InvoiceStatus
 from core.features.finance.automation import FinanceAutomationService
@@ -379,6 +381,71 @@ async def test_narrate_anomaly_raises_when_missing() -> None:
         await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
 
 
+async def test_narrate_anomaly_uses_ai_when_cites_figure() -> None:
+    repo = StubRepo()
+    repo.anomaly = _anomaly()
+    audit = RecordingAudit()
+
+    async def ai_narrate(anomaly_type, description, severity):
+        return AnomalyNarration(
+            narration="Duplicate entry flagged - both posts total 1,200. Review...",
+            model_used="gpt-test",
+        )
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["narration"].startswith("Duplicate entry flagged")
+    assert result["model_used"] == "gpt-test"
+    assert audit.logs[0]["details"]["model_used"] == "gpt-test"
+
+
+async def test_narrate_anomaly_falls_back_when_ai_omits_figure() -> None:
+    repo = StubRepo()
+    anomaly = _anomaly()
+    repo.anomaly = anomaly
+
+    async def ai_narrate(anomaly_type, description, severity):
+        return AnomalyNarration(narration="A duplicate entry was detected.", model_used="gpt-test")
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["model_used"] == ""
+    assert result["narration"] == (
+        f"Anomaly detected: {anomaly.anomaly_type} — {anomaly.description}"
+    )
+
+
+async def test_narrate_anomaly_falls_back_when_ai_fails() -> None:
+    repo = StubRepo()
+    anomaly = _anomaly()
+    repo.anomaly = anomaly
+
+    async def ai_narrate(anomaly_type, description, severity):
+        raise AiServiceUnavailableError("down")
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["model_used"] == ""
+    assert "Anomaly detected" in result["narration"]
+
+
+async def test_narrate_anomaly_falls_back_when_ai_abstains() -> None:
+    repo = StubRepo()
+    repo.anomaly = _anomaly()
+
+    async def ai_narrate(anomaly_type, description, severity):
+        return None
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["model_used"] == ""
+    assert "Anomaly detected" in result["narration"]
+
+
 # ---------------------------------------------------------------------------
 # generate_reminder tests
 # ---------------------------------------------------------------------------
@@ -432,6 +499,63 @@ async def test_generate_reminder_raises_when_invoice_missing() -> None:
         await svc.generate_reminder(_TENANT, _INVOICE_ID)
 
 
+async def test_generate_reminder_uses_ai() -> None:
+    repo = StubRepo()
+    invoice = _invoice(due_offset=-10, total=Decimal("1500"))
+    repo.invoice = invoice
+    audit = RecordingAudit()
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        return ReminderDraft(
+            invoice_number=invoice_number,
+            customer_name="Acme Corp",
+            amount=amount,
+            days_overdue=days_overdue,
+            tone=tone,
+            subject=f"Overdue Invoice {invoice_number}",
+            body="Please remit payment for invoice INV-001 totaling 1,500.",
+            model_used="gpt-test",
+        )
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminder = await svc.generate_reminder(_TENANT, _INVOICE_ID)
+
+    assert reminder.customer_name == "Acme Corp"
+    assert reminder.subject == "Overdue Invoice INV-001"
+    assert reminder.model_used == "gpt-test"
+    assert audit.logs[0]["details"]["model_used"] == "gpt-test"
+
+
+async def test_generate_reminder_falls_back_when_ai_fails() -> None:
+    repo = StubRepo()
+    repo.invoice = _invoice(due_offset=-10, total=Decimal("1500"))
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        raise AiServiceUnavailableError("down")
+
+    audit = RecordingAudit()
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminder = await svc.generate_reminder(_TENANT, _INVOICE_ID)
+
+    assert reminder.model_used == ""
+    assert "Payment Reminder" in reminder.subject
+    assert audit.logs[0]["details"]["model_used"] == ""
+
+
+async def test_generate_reminder_falls_back_when_ai_returns_empty() -> None:
+    repo = StubRepo()
+    repo.invoice = _invoice(due_offset=-10, total=Decimal("1500"))
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        return None
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_remind=ai_remind)
+    reminder = await svc.generate_reminder(_TENANT, _INVOICE_ID)
+
+    assert reminder.model_used == ""
+    assert "Payment Reminder" in reminder.subject
+
+
 # ---------------------------------------------------------------------------
 # batch_reminders tests
 # ---------------------------------------------------------------------------
@@ -471,3 +595,44 @@ async def test_batch_reminders_empty_list() -> None:
     reminders = await svc.batch_reminders(_TENANT)
 
     assert reminders == []
+
+
+async def test_batch_reminders_uses_ai_and_audits_ai_generated() -> None:
+    repo = StubRepo()
+    inv1 = _invoice(due_offset=-10, total=Decimal("100"))
+    repo.overdue_invoices = [inv1]
+    audit = RecordingAudit()
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        return ReminderDraft(
+            invoice_number=invoice_number,
+            customer_name=None,
+            amount=amount,
+            days_overdue=days_overdue,
+            tone=tone,
+            subject=f"Overdue {invoice_number}",
+            body="Please pay now, thanks.",
+            model_used="gpt-test",
+        )
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminders = await svc.batch_reminders(_TENANT)
+
+    assert reminders[0].model_used == "gpt-test"
+    assert len(audit.logs) == 1
+    assert audit.logs[0]["action"] == FINANCE_AI_REMINDER_GENERATED
+
+
+async def test_batch_reminders_falls_back_per_invoice_when_ai_fails() -> None:
+    repo = StubRepo()
+    repo.overdue_invoices = [_invoice(due_offset=-10)]
+    audit = RecordingAudit()
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        raise AiServiceUnavailableError("down")
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminders = await svc.batch_reminders(_TENANT)
+
+    assert reminders[0].model_used == ""
+    assert len(audit.logs) == 0
