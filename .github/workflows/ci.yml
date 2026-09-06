@@ -13,6 +13,9 @@ jobs:
   changes:
     name: Detect changed packages
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       identity: ${{ steps.filter.outputs.identity }}
       core: ${{ steps.filter.outputs.core }}
@@ -59,25 +62,11 @@ jobs:
       - name: Bandit security scan
         run: uv run bandit -r services/ libs/ -c pyproject.toml
 
-  test:
-    name: Tests (${{ matrix.package }})
+  test-identity:
+    name: Tests (services/identity)
     needs: changes
+    if: ${{ needs.changes.outputs.identity == 'true' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - package: services/identity
-            flag: identity
-          - package: services/core
-            flag: core
-          - package: libs/skyrict-common
-            flag: common
-          - package: libs/skyrict-events
-            flag: events
-          - package: libs/skyrict-testing
-            flag: testing
-    if: ${{ fromJSON(needs.changes.outputs[matrix.flag]) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -88,4 +77,72 @@ jobs:
           version: latest
       - run: uv sync --all-packages --group dev
       - name: Run tests
-        run: uv run pytest ${{ matrix.package }}/tests/ -v --tb=short
+        run: uv run pytest services/identity/tests/ -v --tb=short
+
+  test-core:
+    name: Tests (services/core)
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+      - run: uv sync --all-packages --group dev
+      - name: Run tests
+        run: uv run pytest services/core/tests/ -v --tb=short
+
+  test-common:
+    name: Tests (libs/skyrict-common)
+    needs: changes
+    if: ${{ needs.changes.outputs.common == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+      - run: uv sync --all-packages --group dev
+      - name: Run tests
+        run: uv run pytest libs/skyrict-common/tests/ -v --tb=short
+
+  test-events:
+    name: Tests (libs/skyrict-events)
+    needs: changes
+    if: ${{ needs.changes.outputs.events == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+      - run: uv sync --all-packages --group dev
+      - name: Run tests
+        run: uv run pytest libs/skyrict-events/tests/ -v --tb=short
+
+  test-testing:
+    name: Tests (libs/skyrict-testing)
+    needs: changes
+    if: ${{ needs.changes.outputs.testing == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: latest
+      - run: uv sync --all-packages --group dev
+      - name: Run tests
+        run: uv run pytest libs/skyrict-testing/tests/ -v --tb=short
