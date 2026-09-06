@@ -1,3 +1,13 @@
+<!--
+PR title is enforced by the Validate PR Title workflow and must match one of:
+  1. Jira-tracked work:  [INTERNAL-ID]: type(scope)/TICKET-KEY summary
+                         e.g. [RPT-DATA-001]: feat(core)/SKY-77 reporting data layer - ...
+  2. Non-Jira work:      type(scope): summary  (Conventional Commits, no ID/key)
+                         e.g. fix(ci): validate root CI - ...
+Types: feat|fix|chore|docs|test|refactor|perf|ci|build -- scope optional -- breaking: type! or type(scope)!:
+See CONTRIBUTING.md, "Pull Request Process" -> "PR Title".
+-->
+
 ## Summary
 
 <!-- What does this PR do? One sentence. -->
