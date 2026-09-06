@@ -32,12 +32,16 @@ from core.domain.entities import (
     StockHealthSummary,
     StockLevel,
     StockMovement,
+    Supplier,
+    SupplierPerformance,
     Warehouse,
 )
 from core.domain.value_objects import Money, StockMovementType
 from core.features.inventory.models.product import ErpProductModel
 from core.features.inventory.models.stock_level import ErpStockLevelModel
 from core.features.inventory.models.stock_movement import ErpStockMovementModel
+from core.features.inventory.models.supplier import ErpSupplierModel
+from core.features.inventory.models.supplier_performance import ErpSupplierPerformanceModel
 from core.features.inventory.models.warehouse import ErpWarehouseModel
 
 if TYPE_CHECKING:
@@ -82,6 +86,7 @@ def _product_to_orm(product: Product) -> ErpProductModel:
         "sell_currency_code": product.sell_price.currency,
         "reorder_point": product.reorder_point,
         "is_active": product.is_active,
+        "supplier_id": product.supplier_id,
     }
     if product.id is not None:
         kwargs["id"] = product.id
@@ -100,6 +105,7 @@ def _product_from_orm(model: ErpProductModel) -> Product:
         sell_price=Money(model.sell_price, model.sell_currency_code),
         reorder_point=model.reorder_point,
         is_active=model.is_active,
+        supplier_id=model.supplier_id,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
@@ -153,6 +159,50 @@ def _stock_movement_from_orm(model: ErpStockMovementModel) -> StockMovement:
         ref_type=model.ref_type,
         ref_id=model.ref_id,
         created_at=model.created_at,
+    )
+
+
+def _supplier_to_orm(supplier: Supplier) -> ErpSupplierModel:
+    kwargs: dict[str, object] = {
+        "tenant_id": supplier.tenant_id,
+        "name": supplier.name,
+        "contact_name": supplier.contact_name,
+        "contact_email": supplier.contact_email,
+        "lead_time_days": supplier.lead_time_days,
+        "is_active": supplier.is_active,
+    }
+    if supplier.id is not None:
+        kwargs["id"] = supplier.id
+    return ErpSupplierModel(**kwargs)
+
+
+def _supplier_from_orm(model: ErpSupplierModel) -> Supplier:
+    return Supplier(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        name=model.name,
+        contact_name=model.contact_name,
+        contact_email=model.contact_email,
+        lead_time_days=model.lead_time_days,
+        is_active=model.is_active,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+    )
+
+
+def _performance_from_orm(model: ErpSupplierPerformanceModel) -> SupplierPerformance:
+    return SupplierPerformance(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        supplier_id=model.supplier_id,
+        period_start=model.period_start,
+        period_end=model.period_end,
+        on_time_delivery_pct=model.on_time_delivery_pct,
+        defect_rate_pct=model.defect_rate_pct,
+        price_stability_index=model.price_stability_index,
+        responsiveness_days=model.responsiveness_days,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
     )
 
 
@@ -233,6 +283,7 @@ class InventoryRepository:
         cost_price: Money | object = _UNSET,
         sell_price: Money | object = _UNSET,
         reorder_point: Decimal | object = _UNSET,
+        supplier_id: uuid.UUID | object | None = _UNSET,
     ) -> Product | None:
         stmt = select(ErpProductModel).where(
             ErpProductModel.tenant_id == tenant_id,
@@ -257,6 +308,8 @@ class InventoryRepository:
             model.sell_currency_code = cast("Money", sell_price).currency
         if reorder_point is not _UNSET:
             model.reorder_point = cast("Decimal", reorder_point)
+        if supplier_id is not _UNSET:
+            model.supplier_id = cast("uuid.UUID | None", supplier_id)
         await self.session.flush()
         await self.session.refresh(model)
         return _product_from_orm(model)
@@ -295,6 +348,148 @@ class InventoryRepository:
             stmt = stmt.where(ErpProductModel.is_active.is_(True))
         if category:
             stmt = stmt.where(ErpProductModel.category == category)
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    # ------------------------------------------------------------------
+    # Suppliers (SKY-86 / INV-AI-004)
+    # ------------------------------------------------------------------
+
+    async def create_supplier(self, supplier: Supplier) -> Supplier:
+        model = _supplier_to_orm(supplier)
+        self.session.add(model)
+        await self.session.flush()
+        await self.session.refresh(model)
+        return _supplier_from_orm(model)
+
+    async def get_supplier(self, supplier_id: uuid.UUID, tenant_id: uuid.UUID) -> Supplier | None:
+        stmt = select(ErpSupplierModel).where(
+            ErpSupplierModel.tenant_id == tenant_id,
+            ErpSupplierModel.id == supplier_id,
+        )
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        return _supplier_from_orm(model) if model is not None else None
+
+    async def get_supplier_by_name(self, name: str, tenant_id: uuid.UUID) -> Supplier | None:
+        stmt = select(ErpSupplierModel).where(
+            ErpSupplierModel.tenant_id == tenant_id,
+            ErpSupplierModel.name == name,
+        )
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        return _supplier_from_orm(model) if model is not None else None
+
+    async def update_supplier(
+        self,
+        supplier_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        *,
+        name: str | object = _UNSET,
+        contact_name: str | object | None = _UNSET,
+        contact_email: str | object | None = _UNSET,
+        lead_time_days: int | object = _UNSET,
+        is_active: bool | object = _UNSET,
+    ) -> Supplier | None:
+        stmt = select(ErpSupplierModel).where(
+            ErpSupplierModel.tenant_id == tenant_id,
+            ErpSupplierModel.id == supplier_id,
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            return None
+        if name is not _UNSET:
+            model.name = cast("str", name)
+        if contact_name is not _UNSET:
+            model.contact_name = cast("str | None", contact_name)
+        if contact_email is not _UNSET:
+            model.contact_email = cast("str | None", contact_email)
+        if lead_time_days is not _UNSET:
+            model.lead_time_days = cast("int", lead_time_days)
+        if is_active is not _UNSET:
+            model.is_active = cast("bool", is_active)
+        await self.session.flush()
+        await self.session.refresh(model)
+        return _supplier_from_orm(model)
+
+    async def deactivate_supplier(
+        self, supplier_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> Supplier | None:
+        """Soft-delete: suppliers referenced by products cannot be removed."""
+        return await self.update_supplier(supplier_id, tenant_id, is_active=False)
+
+    async def list_suppliers(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[Supplier]:
+        stmt = select(ErpSupplierModel).where(ErpSupplierModel.tenant_id == tenant_id)
+        if not include_inactive:
+            stmt = stmt.where(ErpSupplierModel.is_active.is_(True))
+        stmt = stmt.order_by(ErpSupplierModel.name).offset(offset).limit(limit)
+        result = await self.session.execute(stmt)
+        return [_supplier_from_orm(model) for model in result.scalars().all()]
+
+    async def count_suppliers(self, tenant_id: uuid.UUID, *, include_inactive: bool = False) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(ErpSupplierModel)
+            .where(ErpSupplierModel.tenant_id == tenant_id)
+        )
+        if not include_inactive:
+            stmt = stmt.where(ErpSupplierModel.is_active.is_(True))
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def add_supplier_performance(
+        self, performance: SupplierPerformance
+    ) -> SupplierPerformance:
+        model = ErpSupplierPerformanceModel(
+            tenant_id=performance.tenant_id,
+            supplier_id=performance.supplier_id,
+            period_start=performance.period_start,
+            period_end=performance.period_end,
+            on_time_delivery_pct=performance.on_time_delivery_pct,
+            defect_rate_pct=performance.defect_rate_pct,
+            price_stability_index=performance.price_stability_index,
+            responsiveness_days=performance.responsiveness_days,
+        )
+        self.session.add(model)
+        await self.session.flush()
+        await self.session.refresh(model)
+        return _performance_from_orm(model)
+
+    async def list_supplier_performance(
+        self,
+        supplier_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        *,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[SupplierPerformance]:
+        stmt = (
+            select(ErpSupplierPerformanceModel)
+            .where(
+                ErpSupplierPerformanceModel.tenant_id == tenant_id,
+                ErpSupplierPerformanceModel.supplier_id == supplier_id,
+            )
+            .order_by(ErpSupplierPerformanceModel.period_start.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return [_performance_from_orm(model) for model in result.scalars().all()]
+
+    async def count_supplier_performance(self, supplier_id: uuid.UUID, tenant_id: uuid.UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(ErpSupplierPerformanceModel)
+            .where(
+                ErpSupplierPerformanceModel.tenant_id == tenant_id,
+                ErpSupplierPerformanceModel.supplier_id == supplier_id,
+            )
+        )
         return int((await self.session.execute(stmt)).scalar_one())
 
     # ------------------------------------------------------------------
