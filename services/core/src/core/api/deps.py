@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from core.features.payroll.ports import PayslipApprovedNotifierPort
     from core.features.payroll.service import PayrollService
     from core.features.payroll_automation.service import PayrollAutomationService
-    from core.features.reporting.service import DashboardService
+    from core.features.reporting.service import DashboardService, ReportService
     from core.features.sales.service import SalesService
 
 logger = get_logger("core.deps")
@@ -899,3 +899,33 @@ def get_dashboard_service(db: AsyncSession = Depends(get_db)) -> DashboardServic
     from core.features.reporting.service import DashboardService
 
     return DashboardService(DashboardRepository(db))
+
+
+def make_report_service(
+    db: AsyncSession,
+    audit: CoreAuditService | None = None,
+) -> ReportService:
+    """Plain factory - build :class:`ReportService` without FastAPI resolution.
+
+    Shared by the FastAPI dependency below and the background snapshot
+    retention worker, which constructs services on its own per-tick session
+    and cannot go through ``Depends``.
+    """
+    from core.features.reporting.repository import ReportRepository
+    from core.features.reporting.service import ReportService
+
+    return ReportService(ReportRepository(db), audit=audit)
+
+
+def get_report_service(
+    db: AsyncSession = Depends(get_db),
+    audit: CoreAuditService = Depends(get_core_audit_service),
+) -> ReportService:
+    """Composition root for the reports API (RPT-BE-001).
+
+    Same session as the permission dependency, so param validation, the report
+    query, and the snapshot upsert commit atomically in the request
+    transaction. The shared audit service records ``REPORT_EXPORTED`` on the
+    export path.
+    """
+    return make_report_service(db, audit)

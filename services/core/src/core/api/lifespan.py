@@ -81,6 +81,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         app.state.payroll_automation_worker = None
 
+    # Report snapshot retention worker (RPT-BE-001): a background asyncio loop
+    # that prunes each definition's snapshots beyond REPORTING_RETENTION_LIMIT.
+    # Disabled under the test environment so integration tests drive
+    # process_all() directly (and via `core retention run`).
+    if settings.REPORTING_RETENTION_ENABLED and settings.ENVIRONMENT != Environment.TEST:
+        from core.db.session import async_session_factory
+        from core.features.reporting.retention_worker import SnapshotRetentionWorker
+
+        app.state.reporting_retention_worker = SnapshotRetentionWorker(
+            async_session_factory,
+            poll_seconds=settings.REPORTING_RETENTION_POLL_SECONDS,
+            keep_n=settings.REPORTING_RETENTION_LIMIT,
+        )
+        app.state.reporting_retention_worker.start()
+    else:
+        app.state.reporting_retention_worker = None
+
     # Graceful shutdown: uvicorn owns SIGTERM/SIGINT handling; on signal it
     # runs this context manager's exit, closing the readiness gate, the AI
     # client and the DB engine so in-flight work can drain cleanly.
@@ -94,5 +111,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     worker = getattr(app.state, "payroll_automation_worker", None)
     if worker is not None:
         await worker.stop()
+    retention_worker = getattr(app.state, "reporting_retention_worker", None)
+    if retention_worker is not None:
+        await retention_worker.stop()
     await app.state.ai_client.aclose()
     await engine.dispose()

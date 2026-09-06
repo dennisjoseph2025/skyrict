@@ -261,5 +261,39 @@ def provision_rbac(
     asyncio.run(_run())
 
 
+@app.command()
+def retention(
+    keep: int = typer.Option(
+        None,
+        "--keep",
+        min=1,
+        help="Per-definition snapshot cap (default: REPORTING_RETENTION_LIMIT, 20)",
+    ),
+) -> None:
+    """Run one report-snapshot retention pass (manual/CI equivalent of the worker).
+
+    Walks every tenant's definitions and prunes snapshots beyond the newest
+    ``keep`` per definition (the ticket's "keeping N per definition" contract).
+    """
+    import asyncio
+
+    from core.core.config import settings
+    from core.db.session import async_session_factory
+    from core.features.reporting.retention_worker import SnapshotRetentionWorker
+
+    async def _run() -> None:
+        keep_n = keep if keep is not None else settings.REPORTING_RETENTION_LIMIT
+        outcome = await SnapshotRetentionWorker(
+            async_session_factory,
+            keep_n=keep_n,
+        ).process_all()
+        typer.echo(
+            f"retention pass complete: {outcome.tenants_processed} tenants, "
+            f"{outcome.snapshots_pruned} snapshots pruned (keep={keep_n})"
+        )
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     app()
