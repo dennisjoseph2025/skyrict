@@ -80,6 +80,11 @@ FINANCE_AI_DRAFT_APPLIED = "finance.ai.draft.applied"
 FINANCE_AI_ANOMALY_NARRATED = "finance.ai.anomaly.narrated"
 FINANCE_AI_REMINDER_GENERATED = "finance.ai.reminder.generated"
 
+# ---------------------------------------------------------------------------
+# Reports (RPT-BE-001)
+# ---------------------------------------------------------------------------
+REPORT_EXPORTED = "report.exported"
+
 # Every catalogued audit event, in catalog order.
 CATALOG: tuple[str, ...] = (
     HR_DEPARTMENT_CREATED,
@@ -135,6 +140,7 @@ CATALOG: tuple[str, ...] = (
     FINANCE_AI_DRAFT_APPLIED,
     FINANCE_AI_ANOMALY_NARRATED,
     FINANCE_AI_REMINDER_GENERATED,
+    REPORT_EXPORTED,
 )
 
 ALL_AUDIT_EVENTS: frozenset[str] = frozenset(CATALOG)
@@ -213,6 +219,11 @@ AUDIT_EVENT_MODULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             FINANCE_AI_REMINDER_GENERATED,
         ),
     ),
+    (
+        "reports",
+        "Reports",
+        (REPORT_EXPORTED,),
+    ),
 )
 
 
@@ -288,4 +299,5 @@ __all__ = [
     "PAYROLL_RUN_PAID",
     "PAYROLL_RUN_VOIDED",
     "PAYROLL_SETTINGS_UPDATED",
+    "REPORT_EXPORTED",
 ]

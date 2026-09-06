@@ -216,6 +216,45 @@ class Settings(BaseSettings):
         description="per-item retry budget before an item is marked failed permanently",
     )
 
+    # --- Reporting endpoints (RPT-BE-001) ---
+    REPORTING_QUERY_TIMEOUT_SECONDS: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description=(
+            "statement_timeout applied to every report execution (seconds). "
+            "Guardrail against runaway report SQL: the timeout is set "
+            "transaction-locally right before the definition query runs."
+        ),
+    )
+    REPORTING_RESULT_CAP: int = Field(
+        default=10_000,
+        ge=1,
+        description=(
+            "max rows the UI run path returns (excess rows are truncated and "
+            "flagged); CSV export streams the full result set without the cap."
+        ),
+    )
+    REPORTING_RETENTION_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "run the in-process snapshot retention worker (a background asyncio "
+            "loop that prunes snapshots beyond the per-definition limit). "
+            "Disabled under the test environment so integration tests drive "
+            "the retention pass directly."
+        ),
+    )
+    REPORTING_RETENTION_LIMIT: int = Field(
+        default=20,
+        ge=1,
+        description="number of most-recent snapshots kept per report definition",
+    )
+    REPORTING_RETENTION_POLL_SECONDS: float = Field(
+        default=3600.0,
+        gt=0,
+        description="interval between retention passes while idle",
+    )
+
     # --- Derived (loaded from files at validation time) ---
     jwt_public_key: str = ""
 

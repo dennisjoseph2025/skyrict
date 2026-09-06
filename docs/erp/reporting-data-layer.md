@@ -45,8 +45,7 @@ refreshable.
 - The `ReportRepository` snapshot/definition access (`core.features.reporting.repository`).
 
 ### 2.2 Out of scope (Phase 1 / later tickets)
-- The report runner / query execution layer (RPT-BE).
-- Endpoints under `/api/v1/reporting/*` (draft in erp-phase1.md §M-RPT).
+- The report runner / query execution layer (RPT-BE) — implemented, see `docs/erp/reporting-endpoints.md`.
 - Dashboard layout work (`erp_dashboards` — already shipped, SKY-62).
 - Scheduled snapshot refresh / outbox jobs.
 
