@@ -1,35 +1,60 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, BarChart3, SlidersHorizontal } from "lucide-react";
 
 import { EmptyState } from "@/components/dashboard/erp/empty-state";
 import { ErrorState } from "@/components/dashboard/erp/error-state";
 import { RequirePermission } from "@/components/dashboard/shared/require-permission";
-import { ListPageSkeleton } from "@/components/ui/page-skeletons";
+import { ListPageSkeleton, TableSkeleton } from "@/components/ui/page-skeletons";
 import {
   REPORT_MODULE_LABELS,
+  exportReport,
   getReport,
   normalizeModule,
+  runReport,
   type ReportDefinition,
+  type ReportRunResult,
 } from "@/lib/api/reports-api";
 import { ApiError } from "@/lib/api/http";
 import { formatDateTime } from "@/lib/format";
+import { saveReportCsv } from "@/lib/reports/export";
+import {
+  buildParamFields,
+  initialParamValues,
+  toQueryString,
+  type ReportParamField,
+} from "@/lib/reports/params";
 import { setPageTitle } from "@/lib/topbar-title";
+import { ReportParamForm } from "@/features/reports/components/report-param-form";
+import { ReportResultsTable } from "@/features/reports/components/report-results-table";
 
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; report: ReportDefinition };
 
+type RunState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "error"; message: string }
+  | { status: "ready"; result: ReportRunResult };
+
 export function ReportsDetail({
   slug,
+  initialParams,
 }: {
   slug: string;
   initialParams: Record<string, string>;
 }) {
+  const router = useRouter();
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [runState, setRunState] = useState<RunState>({ status: "idle" });
+  const [exporting, setExporting] = useState(false);
+  const autoRunDone = useRef(false);
 
   const load = useCallback(async () => {
     setState({ status: "loading" });
@@ -49,10 +74,84 @@ export function ReportsDetail({
     void load();
   }, [load]);
 
+  const fields = useMemo<ReportParamField[]>(
+    () => (state.status === "ready" ? buildParamFields(state.report.params) : []),
+    [state],
+  );
+
+  // Seed the form from the deep-linked URL, falling back to sensible defaults.
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    setValues((current) =>
+      Object.keys(current).length > 0 ? current : initialParamValues(fields, initialParams),
+    );
+  }, [state, fields, initialParams]);
+
   useEffect(() => {
     if (state.status === "ready") setPageTitle(state.report.title);
     return () => setPageTitle(null);
   }, [state]);
+
+  const run = useCallback(
+    async (next: Record<string, string>) => {
+      if (state.status !== "ready") return;
+      const report = state.report;
+      setRunState({ status: "running" });
+      router.replace(`/dashboard/erp/reports/${slug}${toQueryString(next, report.params)}`, {
+        scroll: false,
+      });
+      try {
+        const result = await runReport(slug, next);
+        setRunState({ status: "ready", result });
+      } catch (error) {
+        setRunState({
+          status: "error",
+          message:
+            error instanceof ApiError ? error.message : "Could not run this report.",
+        });
+      }
+    },
+    [router, slug, state],
+  );
+
+  // Deep links and parameter-less reports run themselves on first load; the
+  // URL stays the source of truth for the parameters shown.
+  useEffect(() => {
+    if (state.status !== "ready" || autoRunDone.current) return;
+    const hasDeepLink = Object.keys(initialParams).length > 0;
+    if (!hasDeepLink && fields.length > 0) return;
+    autoRunDone.current = true;
+    void run(initialParamValues(fields, initialParams));
+  }, [state, fields, initialParams, run]);
+
+  const handleExport = useCallback(async () => {
+    if (state.status !== "ready") return;
+    setExporting(true);
+    try {
+      const res = await exportReport(slug, values);
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as {
+          detail?: { error?: { message?: string }; message?: string } | string;
+        };
+        const detail = payload.detail;
+        const message =
+          (typeof detail === "object" && detail?.error?.message) ||
+          (typeof detail === "object" && detail?.message) ||
+          (typeof detail === "string" ? detail : null) ||
+          "Could not export the report.";
+        throw new ApiError(res.status, message);
+      }
+      await saveReportCsv(res, `${slug}.csv`);
+    } catch (error) {
+      setRunState({
+        status: "error",
+        message:
+          error instanceof ApiError ? error.message : "Could not export the report.",
+      });
+    } finally {
+      setExporting(false);
+    }
+  }, [slug, values, state]);
 
   if (state.status === "loading") {
     return <ListPageSkeleton />;
@@ -97,11 +196,36 @@ export function ReportsDetail({
           </div>
         </div>
 
-        <EmptyState
-          icon={SlidersHorizontal}
-          title="Configure this run"
-          description="Set the report parameters and press Run to generate live results."
-        />
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+          <ReportParamForm
+            fields={fields}
+            values={values}
+            onChange={(name, value) =>
+              setValues((current) => ({ ...current, [name]: value }))
+            }
+            onRun={() => void run(values)}
+            onExport={() => void handleExport()}
+            running={runState.status === "running"}
+            exporting={exporting}
+          />
+
+          <div className="min-w-0 space-y-4">
+            {runState.status === "idle" ? (
+              <EmptyState
+                icon={SlidersHorizontal}
+                title="Configure this run"
+                description="Set the report parameters and press Run to generate live results."
+              />
+            ) : null}
+            {runState.status === "running" ? <TableSkeleton rows={6} /> : null}
+            {runState.status === "error" ? (
+              <ErrorState message={runState.message} onRetry={() => void run(values)} />
+            ) : null}
+            {runState.status === "ready" ? (
+              <ReportResultsTable result={runState.result} />
+            ) : null}
+          </div>
+        </div>
       </div>
     </RequirePermission>
   );
