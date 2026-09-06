@@ -13,6 +13,7 @@ import {
   REPORT_MODULE_LABELS,
   exportReport,
   getReport,
+  listSnapshots,
   normalizeModule,
   runReport,
   type ReportDefinition,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/api/reports-api";
 import { ApiError } from "@/lib/api/http";
 import { formatDateTime } from "@/lib/format";
+import { planChart } from "@/lib/reports/chartability";
 import { saveReportCsv } from "@/lib/reports/export";
 import {
   buildParamFields,
@@ -28,8 +30,13 @@ import {
   type ReportParamField,
 } from "@/lib/reports/params";
 import { setPageTitle } from "@/lib/topbar-title";
+import { ReportChart } from "@/features/reports/components/report-chart";
 import { ReportParamForm } from "@/features/reports/components/report-param-form";
 import { ReportResultsTable } from "@/features/reports/components/report-results-table";
+import {
+  ReportSnapshots,
+  type SnapshotsState,
+} from "@/features/reports/components/report-snapshots";
 
 type LoadState =
   | { status: "loading" }
@@ -54,10 +61,29 @@ export function ReportsDetail({
   const [values, setValues] = useState<Record<string, string>>({});
   const [runState, setRunState] = useState<RunState>({ status: "idle" });
   const [exporting, setExporting] = useState(false);
+  const [view, setView] = useState<"table" | "chart">("table");
+  const [snapshotsState, setSnapshotsState] = useState<SnapshotsState>({
+    status: "loading",
+  });
   const autoRunDone = useRef(false);
+
+  const loadSnapshots = useCallback(async () => {
+    setSnapshotsState({ status: "loading" });
+    try {
+      const items = await listSnapshots(slug, 20);
+      setSnapshotsState({ status: "ready", items });
+    } catch (error) {
+      setSnapshotsState({
+        status: "error",
+        message:
+          error instanceof ApiError ? error.message : "Could not load run history.",
+      });
+    }
+  }, [slug]);
 
   const load = useCallback(async () => {
     setState({ status: "loading" });
+    void loadSnapshots();
     try {
       const report = await getReport(slug);
       setState({ status: "ready", report });
@@ -68,7 +94,7 @@ export function ReportsDetail({
           error instanceof ApiError ? error.message : "Could not load this report.",
       });
     }
-  }, [slug]);
+  }, [loadSnapshots, slug]);
 
   useEffect(() => {
     void load();
@@ -103,6 +129,7 @@ export function ReportsDetail({
       try {
         const result = await runReport(slug, next);
         setRunState({ status: "ready", result });
+        void loadSnapshots();
       } catch (error) {
         setRunState({
           status: "error",
@@ -111,7 +138,7 @@ export function ReportsDetail({
         });
       }
     },
-    [router, slug, state],
+    [loadSnapshots, router, slug, state],
   );
 
   // Deep links and parameter-less reports run themselves on first load; the
@@ -123,6 +150,14 @@ export function ReportsDetail({
     autoRunDone.current = true;
     void run(initialParamValues(fields, initialParams));
   }, [state, fields, initialParams, run]);
+
+  const chartPlan = useMemo(
+    () =>
+      runState.status === "ready"
+        ? planChart(runState.result.columns, runState.result.rows)
+        : null,
+    [runState],
+  );
 
   const handleExport = useCallback(async () => {
     if (state.status !== "ready") return;
@@ -222,10 +257,41 @@ export function ReportsDetail({
               <ErrorState message={runState.message} onRetry={() => void run(values)} />
             ) : null}
             {runState.status === "ready" ? (
-              <ReportResultsTable result={runState.result} />
+              <div className="space-y-4">
+                {chartPlan ? (
+                  <div className="flex gap-1.5">
+                    {(
+                      [
+                        ["table", "Table"],
+                        ["chart", "Chart"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setView(key)}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                          view === key
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {view === "chart" && chartPlan ? (
+                  <ReportChart plan={chartPlan} rows={runState.result.rows} />
+                ) : (
+                  <ReportResultsTable result={runState.result} />
+                )}
+              </div>
             ) : null}
           </div>
         </div>
+
+        <ReportSnapshots state={snapshotsState} onRetry={() => void loadSnapshots()} />
       </div>
     </RequirePermission>
   );
