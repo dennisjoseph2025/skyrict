@@ -260,10 +260,12 @@ Each module is a feature package under `src/core/features/<module>/` (`router.py
 - Snapshots are stored (`erp_report_snapshots`) for trend/backfill and scheduled refresh (outbox/background job in Phase 1).
 - CSV/JSON export is generated server-side and streamed; exports are audited.
 
-**Endpoints (draft).**
-- `GET /api/v1/reporting/dashboard` (default tenant dashboard), `PUT /api/v1/reporting/dashboard` (layout)
-- `GET /api/v1/reporting/{definition_slug}?from=&to=`, `GET /api/v1/reporting/{definition_slug}/export.csv`
-- `POST /api/v1/reporting/snapshots` (manual refresh), `GET /api/v1/reporting/snapshots/{id}`
+**Endpoints (implemented — RPT-BE-001; see `docs/erp/reporting-endpoints.md`).**
+- `GET /api/v1/reports` (list definitions, `?module=` filter), `GET /api/v1/reports/{slug}` (metadata)
+- `POST /api/v1/reports/{slug}/run` (parametrize + execute + snapshot), `GET /api/v1/reports/{slug}/snapshots`
+- `POST /api/v1/reports/{slug}/export` (full CSV, streamed, audited `report.exported`)
+- Background retention: newest N snapshots per definition (worker + `core retention run` CLI)
+- Web BFF: `/api/v1/reports/**` proxy segment with KPI mock-fallback while Core is down
 
 **All endpoints:** `erp.reports.read`.
 
