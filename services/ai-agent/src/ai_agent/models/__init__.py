@@ -28,6 +28,7 @@ from ai_agent.models.ai_digest import AiDigestModel
 from ai_agent.models.ai_episodic_memory import AiEpisodicMemoryModel
 from ai_agent.models.ai_eval_run import AiEvalRunModel
 from ai_agent.models.ai_finance_eval_run import AiFinanceEvalRunModel
+from ai_agent.models.ai_finance_line_embedding import AiFinanceLineEmbeddingModel
 from ai_agent.models.ai_follow_up_suggestion import AiFollowUpSuggestionModel
 from ai_agent.models.ai_inv_item_embedding import AiInvItemEmbeddingModel
 from ai_agent.models.ai_lead_score import AiLeadScoreModel
@@ -60,6 +61,7 @@ __all__ = [
     "AiEpisodicMemoryModel",
     "AiEvalRunModel",
     "AiFinanceEvalRunModel",
+    "AiFinanceLineEmbeddingModel",
     "AiFollowUpSuggestionModel",
     "AiInvItemEmbeddingModel",
     "AiLeadScoreModel",

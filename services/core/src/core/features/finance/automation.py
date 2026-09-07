@@ -47,6 +47,7 @@ from core.domain.entities import (
     ChartOfAccount,
     DraftEntry,
     DraftEntryLine,
+    InvoiceLineSuggestion,
     ReminderDraft,
     RevenueConcentration,
     RevenueConcentrationEntry,
@@ -67,6 +68,7 @@ from core.features.finance.schemas import (
     DraftEntryResponse,
     DuplicateGroupResponse,
     HealthScoreResponse,
+    InvoiceLineSuggestionResponse,
     InvoiceNumberingSchemeResponse,
     JournalEntryResponse,
     PaymentMethodAnalyticsResponse,
@@ -75,6 +77,7 @@ from core.features.finance.schemas import (
     ReminderGenerateRequest,
     RevenueConcentrationResponse,
     SuggestAccountCodeRequest,
+    SuggestInvoiceLinesRequest,
     SuggestionQualityResponse,
     TenantSettingsResponse,
     WorkingCapitalAlertResponse,
@@ -109,6 +112,7 @@ AiNarrater = Callable[[str, str, str], Awaitable[AnomalyNarration | None]]
 AiReminder = Callable[
     [str | None, str, Decimal, int, str], Awaitable[ReminderDraft | None]
 ]
+AiLineSuggester = Callable[[str], Awaitable[list[InvoiceLineSuggestion] | None]]
 
 
 def _narration_cites_figure(narration: str) -> bool:
@@ -127,6 +131,7 @@ class FinanceAutomationService:
     ai_draft: AiDrafter | None = field(default=None)
     ai_narrate: AiNarrater | None = field(default=None)
     ai_remind: AiReminder | None = field(default=None)
+    ai_lines: AiLineSuggester | None = field(default=None)
 
     async def close_checklist(self, tenant_id: uuid.UUID, period_id: uuid.UUID) -> Any:
         return await self.repo.close_checklist(tenant_id, period_id)
@@ -180,6 +185,23 @@ class FinanceAutomationService:
             status=persisted.status,
             feature=persisted.feature,
         )
+
+    async def suggest_invoice_lines(
+        self, tenant_id: uuid.UUID, description: str
+    ) -> list[InvoiceLineSuggestion]:
+        """Best-effort line-item suggestions from the tenant's line history (C1).
+
+        The ai-agent vector store is a read-only enhancement over the plain
+        invoice form (never an auto-insert); any failure returns an empty list
+        so the dialog degrades to manual entry without an error.
+        """
+        if self.ai_lines is not None:
+            try:
+                suggestions = await self.ai_lines(description)
+            except AiServiceUnavailableError:
+                return []
+            return suggestions or []
+        return []
 
     async def accept_suggestion(self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID) -> AiFinanceSuggestion:
         result = await self.repo.review_ai_suggestion(tenant_id, suggestion_id, accepted=True)
@@ -822,6 +844,21 @@ async def invoice_numbering_scheme(
 ) -> ResponseEnvelope[InvoiceNumberingSchemeResponse]:
     suggestion = await svc.recommend_numbering_scheme(_tenant_id(current_user))
     return ResponseEnvelope(data=suggestion)
+
+
+@router.post(
+    "/suggest-invoice-lines",
+    response_model=ResponseEnvelope[list[InvoiceLineSuggestionResponse]],
+)
+async def suggest_invoice_lines(
+    body: SuggestInvoiceLinesRequest,
+    current_user: dict[str, Any] = Depends(require_finance_ai_read),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service_with_ai),
+) -> ResponseEnvelope[list[InvoiceLineSuggestionResponse]]:
+    suggestions = await svc.suggest_invoice_lines(_tenant_id(current_user), body.description)
+    return ResponseEnvelope(
+        data=[InvoiceLineSuggestionResponse.model_validate(item) for item in suggestions]
+    )
 
 
 # ---------------------------------------------------------------------------

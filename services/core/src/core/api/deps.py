@@ -734,6 +734,7 @@ def get_finance_automation_service_with_ai(
         AnomalyNarration,
         ChartOfAccount,
         DraftEntry,
+        InvoiceLineSuggestion,
         ReminderDraft,
     )
     from core.features.ai.router import get_ai_client
@@ -744,6 +745,7 @@ def get_finance_automation_service_with_ai(
         generate_reminder_with_ai,
         narrate_anomaly_with_ai,
         suggest_account_code_with_ai,
+        suggest_invoice_lines_with_ai,
     )
     from core.features.finance.automation import FinanceAutomationService
     from core.features.finance.repository import FinanceRepository
@@ -751,6 +753,14 @@ def get_finance_automation_service_with_ai(
     client = get_ai_client(request)
     authorization = request.headers.get("authorization")
     tenant_slug = derive_tenant_slug(request)
+
+    async def ai_lines(description: str) -> list[InvoiceLineSuggestion] | None:
+        return await suggest_invoice_lines_with_ai(
+            client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            description=description,
+        )
 
     async def ai_suggest(
         description: str, accounts: Sequence[ChartOfAccount]
@@ -810,6 +820,7 @@ def get_finance_automation_service_with_ai(
         ai_draft=ai_draft,
         ai_narrate=ai_narrate,
         ai_remind=ai_remind,
+        ai_lines=ai_lines,
     )
 
 

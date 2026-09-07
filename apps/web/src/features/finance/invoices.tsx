@@ -47,12 +47,14 @@ import {
     listCustomers,
     listFiscalPeriods,
     listInvoices,
+    suggestInvoiceLines,
     upsertFxRate,
     type Account,
     type Customer,
     type FiscalPeriod,
     type FxContext,
     type Invoice,
+    type InvoiceLineSuggestion,
     type ReminderDraft,
 } from "@/lib/api/finance-api";
 import { ApiError } from "@/lib/api/http";
@@ -403,6 +405,111 @@ function InvoiceAccountRow({
     );
 }
 
+function LineDescriptionField({
+    value,
+    onChange,
+    invalid,
+}: {
+    value: string;
+    onChange: (suggestion: InvoiceLineSuggestion | null, value: string) => void;
+    invalid?: boolean;
+}) {
+    // SKY-67 C1: debounced line-item suggestion dropdown (read-only, never
+    // auto-inserts or auto-approves - selecting just fills description + account).
+    const [suggestions, setSuggestions] = useState<InvoiceLineSuggestion[]>([]);
+    const [open, setOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const controllerRef = useRef<AbortController | null>(null);
+    const justPickedRef = useRef(false);
+
+    useEffect(() => {
+        const text = value.trim();
+        if (justPickedRef.current || text.length < 2) {
+            justPickedRef.current = false;
+            setSuggestions([]);
+            setOpen(false);
+            return;
+        }
+        const controller = new AbortController();
+        controllerRef.current?.abort();
+        controllerRef.current = controller;
+        setLoading(true);
+        const timer = setTimeout(() => {
+            void suggestInvoiceLines(text)
+                .then((hits) => {
+                    if (!controller.signal.aborted) {
+                        setSuggestions(hits.slice(0, 5));
+                        setOpen(hits.length > 0);
+                    }
+                })
+                .catch(() => {
+                    if (!controller.signal.aborted) {
+                        setSuggestions([]);
+                        setOpen(false);
+                    }
+                })
+                .finally(() => {
+                    if (!controller.signal.aborted) setLoading(false);
+                });
+        }, 300);
+        return () => {
+            controller.abort();
+            clearTimeout(timer);
+        };
+    }, [value]);
+
+    function pick(suggestion: InvoiceLineSuggestion) {
+        justPickedRef.current = true;
+        onChange(suggestion, suggestion.description);
+        setSuggestions([]);
+        setOpen(false);
+    }
+
+    return (
+        <div className="relative">
+            <Input
+                placeholder="Description"
+                aria-invalid={invalid}
+                aria-expanded={open}
+                value={value}
+                onChange={(event) => onChange(null, event.target.value)}
+            />
+            {open ? (
+                <ul
+                    className="absolute left-0 top-[calc(100%+4px)] z-30 w-full overflow-hidden rounded-md border border-border bg-popover text-sm shadow-lg"
+                    onMouseDown={(event) => event.preventDefault()}
+                >
+                    {suggestions.map((suggestion) => (
+                        <li
+                            key={`${suggestion.description}-${suggestion.account_code}`}
+                        >
+                            <button
+                                type="button"
+                                className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-accent"
+                                onClick={() => pick(suggestion)}
+                            >
+                                <span className="w-full truncate font-medium text-foreground">
+                                    {suggestion.description}
+                                </span>
+                                <span className="w-full truncate text-xs text-muted-foreground">
+                                    {suggestion.account_code} ·{" "}
+                                    {suggestion.account_name}
+                                </span>
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            ) : null}
+            {loading ? (
+                <LoaderCircle
+                    aria-hidden="true"
+                    className="absolute right-2 top-3 size-3.5 animate-spin text-muted-foreground"
+                />
+            ) : null}
+        </div>
+    );
+}
+
 function CreateInvoiceDialog() {
     const router = useRouter();
     const [open, setOpen] = useState(false);
@@ -427,6 +534,7 @@ function CreateInvoiceDialog() {
         control,
         watch,
         reset,
+        setValue,
         formState: { errors, isSubmitting },
     } = useForm<InvoiceValues>({
         resolver: zodResolver(invoiceSchema),
@@ -824,17 +932,50 @@ function CreateInvoiceDialog() {
                                         className="border-b border-border/60 last:border-0"
                                     >
                                         <td className="px-3 py-1">
-                                            <Input
-                                                placeholder="Description"
-                                                aria-invalid={
+                                            <LineDescriptionField
+                                                value={
+                                                    (watch(
+                                                        `lines.${index}.description`,
+                                                    ) as string) ?? ""
+                                                }
+                                                onChange={(
+                                                    suggestion,
+                                                    value,
+                                                ) => {
+                                                    setValue(
+                                                        `lines.${index}.description`,
+                                                        value,
+                                                        {
+                                                            shouldValidate: true,
+                                                            shouldDirty: true,
+                                                            shouldTouch: true,
+                                                        },
+                                                    );
+                                                    // Filling a known line also
+                                                    // fills its account code.
+                                                    if (
+                                                        suggestion &&
+                                                        !(watch(
+                                                            `lines.${index}.account_code`,
+                                                        ) as string)
+                                                    ) {
+                                                        setValue(
+                                                            `lines.${index}.account_code`,
+                                                            suggestion.account_code,
+                                                            {
+                                                                shouldValidate: true,
+                                                                shouldDirty: true,
+                                                                shouldTouch: true,
+                                                            },
+                                                        );
+                                                    }
+                                                }}
+                                                invalid={
                                                     errors.lines?.[index]
                                                         ?.description
                                                         ? true
                                                         : undefined
                                                 }
-                                                {...register(
-                                                    `lines.${index}.description`,
-                                                )}
                                             />
                                             {errors.lines?.[index]
                                                 ?.description ? (

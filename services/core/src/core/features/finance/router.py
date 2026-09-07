@@ -15,7 +15,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from core.api.deps import get_finance_service, require_permission
+from core.api.deps import (
+    get_finance_service,
+    get_tenant_id,
+    require_ingest_m2m_or_permission,
+    require_permission,
+)
 from core.domain.value_objects import SUPPORTED_CURRENCIES
 from core.features.finance.schemas import (
     AccountCreateRequest,
@@ -51,6 +56,10 @@ require_finance_write = require_permission("erp.finance.write")
 require_finance_approve = require_permission("erp.finance.approve")
 require_fx_read = require_permission("core.fx.read")
 require_fx_write = require_permission("core.fx.write")
+# The invoice list additionally accepts ai-agent's m2m ingest secret
+# (CORE_AI_INGEST_TOKEN) so ``finance reindex`` can pull line history; every
+# other route stays JWT-only (same posture as inventory catalog reads).
+require_invoice_read_m2m = require_ingest_m2m_or_permission("erp.finance.read")
 
 
 def _tenant_id(current_user: dict[str, Any]) -> uuid.UUID:
@@ -278,10 +287,10 @@ async def list_invoices(
     status: str | None = None,
     offset: int = 0,
     limit: int = 50,
-    current_user: dict[str, Any] = Depends(require_finance_read),
+    _: dict[str, object] = Depends(require_invoice_read_m2m),
+    tenant_id: uuid.UUID = Depends(get_tenant_id),
     svc: FinanceService = Depends(get_finance_service),
 ) -> ListResponse[InvoiceResponse]:
-    tenant_id = _tenant_id(current_user)
     invoices, customer_names = await svc.list_invoices_with_customer_names(
         tenant_id,
         status=_parse_invoice_status(status),

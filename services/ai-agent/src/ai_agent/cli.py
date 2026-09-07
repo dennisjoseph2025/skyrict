@@ -210,6 +210,36 @@ def inventory_reindex(
 app.add_typer(inventory_app)
 
 
+finance_app = typer.Typer(
+    name="finance",
+    help="Finance invoice-line embedding snapshot (SKY-67 C1).",
+    no_args_is_help=True,
+)
+
+
+@finance_app.command("reindex")
+def finance_reindex(
+    tenant: str = typer.Option(..., help="tenant slug or UUID (required)"),
+    mode: str = typer.Option(
+        "full", help="'full' wipes then rebuilds; 'incremental' only upserts the fetched lines"
+    ),
+) -> None:
+    """Rebuild one tenant's invoice-line embedding snapshot (SKY-67 C1).
+
+    Pulls invoice line history from the core monolith (AI_INGEST_TOKEN) and
+    stores one embedding per distinct line description, enabling "sensible
+    line suggestions" in the invoice form. Never writes invoices itself.
+    """
+    import asyncio
+
+    from ai_agent.finance_reindex import run_finance_reindex
+
+    asyncio.run(run_finance_reindex(tenant=tenant, mode=mode))
+
+
+app.add_typer(finance_app)
+
+
 @app.command()
 def attrition_train(
     dataset: str = typer.Option(

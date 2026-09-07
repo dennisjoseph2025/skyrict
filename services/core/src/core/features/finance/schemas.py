@@ -341,6 +341,16 @@ class AccountCodeSuggestionResponse(BaseModel):
     feature: str = "account_suggest"
 
 
+class InvoiceLineSuggestionResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    description: str
+    account_code: str
+    account_name: str
+    times_used: int
+    score: float
+
+
 class SuggestionQualityScoreResponse(BaseModel):
     model_config = _RESPONSE_CONFIG
 
@@ -461,6 +471,10 @@ class InvoiceNumberingSchemeResponse(BaseModel):
 
 
 class SuggestAccountCodeRequest(BaseModel):
+    description: str = Field(..., min_length=1, max_length=512)
+
+
+class SuggestInvoiceLinesRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=512)
 
 

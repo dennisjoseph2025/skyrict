@@ -57,6 +57,8 @@ class TestRegistry:
             "ai_finance_eval_runs",
             # SKY-70 product-embedding snapshot
             "ai_inv_item_embeddings",
+            # SKY-67 C1 finance-line snapshot
+            "ai_finance_line_embeddings",
             # LangGraph orchestration (SKY-59)
             "graph_checkpoints",
             "graph_checkpoint_writes",

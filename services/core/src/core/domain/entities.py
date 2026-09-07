@@ -970,6 +970,17 @@ class AiFinanceSuggestion:
 
 
 @dataclass(frozen=True)
+class InvoiceLineSuggestion:
+    """Suggested invoice line item from the tenant's own line history (C1)."""
+
+    description: str
+    account_code: str
+    account_name: str
+    times_used: int
+    score: float
+
+
+@dataclass(frozen=True)
 class AiFinanceQualityScore:
     """Acceptance-rate snapshot for one suggestion feature (window)."""
 

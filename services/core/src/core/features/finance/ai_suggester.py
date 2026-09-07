@@ -24,6 +24,7 @@ from core.domain.entities import (
     ChartOfAccount,
     DraftEntry,
     DraftEntryLine,
+    InvoiceLineSuggestion,
     ReminderDraft,
 )
 from core.features.ai.proxy import forward_to_ai_agent
@@ -32,6 +33,7 @@ _UPSTREAM_PATH = "/api/v1/ai/finance/account-suggest"
 _DRAFT_UPSTREAM_PATH = "/api/v1/ai/finance/draft-entry"
 _NARRATE_UPSTREAM_PATH = "/api/v1/ai/finance/anomalies/narrate"
 _REMINDER_UPSTREAM_PATH = "/api/v1/ai/finance/reminders/draft"
+_LINES_UPSTREAM_PATH = "/api/v1/ai/finance/lines/suggest"
 
 
 async def suggest_account_code_with_ai(
@@ -93,6 +95,63 @@ async def suggest_account_code_with_ai(
         contra_code=contra_code,
         contra_name=contra_name,
     )
+
+
+async def suggest_invoice_lines_with_ai(
+    client: httpx.AsyncClient,
+    *,
+    authorization: str | None,
+    tenant_slug: str | None,
+    description: str,
+) -> list[InvoiceLineSuggestion] | None:
+    """Ask ai-agent for the tenant's similar past invoice line items (C1).
+
+    The vector store is read-only (permission-gated /ai/finance/lines/suggest,
+    tenant-scoped embeddings); a missing provider or a transport failure
+    degrades to an empty suggestion list, never an error the caller must mask.
+    """
+    payload = {"description": description}
+    upstream = await forward_to_ai_agent(
+        client,
+        method="POST",
+        upstream_path=_LINES_UPSTREAM_PATH,
+        authorization=authorization,
+        tenant_slug=tenant_slug,
+        body=json.dumps(payload).encode("utf-8"),
+    )
+    if upstream.status_code >= 400:
+        raise AiServiceUnavailableError("AI line-item suggestion failed")
+
+    try:
+        data = upstream.json()
+    except ValueError:
+        raise AiServiceUnavailableError(
+            "AI line-item suggestion returned invalid JSON"
+        ) from None
+
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return None
+
+    suggestions: list[InvoiceLineSuggestion] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        description_text = str(item.get("description") or "").strip()
+        code = str(item.get("account_code") or "").strip()
+        name = str(item.get("account_name") or "").strip()
+        if not description_text or not code or not name:
+            continue
+        suggestions.append(
+            InvoiceLineSuggestion(
+                description=description_text,
+                account_code=code,
+                account_name=name,
+                times_used=int(item.get("times_used") or 0),
+                score=float(item.get("score") or 0.0),
+            )
+        )
+    return suggestions
 
 
 async def draft_journal_entry_with_ai(

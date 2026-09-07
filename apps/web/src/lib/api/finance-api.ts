@@ -598,6 +598,23 @@ export function suggestAccountCode(
     );
 }
 
+export interface InvoiceLineSuggestion {
+    description: string;
+    account_code: string;
+    account_name: string;
+    times_used: number;
+    score: number;
+}
+
+export function suggestInvoiceLines(
+    description: string,
+): Promise<InvoiceLineSuggestion[]> {
+    return apiPost<InvoiceLineSuggestion[]>(
+        `${AUTOMATION}/suggest-invoice-lines`,
+        { description },
+    );
+}
+
 export function acceptSuggestion(
     suggestionId: string,
 ): Promise<AccountCodeSuggestion> {
