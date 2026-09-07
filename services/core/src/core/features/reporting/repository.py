@@ -50,17 +50,20 @@ class DashboardRepository:
         if existing is not None:
             existing.title = title
             existing.layout = layout
-            await self._session.flush()
-            return existing
-
-        dashboard = ErpDashboardModel(
-            tenant_id=tenant_id,
-            title=title,
-            layout=layout,
-            tenant_default=True,
-        )
-        self._session.add(dashboard)
+            dashboard = existing
+        else:
+            dashboard = ErpDashboardModel(
+                tenant_id=tenant_id,
+                title=title,
+                layout=layout,
+                tenant_default=True,
+            )
+            self._session.add(dashboard)
         await self._session.flush()
+        # updated_at is server-side (ON UPDATE now()); refresh it inside the
+        # awaited context so a post-flush read by the caller cannot trigger a
+        # lazy refresh (MissingGreenlet in the async engine).
+        await self._session.refresh(dashboard, attribute_names=["updated_at"])
         return dashboard
 
     # --- User layout ---------------------------------------------------------
@@ -91,17 +94,20 @@ class DashboardRepository:
         existing = await self.get_user_layout(tenant_id=tenant_id, user_id=user_id)
         if existing is not None:
             existing.layout = layout
-            await self._session.flush()
-            return existing
-
-        user_layout = UserDashboardLayoutModel(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            layout=layout,
-        )
-        self._session.add(user_layout)
+            record = existing
+        else:
+            record = UserDashboardLayoutModel(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                layout=layout,
+            )
+            self._session.add(record)
         await self._session.flush()
-        return user_layout
+        # updated_at is server-side (ON UPDATE now()); refresh it inside the
+        # awaited context so a post-flush read by the caller cannot trigger a
+        # lazy refresh (MissingGreenlet in the async engine).
+        await self._session.refresh(record, attribute_names=["updated_at"])
+        return record
 
     async def delete_user_layout(
         self,
@@ -283,17 +289,24 @@ class ReportRepository:
         )
         if existing is not None:
             existing.payload = payload
-            await self._session.flush()
-            return existing
-
-        snapshot = ErpReportSnapshotModel(
-            tenant_id=tenant_id,
-            definition_id=definition_id,
-            period=period,
-            payload=payload,
-        )
-        self._session.add(snapshot)
+            snapshot = existing
+        else:
+            snapshot = ErpReportSnapshotModel(
+                tenant_id=tenant_id,
+                definition_id=definition_id,
+                period=period,
+                payload=payload,
+            )
+            self._session.add(snapshot)
         await self._session.flush()
+        # ``generated_at`` is server-side (default + ON UPDATE now()), so the
+        # flush leaves it expired; reading it synchronously right after the
+        # flush (ReportService.run_report returns it) would trigger a lazy
+        # refresh, which cannot run in the async session and raises
+        # MissingGreenlet -> HTTP 500. Eagerly refresh the server-generated
+        # columns inside the awaited context so the returned snapshot is fully
+        # readable by the caller.
+        await self._session.refresh(snapshot, attribute_names=["generated_at"])
         return snapshot
 
     async def get_snapshot(
