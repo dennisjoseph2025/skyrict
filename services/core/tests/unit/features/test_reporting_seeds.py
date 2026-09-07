@@ -18,7 +18,11 @@ import pytest
 
 from core.core.permissions import CATALOG, ERP_REPORTS_READ
 from core.features.reporting.seeds import PHASE_1_REPORT_SEEDS
-from core.features.reporting.validation import validate_read_only_sql
+from core.features.reporting.validation import (
+    ReportDefinitionValidationError,
+    require_tenant_filter,
+    validate_read_only_sql,
+)
 
 EXPECTED_SLUGS = frozenset(
     {
@@ -74,6 +78,27 @@ class TestPageOneValidity:
         assert "tenant_id" in used
 
     @pytest.mark.parametrize("seed", PHASE_1_REPORT_SEEDS)
+    def test_sql_filters_by_tenant_id(self, seed) -> None:
+        """Defense-in-depth: every report must filter by tenant_id = :tenant_id."""
+        require_tenant_filter(seed.sql)
+
+    @pytest.mark.parametrize("seed", PHASE_1_REPORT_SEEDS)
     def test_permission_key_references_catalog(self, seed) -> None:
         assert seed.permission_key == ERP_REPORTS_READ
         assert seed.permission_key in CATALOG
+
+
+class TestTenantFilterGate:
+    """Defense-in-depth: require_tenant_filter rejects unscoped SQL."""
+
+    def test_rejects_sql_without_tenant_filter(self) -> None:
+        sql = "SELECT id, name FROM erp_products WHERE is_active = TRUE"
+        with pytest.raises(ReportDefinitionValidationError, match="tenant_id"):
+            require_tenant_filter(sql)
+
+    def test_rejects_sql_with_tenant_bind_but_no_filter(self) -> None:
+        # A SQL that binds :tenant_id but never uses it as a predicate
+        # (e.g. just SELECT it). This must fail.
+        sql = "SELECT :tenant_id AS tenant, name FROM erp_products"
+        with pytest.raises(ReportDefinitionValidationError, match="tenant_id"):
+            require_tenant_filter(sql)

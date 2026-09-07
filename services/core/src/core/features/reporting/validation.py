@@ -31,6 +31,7 @@ binds actually used.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection
 
 # Upper-case keywords that make the statement not-read-only or that start a
@@ -203,6 +204,39 @@ def validate_read_only_sql(
         )
 
     return used_binds
+
+
+# ---------------------------------------------------------------------------
+# Tenant filter gate (defense-in-depth)
+# ---------------------------------------------------------------------------
+
+# Every report seed SQL must filter its driving table by :tenant_id so that
+# rows from other tenants can never appear in the result set, regardless of
+# RLS state.  The pattern matches both unqualified ``tenant_id = :tenant_id``
+# and qualified forms like ``jl.tenant_id = :tenant_id`` or
+# ``pr.tenant_id = :tenant_id``.
+_TENANT_FILTER_RE = re.compile(
+    r"\b[\w.]*tenant_id\s*=\s*:tenant_id\b",
+    re.IGNORECASE,
+)
+
+
+def require_tenant_filter(sql: str) -> None:
+    """Ensure *sql* contains a ``tenant_id = :tenant_id`` predicate.
+
+    Defense-in-depth: every report seed must filter its driving table by
+    ``:tenant_id`` so rows from other tenants can never appear in the result
+    set, regardless of RLS state.  A future seed that declares ``tenant_id``
+    in the parameter whitelist but forgets to use it as a filter would pass
+    :func:`validate_read_only_sql` but **fail** this gate.
+
+    Raises :class:`ReportDefinitionValidationError` when the predicate is
+    absent.
+    """
+    if not _TENANT_FILTER_RE.search(sql):
+        raise ReportDefinitionValidationError(
+            "report SQL must filter by 'tenant_id = :tenant_id' to enforce tenant isolation"
+        )
 
 
 def _skip_single_quoted(sql: str, start: int) -> int:

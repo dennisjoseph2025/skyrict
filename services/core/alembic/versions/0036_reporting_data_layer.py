@@ -40,7 +40,7 @@ import sqlalchemy as sa
 from alembic import op
 
 from core.features.reporting.seeds import PHASE_1_REPORT_SEEDS
-from core.features.reporting.validation import validate_read_only_sql
+from core.features.reporting.validation import require_tenant_filter, validate_read_only_sql
 
 revision = "0036"
 down_revision = "0035"
@@ -86,6 +86,7 @@ def _seed_definitions() -> None:
     bind = op.get_bind()
     for seed in PHASE_1_REPORT_SEEDS:
         validate_read_only_sql(seed.sql, seed.params)
+        require_tenant_filter(seed.sql)
         bind.execute(
             sa.text(
                 """

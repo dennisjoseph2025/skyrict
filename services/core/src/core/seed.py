@@ -62,7 +62,7 @@ from core.features.payroll.models.payroll_run import PayrollRounding
 from core.features.payroll.models.payroll_settings import PayrollSettingsModel
 from core.features.reporting.models.report_definition import ErpReportDefinitionModel
 from core.features.reporting.seeds import PHASE_1_REPORT_SEEDS
-from core.features.reporting.validation import validate_read_only_sql
+from core.features.reporting.validation import require_tenant_filter, validate_read_only_sql
 from core.models.core_role import CoreRoleModel
 
 if TYPE_CHECKING:
@@ -278,6 +278,7 @@ async def seed_reporting_defaults(tenant_id: uuid.UUID) -> None:
             if seed.slug in existing_slugs:
                 continue
             validate_read_only_sql(seed.sql, seed.params)
+            require_tenant_filter(seed.sql)
             session.add(
                 ErpReportDefinitionModel(
                     tenant_id=tenant_id,
