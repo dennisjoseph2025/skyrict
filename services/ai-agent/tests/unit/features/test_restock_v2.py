@@ -22,13 +22,14 @@ WAREHOUSE_ID = uuid.uuid4()
 TENANT_ID = uuid.uuid4()
 
 
-def _product(cost: Decimal | None = Decimal("100.00")) -> ProductRef:
+def _product(cost: Decimal | None = Decimal("100.00"), supplier_id=None) -> ProductRef:
     return ProductRef(
         id=PRODUCT_ID,
         sku="LAPTOP-CHG-001",
         name="Laptop Charger 65W",
         reorder_point=Decimal(10),
         cost_price=cost,
+        supplier_id=supplier_id,
     )
 
 
@@ -38,13 +39,65 @@ def _demand(
     eligible: bool = True,
     lead_time: Decimal = Decimal("7.00"),
     safety: Decimal = Decimal("1.000"),
+    risk_band: str | None = None,
 ) -> DemandProfile:
     return DemandProfile(
         avg_daily_demand=avg,
         eligible=eligible,
         lead_time_days=lead_time,
         safety_factor=safety,
+        risk_band=risk_band,  # type: ignore[arg-type]
     )
+
+
+class TestV2RiskAdjustedFormula:
+    def test_high_risk_stretches_lead_time_and_safety(self) -> None:
+        # 10 + 5 * (7*1.5) * (1.0+0.2) - 3 = 70.
+        draft = compute_suggestion(
+            product=_product(),
+            warehouse_id=WAREHOUSE_ID,
+            qty_on_hand=Decimal(3),
+            demand=_demand(risk_band="high"),
+        )
+        assert draft.suggested_qty == Decimal("70.00")
+        assert "supplier risk high" in draft.reason.lower()
+
+    def test_medium_risk_stretches_moderately(self) -> None:
+        # 10 + 5 * (7*1.2) * (1.0+0.1) - 3 = 53.20.
+        draft = compute_suggestion(
+            product=_product(),
+            warehouse_id=WAREHOUSE_ID,
+            qty_on_hand=Decimal(3),
+            demand=_demand(risk_band="medium"),
+        )
+        assert draft.suggested_qty == Decimal("53.20")
+        assert "supplier risk medium" in draft.reason.lower()
+
+    def test_low_risk_matches_plain_v2(self) -> None:
+        base = compute_suggestion(
+            product=_product(),
+            warehouse_id=WAREHOUSE_ID,
+            qty_on_hand=Decimal(3),
+            demand=_demand(),
+        )
+        low = compute_suggestion(
+            product=_product(),
+            warehouse_id=WAREHOUSE_ID,
+            qty_on_hand=Decimal(3),
+            demand=_demand(risk_band="low"),
+        )
+        assert low.suggested_qty == base.suggested_qty == Decimal("42.00")
+        assert "supplier risk" not in low.reason.lower()
+
+    def test_high_risk_reason_reports_effective_lead_time(self) -> None:
+        draft = compute_suggestion(
+            product=_product(),
+            warehouse_id=WAREHOUSE_ID,
+            qty_on_hand=Decimal(3),
+            demand=_demand(risk_band="high"),
+        )
+        assert "lead time: 10.50 day(s)" in draft.reason.lower()
+        assert "1.5x lead time" in draft.reason.lower()
 
 
 class TestV2Formula:
@@ -141,9 +194,9 @@ def _movements_for_scan() -> list[MovementRow]:
 
 
 class FakeGateway:
-    def __init__(self, *, movements: list[MovementRow]) -> None:
+    def __init__(self, *, movements: list[MovementRow], supplier_id=None) -> None:
         self._movements = movements
-        self.products = [_product()]
+        self.products = [_product(supplier_id=supplier_id)]
         self.stock = [
             StockLevelRow(
                 product_id=PRODUCT_ID,
@@ -203,8 +256,25 @@ class FakeStats:
         self.upserted.append(stats)
 
 
-def _make_service(*, v2_enabled: bool = False, wired: bool = True):
-    gateway = FakeGateway(movements=_movements_for_scan())
+class FakeRisk:
+    def __init__(self, *, band: str = "low") -> None:
+        self._band = band
+
+    async def list_all(self, *, tenant_id):
+        return [SimpleNamespace(supplier_id=SUPPLIER_ID, risk_band=self._band)]
+
+
+SUPPLIER_ID = uuid.uuid4()
+
+
+def _make_service(
+    *,
+    v2_enabled: bool = False,
+    wired: bool = True,
+    supplier_id=None,
+    risk_band: str = "low",
+):
+    gateway = FakeGateway(movements=_movements_for_scan(), supplier_id=supplier_id)
     suggestions = FakeSuggestions()
     audit = FakeAudit()
 
@@ -213,12 +283,14 @@ def _make_service(*, v2_enabled: bool = False, wired: bool = True):
 
     settings = FakeSettings(v2_enabled=v2_enabled) if wired else None
     stats = FakeStats() if wired else None
+    risk = FakeRisk(band=risk_band) if wired else None
     service = RestockService(
         gateway_factory=factory,
         suggestions=suggestions,
         audit=audit,
         settings=settings,  # type: ignore[arg-type]
         stats=stats,  # type: ignore[arg-type]
+        risk=risk,  # type: ignore[arg-type]
     )
     return service, suggestions, settings, stats
 
@@ -249,3 +321,21 @@ class TestScanV2:
 
         assert report.created == 1
         assert repo.created[0]["suggested_qty"] == Decimal(20)
+
+    async def test_ungraded_supplier_defaults_to_low(self) -> None:
+        # Comparator: wired risk repo reporting "low" == no adjustment.
+        service, repo, _settings, _stats = _make_service(
+            v2_enabled=True, supplier_id=SUPPLIER_ID, risk_band="low"
+        )
+        await service.run_scan(tenant_id=TENANT_ID)
+        assert repo.created[0]["suggested_qty"] == Decimal("42.90")
+
+    async def test_high_risk_supplier_orders_defensively(self) -> None:
+        service, repo, _settings, _stats = _make_service(
+            v2_enabled=True, supplier_id=SUPPLIER_ID, risk_band="high"
+        )
+        await service.run_scan(tenant_id=TENANT_ID)
+
+        # 10 + 5.1282 * (7*1.5) * (1.0+0.2) - 3 = 71.62.
+        assert repo.created[0]["suggested_qty"] == Decimal("71.62")
+        assert "supplier risk high" in repo.created[0]["reason"].lower()

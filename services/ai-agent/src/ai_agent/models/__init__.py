@@ -38,6 +38,7 @@ from ai_agent.models.ai_restock_demand_stats import AiRestockDemandStatsModel
 from ai_agent.models.ai_restock_settings import AiRestockSettingsModel
 from ai_agent.models.ai_semantic_memory import AiSemanticMemoryModel
 from ai_agent.models.ai_suggestion import AiSuggestionModel
+from ai_agent.models.ai_supplier_risk import AiSupplierRiskModel
 from ai_agent.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from ai_agent.models.core_rbac import CoreRoleModel, CoreUserRoleModel
 from ai_agent.models.graph_checkpoint import (
@@ -69,6 +70,7 @@ __all__ = [
     "AiRestockSettingsModel",
     "AiSemanticMemoryModel",
     "AiSuggestionModel",
+    "AiSupplierRiskModel",
     "Base",
     "CoreRoleModel",
     "CoreUserRoleModel",

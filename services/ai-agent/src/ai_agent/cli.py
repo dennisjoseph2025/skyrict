@@ -210,6 +210,35 @@ def inventory_reindex(
 app.add_typer(inventory_app)
 
 
+supplier_risk_app = typer.Typer(
+    name="supplier-risk",
+    help="Supplier risk grading maintenance (SKY-86 / INV-AI-004).",
+    no_args_is_help=True,
+)
+
+
+@supplier_risk_app.command("reindex")
+def supplier_risk_reindex(
+    tenant: str = typer.Option(..., help="tenant slug or UUID (required)"),
+) -> None:
+    """Rebuild one tenant's supplier risk grades (SKY-86 / INV-AI-004).
+
+    Pulls the current supplier catalog + grading-period facts from core and
+    recomputes the deterministic risk score/band for every supplier into
+    ai_supplier_risk. The band feeds the v2 restock lead-time adjustment.
+
+    Requires AI_INGEST_TOKEN for the core pull.
+    """
+    import asyncio
+
+    from ai_agent.supplier_risk_reindex import run_supplier_risk_reindex
+
+    asyncio.run(run_supplier_risk_reindex(tenant=tenant))
+
+
+app.add_typer(supplier_risk_app)
+
+
 @app.command()
 def attrition_train(
     dataset: str = typer.Option(

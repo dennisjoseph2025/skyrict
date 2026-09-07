@@ -17,10 +17,11 @@ permission system.
 2. [Feature 1 - Natural language queries](#2-feature-1--natural-language-queries)
 3. [Feature 2 - Smart restock suggestions](#3-feature-2--smart-restock-suggestions)
 4. [Feature 3 - Anomaly detection](#4-feature-3--anomaly-detection)
-5. [Security architecture](#5-security-architecture)
-6. [Implementation plan](#6-implementation-plan)
-7. [Risk assessment](#7-risk-assessment)
-8. [Testing strategy](#8-testing-strategy)
+5. [Feature 4 - Supplier risk scoring (SKY-86 / INV-AI-004)](#5-feature-4--supplier-risk-scoring-sky-86--inv-ai-004)
+6. [Security architecture](#6-security-architecture)
+7. [Implementation plan](#7-implementation-plan)
+8. [Risk assessment](#8-risk-assessment)
+9. [Testing strategy](#9-testing-strategy)
 
 ---
 
@@ -471,9 +472,138 @@ CREATE INDEX idx_ai_anomalies_tenant_status
 
 ---
 
-## 5. Security architecture
+## 5. Feature 4 - Supplier risk scoring (SKY-86 / INV-AI-004)
 
-### 5.1 Authentication and authorization
+### 5.1 What it does
+
+Grades each active supplier into a deterministic **risk band**
+(`low` / `medium` / `high`) on a 0-1 score, then feeds that risk into the
+restock model (demand v2) so the AI orders safely around unreliable suppliers.
+
+Delivery status:
+
+| Deliverable | Status |
+|-------------|--------|
+| Risk scorer + bands + confidence | Done (`fbf9d89d`) |
+| Supplier-risk reindex CLI | Done (`854dca4c`) |
+| Risk-adjusted restock suggestions (v2) | Done (`325a9756`) |
+| Supplier-risk read endpoint + core proxy | Done (`2ec22437`) |
+| Web suppliers page with risk table | Done (`6ab55fa2`) |
+| Backtest harness (risk vs plain vs v1) | Done (`270bb464`) |
+| DB migration + RLS + end-to-end validation | Done (this branch) |
+
+### 5.2 Scoring model
+
+Weights (sum to 100%) and the deterministic progression from raw performance
+facts to a band, with a **power lift** (`_LIFT = 0.45`) that stretches scores
+toward the upper end so medium/high suppliers are distinguishable:
+
+| Dimension | Weight | Failure value used in score |
+|-----------|--------|-----------------------------|
+| On-time delivery | 45% | `1 - on_time_pct` |
+| Defect rate | 15% | `defect_pct` |
+| Price stability | 20% | `1 - price_stability_index` |
+| Responsiveness | 20% | `responsiveness_days / lead_time_days` (capped) |
+
+```
+raw  = Σ(weight_i × failure_i)        # 0 (best) .. 1 (worst)
+score = 1 - (1 - raw) ^ _LIFT         # power lift ^0.45
+band  = low      if score <= 0.33
+        medium   if score <= 0.66
+        high     otherwise
+confidence = min(1, n/5) × recency_decay   # n = grading periods
+```
+
+- **Recency decay:** performance older than `_RECENCY_WINDOW_DAYS = 92` days
+  contributes less to confidence.
+- **Ungraded:** a supplier with no recorded performance returns `None` (no
+  row); the restock model treats it as `low` (no penalty for unknown).
+
+Reference pins (verified in unit tests): `excellent 0.263` (low),
+`Arabian Gulf 0.313` (low), `Al-Fahad 0.690` (high), `Jeddah 0.759` (high).
+
+### 5.3 Risk-adjusted restock (demand v2)
+
+The v2 restock calculator pulls the supplier's risk band and adjusts both the
+effective lead time and the safety buffer:
+
+```
+effective_lead_time = lead_time_days × _RISK_LEAD_TIME_MULTIPLIERS[band]
+safety_bump         = _RISK_SAFETY_BUMPS[band]
+suggested_qty = (avg_daily_demand × effective_lead_time × 1.2)
+                - qty_on_hand + reorder_point
+                (+ reorder_point × safety_bump for medium/high)
+```
+
+| Band | Lead-time multiplier | Safety bump | Rationale |
+|------|----------------------|-------------|-----------|
+| low   | 1.0 | 0.00 | Trusted: plain model |
+| medium | 1.2 | 0.10 | Add 20% lead headroom + 10% safety |
+| high  | 1.5 | 0.20 | Add 50% lead headroom + 20% safety |
+
+The reason string is human-readable, e.g.
+`"lead time: 10.50 day(s)"` (effective lead quantized to 2dp).
+
+### 5.4 Reindex CLI
+
+```
+uv run python -m ai_agent.cli supplier-risk reindex --tenant <slug>
+```
+
+Pulls the supplier catalog from the core service, runs the deterministic
+scorer over each supplier's `erp_supplier_performance` row, and upserts into
+`ai_supplier_risk`. Requires `AI_INGEST_TOKEN` and pins the resolved tenant id
+(`TenantContext`) **before** the first write so the RLS hook constrains every
+upsert to that tenant.
+
+### 5.5 API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/ai/supplier-risk` | GET | List one tenant's supplier risk grades |
+| `/api/v1/ai/supplier-risk` (core proxy) | GET | Routes through the core `_InvokeDep`/`_ReadDep` proxy |
+
+Decimals are stringified in responses; payload carries `meta.count`.
+
+### 5.6 Database - `ai_supplier_risk` (migration `0017`)
+
+```
+tenant_id    uuid        PK  (tenant_id, supplier_id)
+supplier_id  uuid        PK
+score        numeric(5,4)   ck 0..1
+risk_band    varchar(16)    ck IN ('low','medium','high')
+confidence   numeric(4,3)   ck 0..1
+reason       text
+generated_at timestamptz    default now()
+```
+
+- Composite FK `(tenant_id, supplier_id) → erp_suppliers(tenant_id, id)`
+  `ON DELETE CASCADE`.
+- Index `idx_ai_supplier_risk_tenant_band`.
+- RLS enabled with policy `tenant_isolation_ai_supplier_risk`
+  (`USING (tenant_id = current_tenant_id())`).
+- Lives in the **ai-agent** version lineage (`alembic_version_ai`), head after
+  `0016`.
+
+**Backtest** (`scripts/backtest/supplier_risk_demand.py`): deterministic
+simulation comparing risk-adjusted v2 vs plain v2 vs v1. Reference output -
+risk cuts stockouts 23->14 and raises days-of-cover 7.3->17.5 vs plain v2, at
+the cost of more units ordered (37376->41678).
+
+### 5.7 Validation performed
+
+- ai-agent full unit suite: **791 passed**; mypy **458 files green**; ruff/format clean.
+- Core `test_ai_router.py`: 15 passed; web vitest **135 passed**; `tsc --noEmit` + `eslint` clean.
+- End-to-end against live Postgres (`identity → core → ai-agent` chains applied
+  to head): migration `0017` lands with correct PK/checks/composite FK/RLS;
+  scorer → repo upsert → `list_all` read-back confirmed for a seeded tenant;
+  RLS policy present and enforced under a non-superuser role (superuser bypasses).
+
+---
+
+## 6. Security architecture
+
+### 6.1 Authentication and authorization
 
 ```
 AI Agent Service
@@ -496,7 +626,7 @@ AI Agent Service
 **Key rule:** The AI agent never bypasses permission checks.  If a human
 would need `erp.inventory.write` to perform an action, the AI needs it too.
 
-### 5.2 Data isolation
+### 6.2 Data isolation
 
 ```
 Every AI query:
@@ -509,7 +639,7 @@ Every AI query:
 **No cross-tenant data leakage:** The AI agent runs with the same tenant
 context as the requesting user.
 
-### 5.3 Audit trail
+### 6.3 Audit trail
 
 Every AI action logs:
 
@@ -524,7 +654,7 @@ Every AI action logs:
 | `latency_ms` | Response time |
 | `timestamp` | When it happened |
 
-### 5.4 Rate limiting
+### 6.4 Rate limiting
 
 | Scope | Limit | Window |
 |-------|-------|--------|
@@ -534,7 +664,7 @@ Every AI action logs:
 | Per tenant - total AI calls | 100 | 1 minute |
 | Per tenant - background scans | 1 | 1 hour |
 
-### 5.5 Data residency
+### 6.5 Data residency
 
 | Data type | Where it's processed | Sent to cloud? |
 |-----------|---------------------|---------------|
@@ -545,7 +675,7 @@ Every AI action logs:
 | Customer/supplier names | Local only | **Never** |
 | User IDs | Local only | **Never** |
 
-### 5.6 Prompt injection defense
+### 6.6 Prompt injection defense
 
 | Threat | Mitigation |
 |--------|-----------|
@@ -556,9 +686,9 @@ Every AI action logs:
 
 ---
 
-## 6. Implementation plan
+## 7. Implementation plan
 
-### 6.1 Service structure
+### 7.1 Service structure
 
 ```
 services/ai-agent/
@@ -592,7 +722,7 @@ services/ai-agent/
 └── pyproject.toml
 ```
 
-### 6.2 Database schema
+### 7.2 Database schema
 
 New tables (added to existing `skyrict` database):
 
@@ -602,7 +732,7 @@ New tables (added to existing `skyrict` database):
 | `ai_suggestions` | Restock suggestions with approval workflow |
 | `ai_anomalies` | Detected anomalies with severity and status |
 
-### 6.3 Frontend components
+### 7.3 Frontend components
 
 | Component | File | Page |
 |-----------|------|------|
@@ -610,7 +740,7 @@ New tables (added to existing `skyrict` database):
 | Restock Suggestions | `restock-suggestions.tsx` | New tab or modal |
 | Anomaly Feed | `anomaly-feed.tsx` | New tab or modal |
 
-### 6.4 Docker setup
+### 7.4 Docker setup
 
 ```yaml
 # docker-compose.dev.yml addition
@@ -637,9 +767,9 @@ services:
 
 ---
 
-## 7. Risk assessment
+## 8. Risk assessment
 
-### 7.1 Security risks
+### 8.1 Security risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|-----------|
@@ -652,7 +782,7 @@ services:
 | Over-reliance on AI suggestions | Medium | Medium | UI always shows "AI suggestion - please verify" disclaimer; confidence scores prominent |
 | Stale suggestions (outdated data) | Low | Low | Suggestions auto-expire after 7 days; daily re-scan refreshes |
 
-### 7.2 Mitigations summary
+### 8.2 Mitigations summary
 
 1. **Human in the loop** - No AI action executes without human approval
 2. **Same security as humans** - JWT, RBAC, audit trail, rate limiting
@@ -661,7 +791,7 @@ services:
 5. **Expiry** - Old suggestions auto-expire; anomalies auto-close
 6. **Feedback loop** - False positives tune future detection
 
-### 7.3 Monitoring
+### 8.3 Monitoring
 
 | Metric | Threshold | Action |
 |--------|-----------|--------|
@@ -673,9 +803,9 @@ services:
 
 ---
 
-## 8. Testing strategy
+## 9. Testing strategy
 
-### 8.1 Unit tests
+### 9.1 Unit tests
 
 | Component | Test cases |
 |-----------|-----------|
@@ -683,7 +813,7 @@ services:
 | Restock Analyzer | Below reorder detection, above reorder ignored, already-pending dedup, expiry logic |
 | Anomaly Detector | Sudden drop detection, duplicate detection, transfer pair check, time-of-day filter |
 
-### 8.2 Integration tests
+### 9.2 Integration tests
 
 | Test | Description |
 |------|-------------|
@@ -693,7 +823,7 @@ services:
 | Permission enforcement | Unauthenticated user blocked; wrong permission blocked |
 | Tenant isolation | User from tenant A cannot see tenant B's suggestions |
 
-### 8.3 Security tests
+### 9.3 Security tests
 
 | Test | Description |
 |------|-------------|

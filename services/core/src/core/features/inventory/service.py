@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,10 @@ from core.audit_events import (
     STOCK_ADJUSTED,
     STOCK_REORDER_ALERTED,
     STOCK_TRANSFERRED,
+    SUPPLIER_CREATED,
+    SUPPLIER_DEACTIVATED,
+    SUPPLIER_PERFORMANCE_ADDED,
+    SUPPLIER_UPDATED,
     WAREHOUSE_CREATED,
     WAREHOUSE_DEACTIVATED,
     WAREHOUSE_REACTIVATED,
@@ -68,6 +73,8 @@ from core.domain.entities import (
     StockHealthSummary,
     StockLevel,
     StockMovement,
+    Supplier,
+    SupplierPerformance,
     Warehouse,
 )
 from core.domain.value_objects import Money, StockMovementType
@@ -321,6 +328,214 @@ class InventoryService:
         )
         return created
 
+    # ------------------------------------------------------------------
+    # Suppliers (SKY-86 / INV-AI-004)
+    # ------------------------------------------------------------------
+
+    async def create_supplier(
+        self,
+        tenant_id: str | uuid.UUID,
+        *,
+        name: str,
+        lead_time_days: int = 7,
+        contact_name: str | None = None,
+        contact_email: str | None = None,
+    ) -> Supplier:
+        tid = _as_uuid(tenant_id)
+        if not name.strip():
+            raise ValidationError("Supplier name is required")
+        if lead_time_days < 0:
+            raise ValidationError("Supplier lead time cannot be negative")
+        existing = await self.inventory_repo.get_supplier_by_name(name, tid)
+        if existing is not None:
+            raise ValidationError(f"Supplier {name!r} already exists")
+
+        created = await self.inventory_repo.create_supplier(
+            Supplier(
+                tenant_id=tid,
+                name=name,
+                lead_time_days=lead_time_days,
+                contact_name=contact_name,
+                contact_email=contact_email,
+            )
+        )
+        await self.inventory_repo.commit()
+        assert created.id is not None
+        await self._audit(
+            tenant_id=tid,
+            action=SUPPLIER_CREATED,
+            target=f"supplier:{created.id}",
+            details={"name": name, "lead_time_days": lead_time_days},
+        )
+        return created
+
+    async def update_supplier(
+        self,
+        tenant_id: str | uuid.UUID,
+        supplier_id: uuid.UUID,
+        *,
+        name: str | object | None = _UNSET,
+        contact_name: str | object | None = _UNSET,
+        contact_email: str | object | None = _UNSET,
+        lead_time_days: int | object = _UNSET,
+    ) -> Supplier:
+        tid = _as_uuid(tenant_id)
+        if name is not _UNSET and not str(name).strip():
+            raise ValidationError("Supplier name is required")
+        if lead_time_days is not _UNSET and isinstance(lead_time_days, int) and lead_time_days < 0:
+            raise ValidationError("Supplier lead time cannot be negative")
+        if name is not _UNSET:
+            clash = await self.inventory_repo.get_supplier_by_name(str(name), tid)
+            if clash is not None and clash.id != supplier_id:
+                raise ValidationError(f"Supplier {name!r} already exists")
+
+        updated = await self.inventory_repo.update_supplier(
+            supplier_id,
+            tid,
+            name=name,
+            contact_name=contact_name,
+            contact_email=contact_email,
+            lead_time_days=lead_time_days,
+        )
+        if updated is None:
+            raise NotFoundError("Supplier not found")
+        await self.inventory_repo.commit()
+        assert updated.id is not None
+        await self._audit(
+            tenant_id=tid,
+            action=SUPPLIER_UPDATED,
+            target=f"supplier:{updated.id}",
+            details={"name": updated.name},
+        )
+        return updated
+
+    async def deactivate_supplier(
+        self, tenant_id: str | uuid.UUID, supplier_id: uuid.UUID
+    ) -> Supplier:
+        tid = _as_uuid(tenant_id)
+        if await self.inventory_repo.get_supplier(supplier_id, tid) is None:
+            raise NotFoundError("Supplier not found")
+        updated = await self.inventory_repo.deactivate_supplier(supplier_id, tid)
+        assert updated is not None
+        await self.inventory_repo.commit()
+        await self._audit(
+            tenant_id=tid,
+            action=SUPPLIER_DEACTIVATED,
+            target=f"supplier:{supplier_id}",
+        )
+        return updated
+
+    async def reactivate_supplier(
+        self, tenant_id: str | uuid.UUID, supplier_id: uuid.UUID
+    ) -> Supplier:
+        tid = _as_uuid(tenant_id)
+        if await self.inventory_repo.get_supplier(supplier_id, tid) is None:
+            raise NotFoundError("Supplier not found")
+        updated = await self.inventory_repo.update_supplier(supplier_id, tid, is_active=True)
+        assert updated is not None
+        await self.inventory_repo.commit()
+        await self._audit(
+            tenant_id=tid,
+            action=SUPPLIER_UPDATED,
+            target=f"supplier:{supplier_id}",
+            details={"reactivated": True},
+        )
+        return updated
+
+    async def list_suppliers(
+        self,
+        tenant_id: str | uuid.UUID,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[Supplier]:
+        return await self.inventory_repo.list_suppliers(
+            _as_uuid(tenant_id),
+            include_inactive=include_inactive,
+            offset=offset,
+            limit=limit,
+        )
+
+    async def count_suppliers(
+        self, tenant_id: str | uuid.UUID, *, include_inactive: bool = False
+    ) -> int:
+        return await self.inventory_repo.count_suppliers(
+            _as_uuid(tenant_id), include_inactive=include_inactive
+        )
+
+    async def add_supplier_performance(
+        self,
+        tenant_id: str | uuid.UUID,
+        supplier_id: uuid.UUID,
+        *,
+        period_start: date,
+        period_end: date,
+        on_time_delivery_pct: Decimal,
+        defect_rate_pct: Decimal,
+        price_stability_index: Decimal,
+        responsiveness_days: Decimal,
+    ) -> SupplierPerformance:
+        tid = _as_uuid(tenant_id)
+        if await self.inventory_repo.get_supplier(supplier_id, tid) is None:
+            raise NotFoundError("Supplier not found")
+        if period_end < period_start:
+            raise ValidationError("Performance period end is before its start")
+        if not (0 <= on_time_delivery_pct <= 100):
+            raise ValidationError("On-time delivery % must be within 0-100")
+        if not (0 <= defect_rate_pct <= 100):
+            raise ValidationError("Defect rate % must be within 0-100")
+        if not (0 <= price_stability_index <= 100):
+            raise ValidationError("Price stability index must be within 0-100")
+        if responsiveness_days < 0:
+            raise ValidationError("Responsiveness cannot be negative")
+
+        added = await self.inventory_repo.add_supplier_performance(
+            SupplierPerformance(
+                tenant_id=tid,
+                supplier_id=supplier_id,
+                period_start=period_start,
+                period_end=period_end,
+                on_time_delivery_pct=on_time_delivery_pct,
+                defect_rate_pct=defect_rate_pct,
+                price_stability_index=price_stability_index,
+                responsiveness_days=responsiveness_days,
+            )
+        )
+        await self.inventory_repo.commit()
+        assert added.id is not None
+        await self._audit(
+            tenant_id=tid,
+            action=SUPPLIER_PERFORMANCE_ADDED,
+            target=f"supplier:{supplier_id}",
+            details={
+                "period_start": period_start.isoformat(),
+                "period_end": period_end.isoformat(),
+            },
+        )
+        return added
+
+    async def list_supplier_performance(
+        self,
+        tenant_id: str | uuid.UUID,
+        supplier_id: uuid.UUID,
+        *,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[SupplierPerformance]:
+        if await self.inventory_repo.get_supplier(supplier_id, _as_uuid(tenant_id)) is None:
+            raise NotFoundError("Supplier not found")
+        return await self.inventory_repo.list_supplier_performance(
+            supplier_id, _as_uuid(tenant_id), offset=offset, limit=limit
+        )
+
+    async def count_supplier_performance(
+        self, tenant_id: str | uuid.UUID, supplier_id: uuid.UUID
+    ) -> int:
+        return await self.inventory_repo.count_supplier_performance(
+            supplier_id, _as_uuid(tenant_id)
+        )
+
     async def update_product(
         self,
         tenant_id: str | uuid.UUID,
@@ -333,6 +548,7 @@ class InventoryService:
         cost_price: Money | object = _UNSET,
         sell_price: Money | object = _UNSET,
         reorder_point: Decimal | object = _UNSET,
+        supplier_id: uuid.UUID | object | None = _UNSET,
     ) -> Product:
         tid = _as_uuid(tenant_id)
         if sku is not _UNSET and not str(sku).strip():
@@ -341,6 +557,12 @@ class InventoryService:
             raise ValidationError("Product name is required")
         if reorder_point is not _UNSET and isinstance(reorder_point, Decimal) and reorder_point < 0:
             raise ValidationError("Reorder point cannot be negative")
+        if (
+            supplier_id is not _UNSET
+            and isinstance(supplier_id, uuid.UUID)
+            and (await self.inventory_repo.get_supplier(supplier_id, tid)) is None
+        ):
+            raise NotFoundError("Supplier not found")
 
         existing = await self.inventory_repo.get_product(product_id, tid)
         if existing is None:
@@ -361,6 +583,7 @@ class InventoryService:
             cost_price=cost_price,
             sell_price=sell_price,
             reorder_point=reorder_point,
+            supplier_id=supplier_id,
         )
         assert updated is not None
         await self.inventory_repo.commit()

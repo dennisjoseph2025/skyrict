@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import structlog
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 
 from core.db.session import async_session_factory
 from core.domain.value_objects import (
@@ -1076,6 +1076,124 @@ PRODUCT_ROWS: tuple[dict[str, object], ...] = (
     },
 )
 
+# Suppliers (SKY-86 / INV-AI-004): deliberately mixed risk profiles so the
+# risk engine has demo material. Al-Fahad (electronics) and Jeddah Import
+# (infra/hosting) carry poor performance facts; the rest are reliable.
+SUPPLIER_ROWS: tuple[dict[str, object], ...] = (
+    {
+        "name": "Arabian Gulf Distribution Co.",
+        "lead_time_days": 7,
+        "contact_name": "Faisal Al-Otaibi",
+        "contact_email": "procurement@gulfdistribution.sa",
+    },
+    {
+        "name": "Al-Fahad Logistics Supplies",
+        "lead_time_days": 14,
+        "contact_name": "Salem Al-Shammari",
+        "contact_email": "sales@alfahadlogistics.sa",
+    },
+    {
+        "name": "Riyadh Capability Services Co.",
+        "lead_time_days": 10,
+        "contact_name": "Noura Al-Qahtani",
+        "contact_email": "delivery@riyadhservices.sa",
+    },
+    {
+        "name": "Saudi Digital Connect",
+        "lead_time_days": 5,
+        "contact_name": "Majed Al-Harbi",
+        "contact_email": "partners@sdc.sa",
+    },
+    {
+        "name": "Jeddah Import & Trade",
+        "lead_time_days": 21,
+        "contact_name": "Hassan Baeshen",
+        "contact_email": "trade@jeddahimport.sa",
+    },
+)
+
+# Grading-period facts per supplier: (supplier_idx, start_days_ago, end_days_ago,
+# on_time_pct, defect_pct, price_stability, responsiveness_days). Facts are raw
+# inputs the ai-agent risk engine scores; two periods for the risky suppliers.
+SUPPLIER_PERFORMANCE_ROWS: tuple[dict[str, object], ...] = (
+    {
+        "sup": 1,
+        "start_days": 75,
+        "end_days": 45,
+        "on_time": Decimal("55"),
+        "defect": Decimal("9"),
+        "stability": Decimal("58"),
+        "resp": Decimal("9"),
+    },
+    {
+        "sup": 1,
+        "start_days": 45,
+        "end_days": 15,
+        "on_time": Decimal("48"),
+        "defect": Decimal("11"),
+        "stability": Decimal("51"),
+        "resp": Decimal("11"),
+    },
+    {
+        "sup": 4,
+        "start_days": 75,
+        "end_days": 45,
+        "on_time": Decimal("40"),
+        "defect": Decimal("14"),
+        "stability": Decimal("40"),
+        "resp": Decimal("14"),
+    },
+    {
+        "sup": 4,
+        "start_days": 45,
+        "end_days": 15,
+        "on_time": Decimal("35"),
+        "defect": Decimal("16"),
+        "stability": Decimal("36"),
+        "resp": Decimal("15"),
+    },
+    {
+        "sup": 0,
+        "start_days": 45,
+        "end_days": 15,
+        "on_time": Decimal("96"),
+        "defect": Decimal("1.5"),
+        "stability": Decimal("90"),
+        "resp": Decimal("2"),
+    },
+    {
+        "sup": 3,
+        "start_days": 45,
+        "end_days": 15,
+        "on_time": Decimal("98"),
+        "defect": Decimal("0.8"),
+        "stability": Decimal("95"),
+        "resp": Decimal("1.5"),
+    },
+)
+
+# product_idx -> supplier_idx. Covers all 17 seeded products so every SKU the
+# risk/demand engines exercise has a source.
+SUPPLIER_PRODUCT_MAP: tuple[tuple[int, int], ...] = (
+    (0, 3),
+    (1, 3),
+    (2, 3),
+    (3, 2),
+    (4, 2),
+    (5, 2),
+    (6, 2),
+    (7, 2),
+    (8, 4),
+    (9, 2),
+    (10, 4),
+    (11, 3),
+    (12, 1),
+    (13, 1),
+    (14, 1),
+    (15, 0),
+    (16, 0),
+)
+
 # Sales orders: (order_number, status, subtotal, discount, tax, total, days_ago, lines)
 SALES_ORDER_ROWS: tuple[dict[str, object], ...] = (
     {
@@ -1764,6 +1882,10 @@ async def seed_demo_data(
     from core.features.inventory.models.product import ErpProductModel
     from core.features.inventory.models.stock_level import ErpStockLevelModel
     from core.features.inventory.models.stock_movement import ErpStockMovementModel
+    from core.features.inventory.models.supplier import ErpSupplierModel
+    from core.features.inventory.models.supplier_performance import (
+        ErpSupplierPerformanceModel,
+    )
     from core.features.inventory.models.warehouse import ErpWarehouseModel
     from core.features.payroll.models.benefits import (
         BenefitElectionModel,
@@ -2301,6 +2423,78 @@ async def seed_demo_data(
             timeline_count += 1
         counts["crm_timeline_events"] = timeline_count
 
+        # ── SUPPLIERS (SKY-86 / INV-AI-004) ──────────────────────────
+        supplier_ids: list[uuid.UUID] = []
+        existing_suppliers = {
+            name
+            for (name,) in (
+                await session.execute(
+                    select(ErpSupplierModel.name).where(ErpSupplierModel.tenant_id == tenant_id)
+                )
+            ).all()
+        }
+        for row in SUPPLIER_ROWS:
+            if row["name"] in existing_suppliers:
+                sid = (
+                    await session.execute(
+                        select(ErpSupplierModel.id).where(
+                            ErpSupplierModel.tenant_id == tenant_id,
+                            ErpSupplierModel.name == row["name"],
+                        )
+                    )
+                ).scalar_one()
+                supplier_ids.append(sid)
+                continue
+            sup = ErpSupplierModel(
+                tenant_id=tenant_id,
+                name=row["name"],
+                lead_time_days=row["lead_time_days"],
+                contact_name=row.get("contact_name"),
+                contact_email=row.get("contact_email"),
+            )
+            session.add(sup)
+            await session.flush()
+            supplier_ids.append(sup.id)
+        counts["suppliers"] = len(supplier_ids)
+        assert supplier_ids, "supplier seed must produce at least one supplier"
+
+        # Performance facts keyed by supplier_id (idempotent: skip if the same
+        # period already exists for the supplier).
+        existing_periods = set(
+            (
+                await session.execute(
+                    select(
+                        ErpSupplierPerformanceModel.supplier_id,
+                        ErpSupplierPerformanceModel.period_start,
+                    ).where(ErpSupplierPerformanceModel.tenant_id == tenant_id)
+                )
+            ).all()
+        )
+        performance_count = 0
+        for prow in SUPPLIER_PERFORMANCE_ROWS:
+            sup_id = supplier_ids[int(str(prow["sup"]))]
+            period_start = _date_ago(int(str(prow["start_days"])))
+            if (sup_id, period_start) in existing_periods:
+                continue
+            perf = ErpSupplierPerformanceModel(
+                tenant_id=tenant_id,
+                supplier_id=sup_id,
+                period_start=period_start,
+                period_end=_date_ago(int(str(prow["end_days"]))),
+                on_time_delivery_pct=prow["on_time"],
+                defect_rate_pct=prow["defect"],
+                price_stability_index=prow["stability"],
+                responsiveness_days=prow["resp"],
+            )
+            session.add(perf)
+            performance_count += 1
+        counts["supplier_performance"] = performance_count
+
+        # product_idx -> supplier_id lookup for product seeding/backfill.
+        product_to_supplier: dict[int, uuid.UUID] = {
+            prod_idx: supplier_ids[supplier_idx] for prod_idx, supplier_idx in SUPPLIER_PRODUCT_MAP
+        }
+
         # ── PRODUCTS ─────────────────────────────────────────────────
         product_ids: list[uuid.UUID] = []
         existing_products = {
@@ -2311,7 +2505,7 @@ async def seed_demo_data(
                 )
             ).all()
         }
-        for row in PRODUCT_ROWS:
+        for idx, row in enumerate(PRODUCT_ROWS):
             if row["sku"] in existing_products:
                 pid = (
                     await session.execute(
@@ -2332,10 +2526,26 @@ async def seed_demo_data(
                 cost_price=row["cost"],
                 sell_price=row["sell"],
                 reorder_point=row.get("reorder", Decimal("0")),
+                supplier_id=product_to_supplier.get(idx),
             )
             session.add(prod)
             await session.flush()
             product_ids.append(prod.id)
+
+        # Backfill supplier links for products seeded before this migration so a
+        # re-run after upgrade keeps every mapped product sourced.
+        for prod_idx, supplier_id in product_to_supplier.items():
+            if prod_idx >= len(product_ids) or product_ids[prod_idx] is None:
+                continue
+            await session.execute(
+                update(ErpProductModel)
+                .where(
+                    ErpProductModel.tenant_id == tenant_id,
+                    ErpProductModel.id == product_ids[prod_idx],
+                    ErpProductModel.supplier_id.is_(None),
+                )
+                .values(supplier_id=supplier_id)
+            )
         counts["products"] = len(product_ids)
 
         # ── COMPENSATION ─────────────────────────────────────────────

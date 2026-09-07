@@ -206,7 +206,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0037", f"head is {version}, expected 0037"
+            assert version == "0038", f"head is {version}, expected 0038"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -779,6 +779,52 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                 )
             ).scalar_one_or_none()
             assert cost_perm is not None, "0037 must register erp.inventory.cost"
+
+            # 0038: suppliers (SKY-86 / INV-AI-004) - master + performance tables,
+            # RLS policies, product:supplier FK, and the two supplier permissions.
+            for table in ("erp_suppliers", "erp_supplier_performance"):
+                regclass = (
+                    await conn.execute(text("SELECT to_regclass(:t)"), {"t": f"public.{table}"})
+                ).scalar_one()
+                assert regclass is not None, f"0038 must create {table}"
+
+            for policy_name in (
+                "tenant_isolation_erp_suppliers",
+                "tenant_isolation_erp_supplier_performance",
+            ):
+                policy_count = (
+                    await conn.execute(
+                        text(
+                            "SELECT count(*) FROM pg_policies "
+                            "WHERE schemaname = 'public' AND policyname = :name"
+                        ),
+                        {"name": policy_name},
+                    )
+                ).scalar_one()
+                assert policy_count == 1, f"0038 must create RLS policy {policy_name}"
+
+            for perm_key in (
+                "erp.inventory.suppliers.read",
+                "erp.inventory.suppliers.write",
+            ):
+                perm_row = (
+                    await conn.execute(
+                        text("SELECT description FROM core_permissions WHERE key = :key"),
+                        {"key": perm_key},
+                    )
+                ).scalar_one_or_none()
+                assert perm_row is not None, f"0038 must register {perm_key}"
+
+            product_supplier_fk = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_constraint "
+                        "WHERE conrelid = 'public.erp_products'::regclass "
+                        "AND conname = 'fk_erp_products_supplier_tenant'"
+                    )
+                )
+            ).scalar_one()
+            assert product_supplier_fk == 1, "0038 must add erp_products.supplier_id FK"
     finally:
         await engine.dispose()
 
@@ -801,6 +847,8 @@ async def _assert_downgraded_to_base(url: str) -> None:
                 "public.erp_sequences",
                 "public.erp_report_definitions",
                 "public.erp_report_snapshots",
+                "public.erp_suppliers",
+                "public.erp_supplier_performance",
             ):
                 regclass = (await conn.execute(text(f"SELECT to_regclass('{table}')"))).scalar_one()
                 assert regclass is None, f"{table} still exists after downgrade base"

@@ -24,6 +24,8 @@ from core.domain.entities import (
     StockHealthSummary,
     StockLevel,
     StockMovement,
+    Supplier,
+    SupplierPerformance,
     Warehouse,
 )
 from core.domain.value_objects import Money, StockMovementType
@@ -51,6 +53,7 @@ class InventoryRepositoryPort(Protocol):
         cost_price: Money | object = ...,
         sell_price: Money | object = ...,
         reorder_point: Decimal | object = ...,
+        supplier_id: uuid.UUID | object | None = ...,
     ) -> Product | None: ...
 
     async def deactivate_product(
@@ -77,6 +80,62 @@ class InventoryRepositoryPort(Protocol):
         *,
         include_inactive: bool = False,
         category: str | None = None,
+    ) -> int: ...
+
+    # --- Suppliers (soft-delete via is_active = false) ---
+    async def create_supplier(self, supplier: Supplier) -> Supplier: ...
+
+    async def get_supplier(
+        self, supplier_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> Supplier | None: ...
+
+    async def get_supplier_by_name(self, name: str, tenant_id: uuid.UUID) -> Supplier | None: ...
+
+    async def update_supplier(
+        self,
+        supplier_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        *,
+        name: str | object = ...,
+        contact_name: str | object | None = ...,
+        contact_email: str | object | None = ...,
+        lead_time_days: int | object = ...,
+        is_active: bool | object = ...,
+    ) -> Supplier | None: ...
+
+    async def deactivate_supplier(
+        self, supplier_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> Supplier | None: ...
+
+    async def list_suppliers(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[Supplier]: ...
+
+    async def count_suppliers(
+        self, tenant_id: uuid.UUID, *, include_inactive: bool = False
+    ) -> int: ...
+
+    # --- Supplier performance facts (grading periods) ---
+    async def add_supplier_performance(
+        self, performance: SupplierPerformance
+    ) -> SupplierPerformance: ...
+
+    async def list_supplier_performance(
+        self,
+        supplier_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        *,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[SupplierPerformance]: ...
+
+    async def count_supplier_performance(
+        self, supplier_id: uuid.UUID, tenant_id: uuid.UUID
     ) -> int: ...
 
     # --- Warehouses (soft-delete via is_active = false) ---

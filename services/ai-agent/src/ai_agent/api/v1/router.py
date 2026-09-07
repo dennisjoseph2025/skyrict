@@ -25,6 +25,7 @@ from ai_agent.api.v1.routers.narrator import router as narrator_router
 from ai_agent.api.v1.routers.nl_query import router as nl_query_router
 from ai_agent.api.v1.routers.rag import router as rag_router
 from ai_agent.api.v1.routers.restock import router as restock_router
+from ai_agent.api.v1.routers.supplier_risk import router as supplier_risk_router
 
 api_router = APIRouter()
 
@@ -45,3 +46,4 @@ api_router.include_router(hr_copilot_router)
 api_router.include_router(abc_router)
 api_router.include_router(forecast_router)
 api_router.include_router(crm_router)
+api_router.include_router(supplier_risk_router)
