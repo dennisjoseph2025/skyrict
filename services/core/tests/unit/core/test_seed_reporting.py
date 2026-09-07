@@ -5,28 +5,38 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from core.features.reporting.models.report_definition import ErpReportDefinitionModel
 from core.features.reporting.seeds import PHASE_1_REPORT_SEEDS
 from core.seed import seed_reporting_defaults
 
 if TYPE_CHECKING:
     import pytest
 
-    from core.features.reporting.models.report_definition import ErpReportDefinitionModel
-
 
 class FakeResult:
-    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+    def __init__(self, rows: list[ErpReportDefinitionModel]) -> None:
         self._rows = rows
 
-    def all(self) -> list[tuple[Any, ...]]:
+    def all(self) -> list[ErpReportDefinitionModel]:
         return self._rows
+
+    def scalars(self) -> FakeResult:
+        return self
+
+    def __iter__(self):
+        return iter(self._rows)
 
 
 class FakeSession:
     """Record adds/commits and serve canned ``execute`` results."""
 
     def __init__(self, existing_slugs: list[str] | None = None) -> None:
-        self.rows = [(slug,) for slug in (existing_slugs or [])]
+        # Existing rows are the canonical pack (in-sync version+SQL), matching
+        # what a clean provisioning of the same catalog would have written.
+        by_slug = {seed.slug: seed for seed in PHASE_1_REPORT_SEEDS}
+        self.rows = [
+            _existing_model(by_slug[slug]) for slug in (existing_slugs or []) if slug in by_slug
+        ]
         self.added: list[ErpReportDefinitionModel] = []
         self.committed = False
 
@@ -57,6 +67,22 @@ def _patch_factory(monkeypatch: pytest.MonkeyPatch, session: FakeSession) -> Non
     from core import seed as seed_module
 
     monkeypatch.setattr(seed_module, "async_session_factory", lambda: FakeFactory(session))
+
+
+def _existing_model(seed: Any) -> ErpReportDefinitionModel:
+    """Build a stored definition that is in sync with the canonical seed."""
+    model = ErpReportDefinitionModel(
+        tenant_id=uuid.uuid4(),
+        slug=seed.slug,
+        title=seed.title,
+        module=seed.module,
+        description=seed.description,
+        sql=seed.sql,
+        params=list(seed.params),
+        permission_key=seed.permission_key,
+        version=seed.version,
+    )
+    return model
 
 
 class TestSeedReportingDefaults:
@@ -99,6 +125,47 @@ class TestSeedReportingDefaults:
 
         added_slugs = {model.slug for model in session.added}
         assert added_slugs == {s.slug for s in PHASE_1_REPORT_SEEDS} - existing
+
+    async def test_refreshes_stale_definition_in_place(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The bug: a catalog improvement never reached already-provisioned
+        tenants (insert-only seeding). A stored ar_aging with the legacy
+        truncated SQL + version 1 must be updated to the canonical seed."""
+        stale_seed = next(s for s in PHASE_1_REPORT_SEEDS if s.slug == "ar_aging")
+
+        class _StaleSession(FakeSession):
+            def __init__(self) -> None:
+                # Whole pack exists; every definition in sync except ar_aging
+                # (legacy version 1 with truncated SQL - the seeded-drift bug).
+                self.rows = []
+                for seed in PHASE_1_REPORT_SEEDS:
+                    model = _existing_model(seed)
+                    if seed.slug == "ar_aging":
+                        model.version = 1
+                        model.sql = (
+                            "SELECT i.invoice_number, i.due_date, i.total "
+                            "FROM erp_invoices i ORDER BY i.due_date"
+                        )
+                    self.rows.append(model)
+                self.added = []
+                self.committed = False
+                self.updated: list[ErpReportDefinitionModel] = []
+
+            async def execute(self, stmt: object) -> FakeResult:
+                return FakeResult(self.rows)
+
+        session = _StaleSession()
+        _patch_factory(monkeypatch, session)
+
+        await seed_reporting_defaults(uuid.uuid4())
+
+        assert session.added == []  # nothing new inserted
+        (model,) = [m for m in session.rows if m.slug == "ar_aging"]
+        assert model.sql == stale_seed.sql  # canonical SQL applied
+        assert model.version == stale_seed.version  # version bumped
+        assert model.title == stale_seed.title
+        assert "outstanding" in model.sql  # the column the KPI sums must exist
 
 
 class TestSeedShapeChecks:
