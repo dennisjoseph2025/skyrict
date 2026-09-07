@@ -206,7 +206,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0038", f"head is {version}, expected 0038"
+            assert version == "0040", f"head is {version}, expected 0040"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -780,7 +780,88 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             ).scalar_one_or_none()
             assert cost_perm is not None, "0037 must register erp.inventory.cost"
 
-            # 0038: payroll run predictions (HR-AUT-002) - the drift threshold
+# 0038: suppliers (SKY-86 / INV-AI-004) - master + performance tables,
+            # RLS policies, product:supplier FK, and the two supplier permissions.
+            for table in ("erp_suppliers", "erp_supplier_performance"):
+                regclass = (
+                    await conn.execute(text("SELECT to_regclass(:t)"), {"t": f"public.{table}"})
+                ).scalar_one()
+                assert regclass is not None, f"0038 must create {table}"
+
+            for policy_name in (
+                "tenant_isolation_erp_suppliers",
+                "tenant_isolation_erp_supplier_performance",
+            ):
+                policy_count = (
+                    await conn.execute(
+                        text(
+                            "SELECT count(*) FROM pg_policies "
+                            "WHERE schemaname = 'public' AND policyname = :name"
+                        ),
+                        {"name": policy_name},
+                    )
+                ).scalar_one()
+                assert policy_count == 1, f"0038 must create RLS policy {policy_name}"
+
+            for perm_key in (
+                "erp.inventory.suppliers.read",
+                "erp.inventory.suppliers.write",
+            ):
+                perm_row = (
+                    await conn.execute(
+                        text("SELECT description FROM core_permissions WHERE key = :key"),
+                        {"key": perm_key},
+                    )
+                ).scalar_one_or_none()
+                assert perm_row is not None, f"0038 must register {perm_key}"
+
+            product_supplier_fk = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_constraint "
+                        "WHERE conrelid = 'public.erp_products'::regclass "
+                        "AND conname = 'fk_erp_products_supplier_tenant'"
+                    )
+                )
+            ).scalar_one()
+            assert product_supplier_fk == 1, "0038 must add erp_products.supplier_id FK"
+
+            # 0039: reconcile report definitions from the canonical catalog
+            # (RPT-DATA-001). 0036 stamped every seeded definition at version 1
+            # even though the catalog carried v2 for the six improved reports,
+            # so 0039 must have bumped them to the canonical version AND kept
+            # the canonical SQL (e.g. ar_aging carries the `outstanding`
+            # column the Open Receivables KPI sums).
+            drifted_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT d.tenant_id, d.slug, d.version "
+                        "FROM erp_report_definitions d "
+                        "JOIN tenants t ON t.id = d.tenant_id "
+                        "WHERE NOT ("
+                        "  (d.slug IN ('ar_aging', 'top_customers', "
+                        "   'stock_on_hand_vs_reorder', 'slow_movers', "
+                        "   'leave_usage', 'payroll_cost_by_period') AND d.version = 2)"
+                        "  OR (d.slug NOT IN ('ar_aging', 'top_customers', "
+                        "   'stock_on_hand_vs_reorder', 'slow_movers', "
+                        "   'leave_usage', 'payroll_cost_by_period') AND d.version = 1)"
+                        ")"
+                    )
+                )
+            ).all()
+            assert drifted_rows == [], f"0039 left drifted definitions: {drifted_rows}"
+
+            ar_aging_sql = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM erp_report_definitions "
+                        "WHERE slug = 'ar_aging' AND sql LIKE '%outstanding%'"
+                    )
+                )
+            ).scalar_one()
+            assert ar_aging_sql == 2, "0039 must ship the canonical ar_aging SQL per tenant"
+
+            # 0040: payroll run predictions (HR-AUT-002) - the drift threshold
             # on payroll settings, not-null with the default 10% server-side.
             drift_col = (
                 await conn.execute(
@@ -793,7 +874,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                 )
             ).scalar_one()
             assert isinstance(drift_col, str) and "0.1000" in drift_col, (
-                "0038 must add prediction_drift_threshold_pct defaulting to 0.1000"
+                "0040 must add prediction_drift_threshold_pct defaulting to 0.1000"
             )
             not_null = (
                 await conn.execute(
@@ -805,7 +886,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                     )
                 )
             ).scalar_one()
-            assert not_null == "NO", "0038 drift threshold must be NOT NULL"
+            assert not_null == "NO", "0040 drift threshold must be NOT NULL"
     finally:
         await engine.dispose()
 
@@ -828,6 +909,8 @@ async def _assert_downgraded_to_base(url: str) -> None:
                 "public.erp_sequences",
                 "public.erp_report_definitions",
                 "public.erp_report_snapshots",
+                "public.erp_suppliers",
+                "public.erp_supplier_performance",
             ):
                 regclass = (await conn.execute(text(f"SELECT to_regclass('{table}')"))).scalar_one()
                 assert regclass is None, f"{table} still exists after downgrade base"

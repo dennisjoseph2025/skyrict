@@ -18,6 +18,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Numeric,
     String,
     UniqueConstraint,
@@ -37,6 +38,15 @@ class ErpProductModel(Base):
         CheckConstraint("cost_price >= 0", name="ck_erp_products_cost_price_non_negative"),
         CheckConstraint("sell_price >= 0", name="ck_erp_products_sell_price_non_negative"),
         CheckConstraint("reorder_point >= 0", name="ck_erp_products_reorder_point_non_negative"),
+        # Optional default supplier (SKY-86, INV-AI-004): composite FK keeps
+        # referential integrity aligned with RLS. RESTRICT - a supplier cannot
+        # be deleted while products reference it; deactivate it instead.
+        ForeignKeyConstraint(
+            ["tenant_id", "supplier_id"],
+            ["erp_suppliers.tenant_id", "erp_suppliers.id"],
+            ondelete="RESTRICT",
+            name="fk_erp_products_supplier_tenant",
+        ),
     )
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
@@ -77,6 +87,7 @@ class ErpProductModel(Base):
         Numeric(18, 4), nullable=False, server_default=text("0")
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

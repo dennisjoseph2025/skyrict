@@ -9,6 +9,8 @@ from core.features.inventory.models import (
     ErpProductModel,
     ErpStockLevelModel,
     ErpStockMovementModel,
+    ErpSupplierModel,
+    ErpSupplierPerformanceModel,
     ErpWarehouseModel,
 )
 from core.features.inventory.ports import (
@@ -23,6 +25,8 @@ __all__ = [
     "ErpProductModel",
     "ErpStockLevelModel",
     "ErpStockMovementModel",
+    "ErpSupplierModel",
+    "ErpSupplierPerformanceModel",
     "ErpWarehouseModel",
     "InventoryRepository",
     "InventoryRepositoryPort",

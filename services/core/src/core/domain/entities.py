@@ -102,6 +102,48 @@ class Product:
     sell_price: Money = field(default_factory=lambda: Money.zero("USD"))
     reorder_point: Decimal = Decimal("0")
     is_active: bool = True
+    supplier_id: uuid.UUID | None = None
+    id: uuid.UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class Supplier:
+    """A tenant-scoped vendor master row (soft-deletable via ``is_active``).
+
+    ``lead_time_days`` is the supplier's quoted replenishment lead time, the
+    starting point the ai-agent risk engine adjusts when a supplier is risky.
+    """
+
+    tenant_id: uuid.UUID
+    name: str
+    lead_time_days: int = 7
+    contact_name: str | None = None
+    contact_email: str | None = None
+    is_active: bool = True
+    id: uuid.UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class SupplierPerformance:
+    """One grading-period fact set for a supplier (SKY-86, INV-AI-004).
+
+    Raw dimension inputs to the risk score: on-time delivery %, defect %,
+    price-stability index (0-100, higher = more stable), responsiveness in
+    days. Facts are stored - not recomputed - so scores are auditable.
+    """
+
+    tenant_id: uuid.UUID
+    supplier_id: uuid.UUID
+    period_start: date
+    period_end: date
+    on_time_delivery_pct: Decimal = Decimal("0")
+    defect_rate_pct: Decimal = Decimal("0")
+    price_stability_index: Decimal = Decimal("0")
+    responsiveness_days: Decimal = Decimal("0")
     id: uuid.UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -514,7 +556,7 @@ class PayrollSettings:
     # HR-AUT-001 (0029): whether marking a run paid also books the accrual JE
     # into the Finance inbox (off = fully manual flow).
     je_bridge_enabled: bool = True
-    # HR-AUT-002 (0038): drift threshold for run predictions - the projected
+    # HR-AUT-002 (0040): drift threshold for run predictions - the projected
     # net vs previous-period change (percentage point) that flags a department
     # as drifting. Advisory only: it never blocks a compute at the backend.
     prediction_drift_threshold_pct: Decimal = Decimal("0.10")

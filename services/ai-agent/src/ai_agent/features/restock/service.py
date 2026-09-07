@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from ai_agent.db.restock_stats_repository import RestockStatsRepository
     from ai_agent.db.settings_repository import SettingsRepository
     from ai_agent.db.suggestion_repository import SuggestionRepository
+    from ai_agent.db.supplier_risk_repository import SupplierRiskRepository
+    from ai_agent.domain.supplier_risk import RiskBand
     from ai_agent.features.nl_query.gateway import (
         InventoryGatewayPort,
         MovementRow,
@@ -62,12 +64,14 @@ class RestockService:
         audit: AuditService,
         settings: SettingsRepository | None = None,
         stats: RestockStatsRepository | None = None,
+        risk: SupplierRiskRepository | None = None,
     ) -> None:
         self._gateway_factory = gateway_factory
         self._suggestions = suggestions
         self._audit = audit
         self._settings = settings
         self._stats = stats
+        self._risk = risk
 
     async def run_scan(self, *, tenant_id: uuid.UUID) -> ScanReport:
         """Compute and persist pending suggestions for below-reorder stock."""
@@ -83,7 +87,7 @@ class RestockService:
             qty_by_pair[key] = qty_by_pair.get(key, Decimal(0)) + row.qty_on_hand
 
         product_by_id: dict[uuid.UUID, ProductRef] = {p.id: p for p in products}
-        demand_by_pair = await self._load_demand_profiles(tenant_id, levels, movements)
+        demand_by_pair = await self._load_demand_profiles(tenant_id, products, levels, movements)
         pending_rows, _total = await self._suggestions.list_by_status(
             tenant_id=tenant_id, status="pending"
         )
@@ -144,6 +148,7 @@ class RestockService:
     async def _load_demand_profiles(
         self,
         tenant_id: uuid.UUID,
+        products: list[ProductRef],
         levels: list[StockLevelRow],
         movements: list[MovementRow],
     ) -> dict[tuple[uuid.UUID, uuid.UUID], DemandProfile]:
@@ -152,6 +157,10 @@ class RestockService:
         v2 is feature-flag-gated per tenant (``ai_restock_settings.v2_enabled``).
         Without settings/stats wiring (or with the flag off) this returns an
         empty map and the scan falls back to the v1 heuristic.
+
+        When the risk repository is wired (SKY-86), each profile picks up its
+        product's supplier risk band so the calculator can stretch lead time
+        and safety for unreliable suppliers. Ungraded suppliers = low risk.
         """
         if self._settings is None or self._stats is None:
             return {}
@@ -164,15 +173,37 @@ class RestockService:
         profile = await BackfillService(stats=self._stats).backfill_and_load(
             tenant_id=tenant_id, levels=levels, movements=movements
         )
+        risk_by_supplier = await self._load_supplier_risk(tenant_id)
+        supplier_by_product = {p.id: p.supplier_id for p in products}
         return {
             pair: DemandProfile(
                 avg_daily_demand=stats.avg_daily_demand,
                 eligible=stats.eligible,
                 lead_time_days=cfg.lead_time_days,
                 safety_factor=cfg.safety_factor,
+                risk_band=self._band_for(pair[0], supplier_by_product, risk_by_supplier),
             )
             for pair, stats in profile.items()
         }
+
+    async def _load_supplier_risk(self, tenant_id: uuid.UUID) -> dict[uuid.UUID, RiskBand]:
+        """Latest supplier risk bands for the tenant (empty when unwired)."""
+        if self._risk is None:
+            return {}
+        grades = await self._risk.list_all(tenant_id=tenant_id)
+        return {grade.supplier_id: grade.risk_band for grade in grades}
+
+    def _band_for(
+        self,
+        product_id: uuid.UUID,
+        supplier_by_product: dict[uuid.UUID, uuid.UUID | None],
+        risk_by_supplier: dict[uuid.UUID, RiskBand],
+    ) -> RiskBand:
+        """The product's supplier risk band, or ``low`` when ungraded."""
+        supplier_id = supplier_by_product.get(product_id)
+        if supplier_id is None:
+            return "low"
+        return risk_by_supplier.get(supplier_id, "low")
 
     async def review(
         self,

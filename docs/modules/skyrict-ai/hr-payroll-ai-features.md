@@ -857,7 +857,7 @@ recurring problems surface in a monthly cross-tab.
   `%`, and the employees the commit will skip. **Read-only:** prediction
   writes no entries, no totals, no run transition.
 - `prediction_drift_threshold_pct` on `erp_payroll_settings` (migration
-  `0038_prediction_drift_threshold`) — default `0.10`; a department whose
+  `0040_prediction_drift_threshold`) — default `0.10`; a department whose
   forecast drifts beyond the threshold flags the run and the UI blocks
   Compute until the drift is acknowledged (client-side gate; the backend
   never blocks the request).

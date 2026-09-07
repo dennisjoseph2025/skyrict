@@ -71,7 +71,7 @@ class PayrollSettingsModel(Base):
     je_bridge_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
-    # HR-AUT-002 (0038): per-tenant drift threshold for run predictions
+    # HR-AUT-002 (0040): per-tenant drift threshold for run predictions
     # (decimal fraction, 0.1000 = 10%) - advisory only, never blocks a commit.
     prediction_drift_threshold_pct: Mapped[Decimal] = mapped_column(
         Numeric(6, 4), nullable=False, server_default=text("0.1000")

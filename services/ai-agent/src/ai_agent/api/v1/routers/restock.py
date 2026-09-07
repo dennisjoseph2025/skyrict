@@ -30,6 +30,7 @@ from ai_agent.db.audit_repository import AiAuditLogRepository
 from ai_agent.db.restock_stats_repository import RestockStatsRepository
 from ai_agent.db.settings_repository import SettingsRepository
 from ai_agent.db.suggestion_repository import SuggestionRepository
+from ai_agent.db.supplier_risk_repository import SupplierRiskRepository
 from ai_agent.features.nl_query.gateway import InventoryGatewayPort
 from ai_agent.features.restock.service import RestockService
 
@@ -52,6 +53,7 @@ def get_restock_service(
         audit=AuditService(AiAuditLogRepository(session)),
         settings=SettingsRepository(session),
         stats=RestockStatsRepository(session),
+        risk=SupplierRiskRepository(session),
     )
 
 

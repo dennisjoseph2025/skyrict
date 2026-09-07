@@ -1,23 +1,26 @@
 /**
  * Contract tests for the /api/v1/reports BFF proxy segment (RPT-BE-001).
  *
- * Covers the four behaviors that make the proxy safe and useful:
+ * Covers the behaviors that make the proxy safe and useful:
  *  - GET of the bare list forwards to Core and returns the backend envelope;
  *  - Core-unreachable GET of the bare list falls back to the sample KPIs
  *    (X-Mock-Fallback header) so the widget renders while Core is down;
  *  - Core-unreachable non-list calls still return the standard 502;
- *  - state-changing methods must pass the same-origin CSRF gate.
+ *  - POST /reports/{slug}/export relays the raw CSV stream through
+ *    (never JSON-wrapped) and the state-changing CSRF gate still applies.
  */
 
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const callBackend = vi.fn();
+const callBackendStream = vi.fn();
 const assertSameOrigin = vi.fn();
 const resolveTenantSlug = vi.fn();
 
 vi.mock("@/lib/server/auth", () => ({
   callBackend: (path: string, options?: unknown) => callBackend(path, options),
+  callBackendStream: (path: string, options?: unknown) => callBackendStream(path, options),
   assertSameOrigin: (request: unknown) => assertSameOrigin(request),
   resolveTenantSlug: (host: string | null | undefined) => resolveTenantSlug(host),
 }));
@@ -141,6 +144,62 @@ describe("reports BFF proxy segment", () => {
 
     expect(response.status).toBe(403);
     expect(callBackend).not.toHaveBeenCalled();
+  });
+
+  it("relays a CSV export stream instead of JSON-wrapping it", async () => {
+    const csv =
+      "stage,opportunity_count,pipeline_value\r\nQualified,3,1250.0000\r\nProposal,1,500.0000\r\n";
+    callBackendStream.mockResolvedValue(
+      new Response(csv, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="pipeline_value_by_stage-2026-09-07.csv"',
+          "X-Report-Rows": "2",
+          "X-Report-Period": "2026-09-07",
+        },
+      }),
+    );
+
+    const request = nextRequest(
+      "http://tenant.localhost/api/v1/reports/pipeline_value_by_stage/export",
+      {
+        method: "POST",
+        headers: { authorization: "Bearer abc123" },
+        body: JSON.stringify({ params: {} }),
+      },
+    );
+
+    const response = await POST(request);
+
+    expect(callBackendStream).toHaveBeenCalledWith(
+      "/reports/pipeline_value_by_stage/export",
+      expect.objectContaining({ method: "POST", target: "core", token: "abc123" }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(response.headers.get("content-disposition")).toContain(".csv");
+    expect(response.headers.get("x-report-rows")).toBe("2");
+    expect(response.headers.get("x-report-period")).toBe("2026-09-07");
+    // The CSV body passes through unchanged - the regression that used to
+    // deliver a file containing only "{}".
+    await expect(response.text()).resolves.toBe(csv);
+  });
+
+  it("returns 502 when Core is unreachable for a CSV export", async () => {
+    callBackendStream.mockResolvedValue(null);
+
+    const response = await POST(
+      nextRequest("http://tenant.localhost/api/v1/reports/ar_aging/export", {
+        method: "POST",
+        body: JSON.stringify({ params: {} }),
+      }),
+    );
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      detail: expect.stringContaining("unavailable"),
+    });
   });
 
   it("exports every HTTP method bound to the proxy", () => {
