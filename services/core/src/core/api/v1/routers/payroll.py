@@ -33,7 +33,12 @@ from core.api.v1.schemas import (
     PayslipReviewActionIn,
     PayslipReviewOut,
     RunComputeOut,
+    RunPredictionOut,
     SkippedEmployeeOut,
+    VoidMonthCountsOut,
+    VoidPatternReportOut,
+    VoidRunIn,
+    VoidRunRefOut,
 )
 from core.core.constants import PayrollRounding
 from core.core.permissions import (
@@ -178,11 +183,43 @@ async def compute_run(
             run=PayrollRunOut.from_entity(result.run),
             entries=[PayrollEntryOut.from_entity(e) for e in result.entries],
             skipped=[
-                SkippedEmployeeOut(employee_id=employee_id, reason=reason)
-                for employee_id, reason in result.skipped
+                SkippedEmployeeOut(
+                    employee_id=record.employee_id,
+                    reason=record.reason,
+                    reason_code=record.code,
+                    category=record.category,
+                )
+                for record in result.skipped
             ],
         ),
         message="Payroll run computed",
+    )
+
+
+@router.get(
+    "/runs/{run_id}/prediction",
+    response_model=ResponseEnvelope[RunPredictionOut],
+)
+async def predict_run(
+    run_id: uuid.UUID,
+    current_user: dict[str, Any] = Depends(_require_payroll_read),
+    payroll_svc: PayrollService = Depends(get_payroll_service),
+    tenant_id: uuid.UUID = Depends(get_tenant_id),
+) -> ResponseEnvelope[RunPredictionOut]:
+    """Project a run's totals per department (read-only, never persisted).
+
+    Estimates the run using the exact compute engine (via ``compute_single``
+    with ``estimate=True``: no leave accrual, no entry writes) and flags
+    departments whose projected net drifts beyond the tenant's threshold vs
+    the previous period. Advisory-only - the drift flags never block a commit
+    at the backend (HR-AUT-002).
+    """
+    try:
+        prediction = await payroll_svc.predict_run(run_id, tenant_id=tenant_id)
+    except ValueError as exc:
+        raise_from_service_error(exc)
+    return ResponseEnvelope(
+        data=RunPredictionOut.from_prediction(prediction), message="Run prediction"
     )
 
 
@@ -230,17 +267,48 @@ async def void_run(
     current_user: dict[str, Any] = Depends(_require_payroll_approve),
     payroll_svc: PayrollService = Depends(get_payroll_service),
     tenant_id: uuid.UUID = Depends(get_tenant_id),
+    body: VoidRunIn | None = None,
 ) -> ResponseEnvelope[PayrollRunOut]:
     try:
         run = await payroll_svc.void_run(
             run_id=run_id,
             tenant_id=tenant_id,
-            reason="voided via API",
+            reason=body.reason if body is not None else None,
             actor_user_id=current_user["user_id"],
         )
     except ValueError as exc:
         raise_from_service_error(exc)
     return ResponseEnvelope(data=PayrollRunOut.from_entity(run), message="Payroll run voided")
+
+
+@router.get(
+    "/void-reasons/report",
+    response_model=ResponseEnvelope[VoidPatternReportOut],
+)
+async def void_reason_report(
+    current_user: dict[str, Any] = Depends(_require_payroll_approve),
+    payroll_svc: PayrollService = Depends(get_payroll_service),
+    tenant_id: uuid.UUID = Depends(get_tenant_id),
+    months: int = Query(default=6, ge=1, le=24),
+) -> ResponseEnvelope[VoidPatternReportOut]:
+    report = await payroll_svc.void_reason_report(tenant_id=tenant_id, months=months)
+    return ResponseEnvelope(
+        data=VoidPatternReportOut(
+            months=[
+                VoidMonthCountsOut.from_month(month.month, month.counts) for month in report.months
+            ],
+            totals=report.category_totals,
+            unclassified_recent=[
+                VoidRunRefOut(
+                    run_id=run_id,
+                    run_code=run_code,
+                    period_start=period_start,
+                    reason=reason,
+                )
+                for run_id, reason, period_start, run_code in report.unclassified_recent
+            ],
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

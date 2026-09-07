@@ -47,6 +47,15 @@ from core.features.payroll.ports import (
     PayrollRepositoryPort,
     PayslipApprovedNotifierPort,
 )
+from core.features.payroll.skip_reasons import (
+    SkipCategory,
+    SkipReasonCode,
+    SkipRecord,
+)
+from core.features.payroll.void_reasons import (
+    VoidReasonCategory,
+    classify_void_reason,
+)
 
 if TYPE_CHECKING:
     from core.features.finance.ports import PayrollAccrualPort
@@ -70,6 +79,12 @@ _RUN_MACHINE = StateMachine(
 )
 
 
+def _add_months(day: date, delta: int) -> date:
+    """Shift ``day`` by ``delta`` calendar months, normalized to day 1."""
+    month_index = day.month - 1 + delta
+    return date(day.year + month_index // 12, month_index % 12 + 1, 1)
+
+
 def _require_id(entity: ent.Employee, what: str) -> uuid.UUID:
     """Return a persisted entity's id, which must always be set."""
     if entity.id is None:
@@ -91,7 +106,51 @@ class ComputeResult:
 
     run: ent.PayrollRun
     entries: list[ent.PayrollEntry]
-    skipped: list[tuple[uuid.UUID, str]]
+    skipped: list[SkipRecord]
+
+
+@dataclasses.dataclass(frozen=True)
+class DepartmentProjection:
+    """One department's predicted totals vs its previous-period actual (HR-AUT-002)."""
+
+    department_id: uuid.UUID | None
+    department_name: str
+    predicted_gross: Money
+    predicted_net: Money
+    employee_count: int
+    previous_net: Money | None = None
+    delta_pct: Decimal | None = None
+    drifted: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class RunPrediction:
+    """Read-only projection of a run's totals - never persisted as actuals."""
+
+    run_id: uuid.UUID
+    predicted_total_gross: Money
+    predicted_total_net: Money
+    drift_threshold_pct: Decimal
+    departments: list[DepartmentProjection]
+    previous_run: ent.PayrollRun | None = None
+    predicted_skipped: list[SkipRecord] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass(frozen=True)
+class VoidMonthCounts:
+    """One month bucket of the void-pattern report (HR-AUT-002 §5.8.3)."""
+
+    month: date
+    counts: dict[VoidReasonCategory, int]
+
+
+@dataclasses.dataclass(frozen=True)
+class VoidPatternReport:
+    """Monthly void-cause cross-tab for HR - derived, never persisted."""
+
+    months: list[VoidMonthCounts]
+    category_totals: dict[VoidReasonCategory, int]
+    unclassified_recent: list[tuple[uuid.UUID, str, date, str]]
 
 
 class PayrollCompute:
@@ -335,6 +394,119 @@ class PayrollService:
         """
         return _RUN_MACHINE.can_transition(run.status.value, PayrollRunStatus.COMPUTED.value)
 
+    async def predict_run(self, run_id: uuid.UUID, *, tenant_id: uuid.UUID) -> RunPrediction:
+        """Project the run's totals per department without writing anything.
+
+        Read-only estimate (HR-AUT-002): reuses :meth:`compute_single` with
+        ``estimate=True`` so the projection shares the exact compute engine -
+        same settings, roster and pay-day rules as a real compute - while
+        skipping the Rule 4 leave accrual and entry writes. A department is
+        flagged as drifting when |delta%| vs the previous period's actual
+        exceeds the settings drift threshold.
+
+        Advisory-only: this never blocks a compute at the backend. If a tenant
+        later wants drift to hard-gate enqueue, the upgrade path is a
+        ``drift_block_pct`` pre-flight block at enqueue time (ponytail:
+        upgrade path) - deliberately not enforced here.
+        """
+        run = await self._repo.get_run(run_id, tenant_id)
+        if run is None:
+            raise ValueError(f"payroll run {run_id} not found")
+
+        settings = await self._repo.get_settings(tenant_id)
+        threshold = (
+            settings.prediction_drift_threshold_pct if settings is not None else Decimal("0.10")
+        )
+        currency = settings.default_currency if settings is not None else "USD"
+
+        employees = await self._repo.list_active_employees(
+            tenant_id,
+            period_start=run.period_start,
+            period_end=run.period_end,
+        )
+        department_names = dict(await self._repo.list_departments(tenant_id))
+        department_of: dict[uuid.UUID, uuid.UUID | None] = {
+            _require_id(employee, "employee"): employee.department_id for employee in employees
+        }
+
+        entries: list[ent.PayrollEntry] = []
+        skipped: list[SkipRecord] = []
+        for employee in employees:
+            entry, reason = await self.compute_single(
+                run_id=run_id,
+                employee_id=_require_id(employee, "employee"),
+                tenant_id=tenant_id,
+                estimate=True,
+            )
+            if entry is None:
+                skipped.append(
+                    SkipRecord.from_text(_require_id(employee, "employee"), reason or "unknown")
+                )
+                continue
+            entries.append(entry)
+
+        if entries:
+            total_gross, total_net = PayrollCompute.compute_totals(entries)
+        else:
+            total_gross = Money(Decimal("0"), currency)
+            total_net = Money(Decimal("0"), currency)
+
+        previous = await self._repo.previous_run(tenant_id, before_start=run.period_start)
+        previous_net_by_dept: dict[str, Decimal] = {}
+        if previous is not None and previous.id is not None:
+            previous_net_by_dept = {
+                (str(dept_id) if dept_id is not None else "Unassigned"): net
+                for dept_id, _, net in await self._repo.department_net_summary(
+                    previous.id, tenant_id=tenant_id
+                )
+            }
+
+        by_department: dict[uuid.UUID | None, list[ent.PayrollEntry]] = {}
+        for entry in entries:
+            by_department.setdefault(department_of.get(entry.employee_id), []).append(entry)
+
+        departments: list[DepartmentProjection] = []
+        for dept in sorted(
+            by_department,
+            key=lambda d: (d is None, _department_label(d, department_names)),
+        ):
+            dept_entries = by_department[dept]
+            dept_gross = sum(
+                (e.gross for e in dept_entries), Money(Decimal("0"), total_gross.currency)
+            )
+            dept_net = sum((e.net for e in dept_entries), Money(Decimal("0"), total_net.currency))
+            dept_key = str(dept) if dept is not None else "Unassigned"
+            prev = previous_net_by_dept.get(dept_key)
+            delta_pct: Decimal | None = None
+            drifted = False
+            if prev is not None and prev != 0:
+                delta_pct = ((dept_net.amount - prev) / prev * 100).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                drifted = abs(delta_pct) > threshold * 100
+            departments.append(
+                DepartmentProjection(
+                    department_id=dept,
+                    department_name=_department_label(dept, department_names),
+                    predicted_gross=dept_gross,
+                    predicted_net=dept_net,
+                    employee_count=len(dept_entries),
+                    previous_net=Money(prev, total_net.currency) if prev is not None else None,
+                    delta_pct=delta_pct,
+                    drifted=drifted,
+                )
+            )
+
+        return RunPrediction(
+            run_id=run_id,
+            predicted_total_gross=total_gross,
+            predicted_total_net=total_net,
+            drift_threshold_pct=threshold,
+            departments=departments,
+            previous_run=previous,
+            predicted_skipped=skipped,
+        )
+
     async def active_employees(
         self, run_id: uuid.UUID, *, tenant_id: uuid.UUID
     ) -> Sequence[ent.Employee]:
@@ -421,7 +593,7 @@ class PayrollService:
         }
         days_in_period = (run.period_end - run.period_start).days + 1
         entries: list[ent.PayrollEntry] = []
-        skipped: list[tuple[uuid.UUID, str]] = []
+        skipped: list[SkipRecord] = []
         for employee in employees:
             employee_id = _require_id(employee, "employee")
             compensation = await self._repo.get_compensation(
@@ -430,7 +602,13 @@ class PayrollService:
                 effective_for=run.period_end,
             )
             if compensation is None:
-                skipped.append((employee_id, "no effective compensation"))
+                skipped.append(
+                    SkipRecord.from_text(
+                        employee_id,
+                        "no effective compensation",
+                        code=SkipReasonCode.NO_COMPENSATION,
+                    )
+                )
                 continue  # no effective salary for this period - no entry
             unpaid_days = await self._leave_ledger.approved_unpaid_days(
                 employee_id,
@@ -446,7 +624,18 @@ class PayrollService:
                 unpaid_days=unpaid_days,
             )
             if days <= 0:
-                skipped.append((employee_id, "no payable days"))
+                skipped.append(
+                    SkipRecord.from_text(
+                        employee_id,
+                        "on unpaid leave for the full period"
+                        if unpaid_days > 0
+                        else (
+                            "terminated mid-period"
+                            if employee.termination_date is not None
+                            else "no payable days in this period"
+                        ),
+                    )
+                )
                 continue
             existing = existing_entries.get(employee_id)
             adjustments = existing.adjustments if existing is not None else None
@@ -479,6 +668,17 @@ class PayrollService:
             keep_ids = [entry.employee_id for entry in entries]
             if set(existing_entries) - set(keep_ids):
                 await self._repo.delete_entries_for_run(run_id, keep_ids, tenant_id=tenant_id)
+
+        # HR-AUT-002 §5.3.5: every computed-but-unbanked employee is a risk
+        # row (never a skip - money still moves), so the post-run analysis can
+        # offer the one-click bank-details fix.
+        await self._append_bank_detail_risk_rows(
+            tenant_id,
+            run,
+            computed_ids={entry.employee_id for entry in entries},
+            records=skipped,
+        )
+
         if entries:
             total_gross, total_net = PayrollCompute.compute_totals(entries)
         else:
@@ -502,10 +702,7 @@ class PayrollService:
             computed_at=datetime.now(UTC),
             total_gross=total_gross,
             total_net=total_net,
-            skipped_employees=[
-                {"employee_id": str(employee_id), "reason": reason}
-                for employee_id, reason in skipped
-            ],
+            skipped_employees=[record.to_dict() for record in skipped],
         )
         if computed is None:
             raise IllegalStateTransitionError(f"run is not in {run.status.value} state") from None
@@ -517,10 +714,8 @@ class PayrollService:
             details={
                 "entry_count": len(entries),
                 "skipped_count": len(skipped),
-                "skipped": [
-                    {"employee_id": str(employee_id), "reason": reason}
-                    for employee_id, reason in skipped
-                ],
+                "risk_count": sum(1 for record in skipped if record.category is SkipCategory.RISK),
+                "skipped": [record.to_dict() for record in skipped],
             },
         )
         if computed.id is not None:
@@ -541,6 +736,7 @@ class PayrollService:
         employee_id: uuid.UUID,
         tenant_id: uuid.UUID,
         persist: bool = True,
+        estimate: bool = False,
     ) -> tuple[ent.PayrollEntry | None, str | None]:
         """Compute ONE roster employee's entry — the batch engine's checkpoint seam.
 
@@ -554,6 +750,11 @@ class PayrollService:
         employee has no effective compensation or no payable days (nothing owed)
         — or ``(None, reason)`` when the employee could not be computed. With
         ``persist=False`` (dry-run) the entry is computed but never written.
+
+        ``estimate=True`` is the run-prediction seam: it additionally skips the
+        Rule 4 leave accrual and never writes, so a prediction is genuinely
+        read-only — same inputs produce the exact entry a real compute would,
+        with zero side effects. ``estimate`` implies ``persist`` is ignored.
         """
         run = await self._repo.get_run(run_id, tenant_id)
         if run is None:
@@ -585,10 +786,13 @@ class PayrollService:
             effective_for=run.period_end,
         )
         if compensation is None:
-            return None, "no effective compensation for this period"
+            return None, "no effective compensation"
 
         # Rule 4 (docs §4.4): idempotent annual accrual for this employee only.
-        accrual_types = await self._leave_ledger.list_accrual_leave_types(tenant_id)
+        # Skipped entirely in estimate mode so predictions never write.
+        accrual_types = (
+            await self._leave_ledger.list_accrual_leave_types(tenant_id) if not estimate else ()
+        )
         for leave_type in accrual_types:
             await self._leave_ledger.accrue(
                 tenant_id=tenant_id,
@@ -611,6 +815,10 @@ class PayrollService:
             unpaid_days=unpaid_days,
         )
         if days <= 0:
+            if unpaid_days > 0:
+                return None, "on unpaid leave for the full period"
+            if employee.termination_date is not None:
+                return None, "terminated mid-period"
             return None, "no payable days in this period"
 
         existing = await self._repo.get_entry(run_id, employee_id, tenant_id=tenant_id)
@@ -637,7 +845,7 @@ class PayrollService:
             adjustments=adjustments,
             id=existing.id if existing is not None else uuid.uuid4(),
         )
-        if persist:
+        if persist and not estimate:
             await self._repo.upsert_entries([entry], tenant_id=tenant_id)
         return entry, None
 
@@ -683,6 +891,20 @@ class PayrollService:
                 run_id, tenant_id=tenant_id, payslips=payslips
             )
 
+        # HR-AUT-002 §5.3.5: normalize the batch's free-text skip reasons into
+        # the taxonomy and append the missing-bank-details risk rows, so the
+        # run's analysis is complete through the SKY-74 path as well.
+        records = [
+            SkipRecord.from_text(uuid.UUID(row["employee_id"]), row.get("reason") or "unknown")
+            for row in (skipped or [])
+        ]
+        await self._append_bank_detail_risk_rows(
+            tenant_id,
+            run,
+            computed_ids={entry.employee_id for entry in entries},
+            records=records,
+        )
+
         computed = await self._repo.transition_run_status(
             run_id,
             run.status.value,
@@ -692,7 +914,7 @@ class PayrollService:
             computed_at=datetime.now(UTC),
             total_gross=total_gross,
             total_net=total_net,
-            skipped_employees=skipped or [],
+            skipped_employees=[record.to_dict() for record in records],
         )
         if computed is None:
             raise IllegalStateTransitionError(f"run is not in {run.status.value} state") from None
@@ -701,7 +923,11 @@ class PayrollService:
             target=f"payroll_run:{run_id}",
             tenant_id=tenant_id,
             user_id=actor_user_id,
-            details={"entry_count": len(entries), "skipped_count": len(skipped or [])},
+            details={
+                "entry_count": len(entries),
+                "skipped_count": len(records),
+                "risk_count": sum(1 for record in records if record.category is SkipCategory.RISK),
+            },
         )
         if computed.id is not None:
             await emit_run_computed(
@@ -713,6 +939,40 @@ class PayrollService:
                 tenant_id=tenant_id,
             )
         return computed
+
+    async def _append_bank_detail_risk_rows(
+        self,
+        tenant_id: uuid.UUID,
+        run: ent.PayrollRun,
+        *,
+        computed_ids: set[uuid.UUID],
+        records: list[SkipRecord],
+    ) -> None:
+        """Append ``missing_bank_details`` risk rows for computed employees.
+
+        Computed employees with neither a bank account nor a bank name get an
+        amber ``risk`` row (never a hard skip - the money still moves). Called
+        by both compute seams so the analysis is identical for direct and batch
+        (SKY-74) runs.
+        """
+        employees = await self._repo.list_active_employees(
+            tenant_id,
+            period_start=run.period_start,
+            period_end=run.period_end,
+        )
+        already_flagged = {record.employee_id for record in records}
+        for employee in employees:
+            employee_id = _require_id(employee, "employee")
+            if employee_id not in computed_ids or employee_id in already_flagged:
+                continue
+            if not (employee.bank_account or employee.bank_name):
+                records.append(
+                    SkipRecord.from_text(
+                        employee_id,
+                        "missing bank details",
+                        code=SkipReasonCode.MISSING_BANK_DETAILS,
+                    )
+                )
 
     async def approve_run(
         self,
@@ -866,6 +1126,53 @@ class PayrollService:
         if transitioned.id is not None:
             await emit_run_voided(run_id=run_id, reason=reason, tenant_id=tenant_id)
         return transitioned
+
+    async def void_reason_report(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        months: int = 6,
+    ) -> VoidPatternReport:
+        """Cross-tab recent voided runs by classified cause (HR-AUT-002 §5.8.3).
+
+        The report is derived at read time: ``void_reason`` always stores the
+        operator's raw text, the keyword classifier buckets it here, and
+        sub-0.75-confidence runs land under ``unclassified`` for HR review.
+        """
+        today = datetime.now(UTC).date()
+        start_month = _add_months(today.replace(day=1), -(months - 1))
+
+        months_seq: list[date] = []
+        cursor = start_month
+        while cursor <= today.replace(day=1):
+            months_seq.append(cursor)
+            cursor = _add_months(cursor, 1)
+
+        voided = await self._repo.list_voided_runs(tenant_id, since_start=start_month)
+        buckets: dict[date, dict[VoidReasonCategory, int]] = {
+            month: dict.fromkeys(VoidReasonCategory, 0) for month in months_seq
+        }
+        unclassified_recent: list[tuple[uuid.UUID, str, date, str]] = []
+        for run in voided:
+            classification = classify_void_reason(run.void_reason or "")
+            bucket = run.period_start.replace(day=1)
+            if bucket in buckets:
+                buckets[bucket][classification.category] += 1
+            if classification.category is VoidReasonCategory.UNCLASSIFIED:
+                assert run.id is not None
+                unclassified_recent.append(
+                    (run.id, run.void_reason or "", run.period_start, run.run_code)
+                )
+        totals = {
+            category: sum(bucket[category] for bucket in buckets.values())
+            for category in VoidReasonCategory
+        }
+        unclassified_recent.sort(key=lambda row: row[2], reverse=True)
+        return VoidPatternReport(
+            months=[VoidMonthCounts(month, buckets[month]) for month in months_seq],
+            category_totals=totals,
+            unclassified_recent=unclassified_recent[:20],
+        )
 
     # ------------------------------------------------------------------
     # Entries (Rule 8: immutable after approved/paid)
@@ -1212,6 +1519,16 @@ class PayrollService:
 
 def _next_run_code(sequence: int) -> str:
     return f"PR-{sequence}"
+
+
+def _department_label(
+    department_id: uuid.UUID | None,
+    department_names: dict[uuid.UUID, str],
+) -> str:
+    """Prediction display name for a department bucket (None = unassigned)."""
+    if department_id is None:
+        return "Unassigned"
+    return department_names.get(department_id, "Unassigned")
 
 
 __all__ = ["PayrollCompute", "PayrollService"]

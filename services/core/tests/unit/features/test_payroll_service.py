@@ -34,6 +34,7 @@ from core.domain import entities as ent
 from core.domain.value_objects import Money
 from core.features.finance.ports import PayrollAccrualOutcome
 from core.features.payroll.service import PayrollService
+from core.features.payroll.void_reasons import VoidReasonCategory
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -159,6 +160,7 @@ class FakePayrollRepository:
         self.settings: dict[uuid.UUID, ent.PayrollSettings] = {}
         self.run_numbers = 0
         self.employees: list[ent.Employee] = []
+        self.departments: list[tuple[uuid.UUID, str]] = []
         self.reviews: list[ent.PayslipReview] = []
 
     async def create_compensation(self, compensation: ent.Compensation) -> ent.Compensation:
@@ -190,6 +192,13 @@ class FakePayrollRepository:
         self, tenant_id: uuid.UUID, *, status=None, limit: int = 20, offset: int = 0
     ):
         return [r for r in self.runs.values() if status is None or r.status == status]
+
+    async def list_voided_runs(self, tenant_id: uuid.UUID, *, since_start: date):
+        return [
+            r
+            for r in self.runs.values()
+            if r.status == PayrollRunStatus.VOID and r.period_start >= since_start
+        ]
 
     async def find_overlapping_run(
         self, tenant_id: uuid.UUID, *, period_start: date, period_end: date
@@ -300,6 +309,35 @@ class FakePayrollRepository:
         self, tenant_id: uuid.UUID, *, period_start: date, period_end: date
     ):
         return self.employees
+
+    async def previous_run(
+        self, tenant_id: uuid.UUID, *, before_start: date
+    ) -> ent.PayrollRun | None:
+        candidates = [
+            run
+            for run in self.runs.values()
+            if run.status != PayrollRunStatus.VOID and run.period_end < before_start
+        ]
+        return max(candidates, key=lambda r: r.period_end) if candidates else None
+
+    async def list_departments(self, tenant_id: uuid.UUID):
+        return list(self.departments)
+
+    async def department_net_summary(self, run_id: uuid.UUID, *, tenant_id: uuid.UUID):
+        dept_of = {e.id: e.department_id for e in self.employees}
+        buckets: dict[str, Decimal] = {}
+        for entry in self.entries.values():
+            if entry.run_id != run_id:
+                continue
+            dept_id = dept_of.get(entry.employee_id)
+            buckets[str(dept_id) if dept_id is not None else "Unassigned"] = (
+                buckets.get(str(dept_id) if dept_id is not None else "Unassigned", Decimal("0"))
+                + entry.net.amount
+            )
+        return [
+            (uuid.UUID(label) if label != "Unassigned" else None, label, net)
+            for label, net in sorted(buckets.items())
+        ]
 
     async def set_run_je_bridge_status(
         self,
@@ -770,7 +808,9 @@ class TestComputeSkips:
         run = await _create_run(service)
         result = await service.compute_run(run_id=run.id, tenant_id=TENANT)
         assert result.entries == []
-        assert result.skipped == [(EMPLOYEE, "no effective compensation")]
+        assert [(r.employee_id, r.reason) for r in result.skipped] == [
+            (EMPLOYEE, "no effective compensation")
+        ]
         assert result.run.status == PayrollRunStatus.COMPUTED
 
     async def test_employee_with_zero_payable_days_is_skipped(self) -> None:
@@ -792,7 +832,193 @@ class TestComputeSkips:
         run = await _create_run(service)
         result = await service.compute_run(run_id=run.id, tenant_id=TENANT)
         assert result.entries == []
-        assert result.skipped == [(EMPLOYEE, "no payable days")]
+        assert [(r.employee_id, r.reason, r.code.value) for r in result.skipped] == [
+            (EMPLOYEE, "on unpaid leave for the full period", "unpaid_leave")
+        ]
+
+
+class TestSkipReasonTaxonomy:
+    def test_known_reason_strings_classify(self) -> None:
+        from core.features.payroll.skip_reasons import SkipReasonCode, classify_skip_reason
+
+        assert classify_skip_reason("no effective compensation") is (SkipReasonCode.NO_COMPENSATION)
+        assert classify_skip_reason("on unpaid leave for the full period") is (
+            SkipReasonCode.UNPAID_LEAVE
+        )
+        assert classify_skip_reason("terminated mid-period") is (
+            SkipReasonCode.TERMINATED_MID_PERIOD
+        )
+        assert classify_skip_reason("employee not on the active roster") is (
+            SkipReasonCode.NOT_ON_ROSTER
+        )
+        assert classify_skip_reason("no payable days in this period") is (
+            SkipReasonCode.NO_PAYABLE_DAYS
+        )
+
+    def test_unknown_text_buckets_to_unclassified_for_review(self) -> None:
+        from core.features.payroll.skip_reasons import (
+            SkipCategory,
+            SkipReasonCode,
+            classify_skip_reason,
+        )
+
+        code = classify_skip_reason("something the taxonomy has never seen")
+        assert code is SkipReasonCode.UNCLASSIFIED
+        assert code.label == "Unclassified - review"
+        assert code.category is SkipCategory.SKIP
+        assert SkipReasonCode.MISSING_BANK_DETAILS.category is SkipCategory.RISK
+
+
+class TestBankDetailRiskRows:
+    """HR-AUT-002 §5.3.5: missing bank details = risk row, never a compute skip."""
+
+    def _banked(self) -> ent.Employee:
+        return dataclasses.replace(_employee(), bank_account="1234", bank_name="Test Bank")
+
+    def _banked_other(self) -> ent.Employee:
+        return dataclasses.replace(
+            _employee_with_id(EMPLOYEE2), bank_account="5678", bank_name="Test Bank"
+        )
+
+    async def test_bank_less_computed_employee_gains_risk_row(self) -> None:
+        service, repo, _ = _service()
+        repo.settings[TENANT] = _settings()
+        repo.employees = [_employee()]
+        await _seed_compensation(repo, EMPLOYEE)
+        run = await _create_run(service)
+        result = await service.compute_run(run_id=run.id, tenant_id=TENANT)
+
+        assert len(result.entries) == 1  # money still moves
+        assert [(r.code.value, r.category.value) for r in result.skipped] == [
+            ("missing_bank_details", "risk")
+        ]
+        assert result.run.skipped_employees[0]["reason_code"] == "missing_bank_details"
+        assert result.run.skipped_employees[0]["category"] == "risk"
+
+    async def test_banked_computed_employee_has_no_risk_row(self) -> None:
+        service, repo, _ = _service()
+        repo.settings[TENANT] = _settings()
+        repo.employees = [self._banked()]
+        await _seed_compensation(repo, EMPLOYEE)
+        run = await _create_run(service)
+        result = await service.compute_run(run_id=run.id, tenant_id=TENANT)
+
+        assert len(result.entries) == 1
+        assert result.skipped == []
+        assert result.run.skipped_employees == []
+
+    async def test_skip_and_risk_rows_coexist_with_no_duplicate(self) -> None:
+        service, repo, _ = _service()
+        repo.settings[TENANT] = _settings()
+        repo.employees = [_employee(), self._banked_other()]
+        await _seed_compensation(repo, EMPLOYEE)
+        await _seed_compensation(repo, EMPLOYEE2)
+        run = await _create_run(service)
+        result = await service.compute_run(run_id=run.id, tenant_id=TENANT)
+
+        codes = {r.code.value for r in result.skipped}
+        assert codes == {"missing_bank_details"}
+        # Banked second employee computed an entry AND has bank details -> no risk,
+        # and the bank-less first employee is not double-flagged.
+        assert len(result.skipped) == 1
+        assert result.skipped[0].employee_id == EMPLOYEE
+
+
+class TestVoidReasonIntelligence:
+    """HR-AUT-002 §5.8.3: keyword classifier + monthly pattern report."""
+
+    def test_confident_duplicate_text_classifies(self) -> None:
+        from core.features.payroll.void_reasons import (
+            VoidReasonCategory,
+            classify_void_reason,
+        )
+
+        result = classify_void_reason("created twice by mistake")
+        assert result.category is VoidReasonCategory.DUPLICATE
+        assert result.category.value == "duplicate"
+        assert result.category.label == "Duplicate"
+        assert result.confidence == Decimal("0.9")
+
+    def test_confident_wrong_period_text_classifies(self) -> None:
+        from core.features.payroll.void_reasons import (
+            VoidReasonCategory,
+            classify_void_reason,
+        )
+
+        result = classify_void_reason("wrong pay period - should be another month")
+        assert result.category is VoidReasonCategory.WRONG_PERIOD
+        assert result.confidence == Decimal("0.9")
+
+    def test_single_signal_kept_unclassified_for_review(self) -> None:
+        from core.features.payroll.void_reasons import (
+            VoidReasonCategory,
+            classify_void_reason,
+        )
+
+        # "duplicate" alone = one weak signal (< 0.75 floor): raw text is kept
+        # for HR review instead of trusting a guess.
+        result = classify_void_reason("duplicate")
+        assert result.category is VoidReasonCategory.UNCLASSIFIED
+        assert result.confidence == Decimal("0.6")
+        assert result.text == "duplicate"
+
+    def test_unknown_text_unclassified_zero_confidence(self) -> None:
+        from core.features.payroll.void_reasons import (
+            VoidReasonCategory,
+            classify_void_reason,
+        )
+
+        result = classify_void_reason("something the taxonomy has never seen")
+        assert result.category is VoidReasonCategory.UNCLASSIFIED
+        assert result.confidence == 0
+
+    async def test_report_buckets_voided_runs_by_period_month(self) -> None:
+        service, repo, _ = _service()
+
+        async def seed(run_code: str, period_start: date, reason: str | None) -> None:
+            await repo.create_run(
+                ent.PayrollRun(
+                    tenant_id=TENANT,
+                    run_code=run_code,
+                    period_start=period_start,
+                    period_end=period_start.replace(day=28),
+                    status=PayrollRunStatus.VOID,
+                    void_reason=reason,
+                    id=uuid.uuid4(),
+                )
+            )
+
+        # Two confident duplicates in the same month + a weak one -> unclassified.
+        await seed("MAY-01", date(2026, 5, 1), "created twice by mistake")
+        await seed("MAY-02", date(2026, 5, 1), "duplicate")
+        await seed("MAY-03", date(2026, 5, 1), "correction required")
+        await seed("JUN-01", date(2026, 6, 1), "wrong pay period - should be another")
+        # Outside the window (older than `months`) -> filtered out.
+        await seed("FEB-99", date(2026, 2, 1), "not in this report")
+
+        report = await service.void_reason_report(tenant_id=TENANT, months=6)
+
+        assert report.category_totals == {
+            VoidReasonCategory.DUPLICATE: 1,
+            VoidReasonCategory.WRONG_PERIOD: 1,
+            VoidReasonCategory.CORRECTION_NEEDED: 1,
+            VoidReasonCategory.UNCLASSIFIED: 1,
+        }
+        may = next(month for month in report.months if month.month == date(2026, 5, 1))
+        assert may.counts == {
+            VoidReasonCategory.DUPLICATE: 1,
+            VoidReasonCategory.WRONG_PERIOD: 0,
+            VoidReasonCategory.CORRECTION_NEEDED: 1,
+            VoidReasonCategory.UNCLASSIFIED: 1,
+        }
+        june = next(month for month in report.months if month.month == date(2026, 6, 1))
+        assert june.counts[VoidReasonCategory.WRONG_PERIOD] == 1
+        # The raw weak text is surfaced for human review, not silently bucketed.
+        assert ("duplicate", "MAY-02", date(2026, 5, 1)) in [
+            (reason, run_code, period_start)
+            for _, reason, period_start, run_code in report.unclassified_recent
+        ]
+        assert report.category_totals[VoidReasonCategory.DUPLICATE] == 1  # FEB excluded
 
 
 def _employee_with_id(employee_id: uuid.UUID) -> ent.Employee:
@@ -888,7 +1114,12 @@ class TestComputeSkipsPersisted:
         result = await service.compute_run(run_id=run.id, tenant_id=TENANT)
         assert result.entries == []
         assert result.run.skipped_employees == [
-            {"employee_id": str(EMPLOYEE), "reason": "no effective compensation"}
+            {
+                "employee_id": str(EMPLOYEE),
+                "reason": "no effective compensation",
+                "reason_code": "no_compensation",
+                "category": "skip",
+            }
         ]
 
     async def test_skips_survive_approval(self) -> None:
@@ -899,7 +1130,12 @@ class TestComputeSkipsPersisted:
         await service.compute_run(run_id=run.id, tenant_id=TENANT)
         approved = await service.approve_run(run_id=run.id, tenant_id=TENANT, approved_by=ACTOR)
         assert approved.skipped_employees == [
-            {"employee_id": str(EMPLOYEE), "reason": "no effective compensation"}
+            {
+                "employee_id": str(EMPLOYEE),
+                "reason": "no effective compensation",
+                "reason_code": "no_compensation",
+                "category": "skip",
+            }
         ]
 
 
@@ -1199,3 +1435,214 @@ class TestPayslips:
         service, _, _ = _service()
         with pytest.raises(ValueError):
             await service.render_payslip_pdf(uuid.uuid4(), tenant_id=TENANT)
+
+
+class TestRunPrediction:
+    """HR-AUT-002: read-only run predictions + drift flags (no writes, no accrual)."""
+
+    DEPARTMENT_A = uuid.uuid4()
+    DEPARTMENT_B = uuid.uuid4()
+    EMPLOYEE_C = uuid.uuid4()
+    EMPLOYEE_D = uuid.uuid4()
+
+    @classmethod
+    def _dept_employee(
+        cls, number: str, department_id: uuid.UUID, employee_id: uuid.UUID
+    ) -> ent.Employee:
+        return ent.Employee(
+            tenant_id=TENANT,
+            employee_number=number,
+            first_name="A",
+            last_name="B",
+            job_title="Engineer",
+            hire_date=date(2020, 1, 1),
+            employment_status=EmploymentStatus.ACTIVE,
+            department_id=department_id,
+            id=employee_id,
+        )
+
+    async def _seed(self, service: PayrollService, repo: FakePayrollRepository) -> None:
+        repo.settings[TENANT] = _settings()
+        repo.employees = [
+            self._dept_employee("EMP-1", self.DEPARTMENT_A, EMPLOYEE),
+            self._dept_employee("EMP-2", self.DEPARTMENT_B, EMPLOYEE2),
+            self._dept_employee("EMP-3", self.DEPARTMENT_B, self.EMPLOYEE_C),
+            self._dept_employee("EMP-4", None, self.EMPLOYEE_D),
+        ]
+        repo.departments = [(self.DEPARTMENT_A, "Engineering"), (self.DEPARTMENT_B, "Support")]
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=EMPLOYEE,
+                monthly_salary=_money("1000"),
+                effective_from=date(2024, 1, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=EMPLOYEE2,
+                monthly_salary=_money("2000"),
+                effective_from=date(2024, 1, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=self.EMPLOYEE_D,
+                monthly_salary=_money("500"),
+                effective_from=date(2024, 1, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+
+    async def test_prediction_is_read_only(self) -> None:
+        service, repo, _ = _service()
+        repo.settings[TENANT] = _settings()
+        repo.employees = [_employee()]
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=EMPLOYEE,
+                monthly_salary=_money("3000"),
+                effective_from=date(2024, 1, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+        run = await _create_run(service)
+
+        entry, reason = await service.compute_single(
+            run_id=run.id,
+            employee_id=EMPLOYEE,
+            tenant_id=TENANT,
+            persist=True,
+            estimate=True,
+        )
+
+        assert reason is None
+        assert entry is not None and entry.net.amount == Decimal("3000")
+        assert repo.entries == {}  # estimate wrote nothing
+        assert service._leave_ledger.accrued == []  # and accrued nothing
+
+    async def test_prediction_matches_compute_on_identical_inputs(self) -> None:
+        service, repo, _ = _service()
+        repo.settings[TENANT] = _settings()
+        repo.employees = [_employee()]
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=EMPLOYEE,
+                monthly_salary=_money("3000"),
+                effective_from=date(2024, 1, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+        run = await _create_run(service)
+
+        predicted = await service.predict_run(run.id, tenant_id=TENANT)
+        actual = await service.compute_run(run_id=run.id, tenant_id=TENANT)
+
+        assert predicted.predicted_total_net.amount == actual.run.total_net.amount
+        assert predicted.predicted_total_gross.amount == actual.run.total_gross.amount
+
+    async def test_drift_flags_18pct_but_not_8pct(self) -> None:
+        service, repo, _ = _service()
+        await self._seed(service, repo)
+        previous = await _create_run(service, start=date(2024, 5, 1))
+        await service.compute_run(run_id=previous.id, tenant_id=TENANT)
+        current = await _create_run(service, start=date(2024, 6, 1))
+        # Engineering (+18%): bump EMPLOYEE effective from June.
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=EMPLOYEE,
+                monthly_salary=_money("1180"),
+                effective_from=date(2024, 6, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+        # Support (+8%): bump EMPLOYEE2 effective from June.
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=EMPLOYEE2,
+                monthly_salary=_money("2160"),
+                effective_from=date(2024, 6, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+
+        prediction = await service.predict_run(current.id, tenant_id=TENANT)
+
+        assert prediction.previous_run is not None and prediction.previous_run.id == previous.id
+        assert prediction.drift_threshold_pct == Decimal("0.10")
+        by_name = {d.department_name: d for d in prediction.departments}
+        engineering = by_name["Engineering"]
+        support = by_name["Support"]
+        unassigned = by_name["Unassigned"]
+        assert engineering.predicted_net.amount == Decimal("1180")
+        assert engineering.previous_net.amount == Decimal("1000")
+        assert engineering.delta_pct == Decimal("18.00")
+        assert engineering.drifted is True
+        assert support.predicted_net.amount == Decimal("2160")
+        assert support.previous_net.amount == Decimal("2000")
+        assert support.delta_pct == Decimal("8.00")
+        assert support.drifted is False
+        assert unassigned.department_id is None
+        assert unassigned.previous_net.amount == Decimal("500")
+        assert unassigned.delta_pct == Decimal("0.00")
+        assert unassigned.drifted is False
+        # No predicted entries persisted for the current run.
+        persisted = [e for e in repo.entries.values() if e.run_id == current.id]
+        assert persisted == []
+        # EMPLOYEE_C has no compensation - classified as predicted skip.
+        assert len(prediction.predicted_skipped) == 1
+        assert prediction.predicted_skipped[0].employee_id == self.EMPLOYEE_C
+        assert prediction.predicted_skipped[0].code.value == "no_compensation"
+
+    async def test_higher_threshold_suppresses_drift(self) -> None:
+        service, repo, _ = _service()
+        await self._seed(service, repo)
+        previous = await _create_run(service, start=date(2024, 5, 1))
+        await service.compute_run(run_id=previous.id, tenant_id=TENANT)
+        current = await _create_run(service, start=date(2024, 6, 1))
+        await repo.create_compensation(
+            ent.Compensation(
+                tenant_id=TENANT,
+                employee_id=EMPLOYEE,
+                monthly_salary=_money("1180"),
+                effective_from=date(2024, 6, 1),
+                is_active=True,
+                id=uuid.uuid4(),
+            )
+        )
+        repo.settings[TENANT] = dataclasses.replace(
+            repo.settings[TENANT], prediction_drift_threshold_pct=Decimal("0.20")
+        )
+
+        prediction = await service.predict_run(current.id, tenant_id=TENANT)
+
+        assert prediction.drift_threshold_pct == Decimal("0.20")
+        engineering = next(d for d in prediction.departments if d.department_name == "Engineering")
+        assert engineering.delta_pct == Decimal("18.00")
+        assert engineering.drifted is False
+
+    async def test_prediction_no_previous_run_has_no_drift(self) -> None:
+        service, repo, _ = _service()
+        await self._seed(service, repo)
+        run = await _create_run(service, start=date(2024, 5, 1))
+
+        prediction = await service.predict_run(run.id, tenant_id=TENANT)
+
+        assert prediction.previous_run is None
+        assert all(d.previous_net is None and not d.drifted for d in prediction.departments)
+        assert prediction.predicted_total_net.amount == Decimal("3500")

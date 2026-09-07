@@ -34,6 +34,7 @@ from typing import Any, Protocol, cast
 from core.core.audit_service import AuditService
 from core.core.tenant_context import TenantContext
 from core.domain import entities as ent
+from core.features.payroll.skip_reasons import SkipRecord
 from core.features.payroll_automation.constants import (
     BATCH_ABORTED,
     BATCH_COMPLETED,
@@ -453,7 +454,7 @@ class PayrollAutomationService:
 
         if entry is None:
             totals["skipped"] = int(totals.get("skipped", 0)) + 1
-            skipped.append({"employee_id": str(employee_id), "reason": reason or "no entry"})
+            skipped.append(SkipRecord.from_text(employee_id, reason or "no entry").to_dict())
             await self._repo.mark_item_done(item_id, tenant_id=tenant_id)
             return False
         totals["done"] = int(totals.get("done", 0)) + 1
