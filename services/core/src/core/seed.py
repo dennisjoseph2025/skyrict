@@ -9,7 +9,7 @@ decisions) live here and are applied at tenant provisioning time:
   - the single ``erp_payroll_settings`` row per tenant (default currency from
     settings, zero PF/tax rates, nearest rounding);
   - the Phase-1 reporting pack in ``erp_report_definitions`` (the SAME
-    ``core.features.reporting.seeds`` catalog that migrations 0036/0038 apply
+    ``core.features.reporting.seeds`` catalog that migrations 0036/0039 apply
     for pre-existing tenants; provisioning reconciles, so catalog updates
     reach existing tenants too);
   - the five system roles in ``core_roles`` (ERP grants per the HR & Payroll
@@ -258,7 +258,7 @@ async def seed_reporting_defaults(tenant_id: uuid.UUID) -> None:
     """Reconcile the Phase-1 report definitions for one tenant.
 
     Applies the canonical ``PHASE_1_REPORT_SEEDS`` pack - the same definitions
-    migration 0036/0038 insert for pre-existing tenants - so a newly
+    migration 0036/0039 insert for pre-existing tenants - so a newly
     provisioned tenant is indistinguishable from one that pre-dates the
     reporting data layer. Each definition is validated read-only before
     insert/update.

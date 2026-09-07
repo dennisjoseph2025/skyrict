@@ -1,7 +1,7 @@
 """Phase-1 report seed catalog tests (RPT-DATA-001).
 
 The catalog is the single source of truth for the report pack used by both
-migration 0036/0038 and the tenant-provisioning hook. These tests pin its
+migration 0036/0039 and the tenant-provisioning hook. These tests pin its
 shape:
 
   - exactly the 12 reports from erp-phase1.md §M-RPT (unique slugs)
@@ -76,7 +76,7 @@ class TestCatalogShape:
 
 
 class TestSeedVersioning:
-    """The drift contract shared by migration 0038 and the provisioning hook."""
+    """The drift contract shared by migration 0039 and the provisioning hook."""
 
     def test_newer_version_with_identical_sql_is_not_stale(self) -> None:
         """is_seed_stale compares SQL content too - a stored version newer than

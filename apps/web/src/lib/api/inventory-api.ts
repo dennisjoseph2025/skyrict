@@ -54,6 +54,17 @@ export interface Warehouse {
     updatedAt: string;
 }
 
+export interface Supplier {
+    id: string;
+    name: string;
+    leadTimeDays: number;
+    contactName: string | null;
+    contactEmail: string | null;
+    isActive: boolean;
+    createdAt: string;
+    updatedAt: string;
+}
+
 export interface StockLevel {
     id: string;
     productId: string;
@@ -191,6 +202,17 @@ interface WarehousePayload {
     updated_at?: unknown;
 }
 
+interface SupplierPayload {
+    id?: unknown;
+    name?: unknown;
+    lead_time_days?: unknown;
+    contact_name?: unknown;
+    contact_email?: unknown;
+    is_active?: unknown;
+    created_at?: unknown;
+    updated_at?: unknown;
+}
+
 interface StockLevelPayload {
     id?: unknown;
     product_id?: unknown;
@@ -262,6 +284,26 @@ function mapWarehouse(raw: WarehousePayload): Warehouse {
         location:
             typeof raw.location === "string" && raw.location
                 ? raw.location
+                : null,
+        isActive: raw.is_active !== false,
+        createdAt: String(raw.created_at ?? ""),
+        updatedAt: String(raw.updated_at ?? ""),
+    };
+}
+
+function mapSupplier(raw: SupplierPayload): Supplier {
+    return {
+        id: String(raw.id ?? ""),
+        name: String(raw.name ?? ""),
+        leadTimeDays:
+            typeof raw.lead_time_days === "number" ? raw.lead_time_days : 0,
+        contactName:
+            typeof raw.contact_name === "string" && raw.contact_name
+                ? raw.contact_name
+                : null,
+        contactEmail:
+            typeof raw.contact_email === "string" && raw.contact_email
+                ? raw.contact_email
                 : null,
         isActive: raw.is_active !== false,
         createdAt: String(raw.created_at ?? ""),
@@ -567,6 +609,24 @@ export async function listWarehouses(
         fetchOptions,
     );
     return mapList(raw, mapWarehouse);
+}
+
+export async function listSuppliers(
+    options: {
+        page?: number;
+        pageSize?: number;
+        includeInactive?: boolean;
+    } = {},
+    fetchOptions: RequestInit = {},
+): Promise<ListResponse<Supplier>> {
+    const query = buildListParams(options, {
+        include_inactive: options.includeInactive ? "true" : undefined,
+    });
+    const raw = await apiFetchEnvelope<ListPayload>(
+        `/api/v1/inventory/suppliers?${query}`,
+        fetchOptions,
+    );
+    return mapList(raw, mapSupplier);
 }
 
 export async function createWarehouse(

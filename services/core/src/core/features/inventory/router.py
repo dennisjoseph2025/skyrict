@@ -30,6 +30,8 @@ from core.core.permissions import (
     ERP_INVENTORY_ADJUST,
     ERP_INVENTORY_COST,
     ERP_INVENTORY_READ,
+    ERP_INVENTORY_SUPPLIERS_READ,
+    ERP_INVENTORY_SUPPLIERS_WRITE,
     ERP_INVENTORY_WRITE,
 )
 from core.features.inventory.repository import _UNSET
@@ -48,6 +50,11 @@ from core.features.inventory.schemas import (
     StockReleaseCreate,
     StockReserveCreate,
     StockTransferCreate,
+    SupplierCreate,
+    SupplierPerformanceCreate,
+    SupplierPerformanceResponse,
+    SupplierResponse,
+    SupplierUpdate,
     TransferResponse,
     WarehouseCreate,
     WarehouseResponse,
@@ -68,6 +75,12 @@ _require_inventory_write = require_permission(ERP_INVENTORY_WRITE)
 _require_inventory_adjust = require_permission(ERP_INVENTORY_ADJUST)
 # Non-raising: true only when the caller holds the cost key (INV-ANL-001).
 _resolve_inventory_cost = resolve_permission(ERP_INVENTORY_COST)
+# Supplier views (SKY-86/INV-AI-004) gate risk data behind their own key so
+# read alone does not leak supplier risk facts; writes use the supplier write key.
+# Reads additionally accept ai-agent's m2m ingest secret so the risk engine can
+# pull supplier master + performance facts without a user JWT (mirrors products).
+_require_suppliers_read = require_ingest_m2m_or_permission(ERP_INVENTORY_SUPPLIERS_READ)
+_require_suppliers_write = require_permission(ERP_INVENTORY_SUPPLIERS_WRITE)
 # The catalog list (reindex/ingest target) additionally accepts ai-agent's m2m
 # ingest secret (CORE_AI_INGEST_TOKEN); every other route stays JWT-only.
 _require_catalog_read = require_ingest_m2m_or_permission(ERP_INVENTORY_READ)
@@ -147,6 +160,7 @@ async def update_product(
         cost_price=money_input(body.cost_price) if "cost_price" in updates else _UNSET,
         sell_price=money_input(body.sell_price) if "sell_price" in updates else _UNSET,
         reorder_point=body.reorder_point if "reorder_point" in updates else _UNSET,
+        supplier_id=body.supplier_id if "supplier_id" in updates else _UNSET,
     )
     return ResponseEnvelope(data=ProductResponse.from_entity(product), message="Product updated")
 
@@ -273,6 +287,160 @@ async def reactivate_warehouse(
     warehouse = await service.reactivate_warehouse(tenant_id, warehouse_id)
     return ResponseEnvelope(
         data=WarehouseResponse.from_entity(warehouse), message="Warehouse reactivated"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Suppliers (SKY-86 / INV-AI-004)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/suppliers", response_model=ListResponse[SupplierResponse])
+async def list_suppliers(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    include_inactive: bool = Query(default=False),
+    _: dict[str, object] = Depends(_require_suppliers_read),
+    tenant_id: str = Depends(get_tenant_context),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ListResponse[SupplierResponse]:
+    """List suppliers (active by default)."""
+    params = PaginationParams.create(page, page_size)
+    suppliers = await service.list_suppliers(
+        tenant_id,
+        include_inactive=include_inactive,
+        offset=params.offset,
+        limit=params.limit,
+    )
+    total = await service.count_suppliers(tenant_id, include_inactive=include_inactive)
+    return ListResponse(
+        data=[SupplierResponse.from_entity(s) for s in suppliers],
+        meta=PaginationMeta.create(total=total, page=params.page, page_size=params.page_size),
+    )
+
+
+@router.post("/suppliers", response_model=ResponseEnvelope[SupplierResponse])
+async def create_supplier(
+    body: SupplierCreate,
+    _: dict[str, object] = Depends(_require_suppliers_write),
+    tenant_id: str = Depends(get_tenant_context),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ResponseEnvelope[SupplierResponse]:
+    """Create a supplier (name must be unique within the tenant)."""
+    supplier = await service.create_supplier(
+        tenant_id,
+        name=body.name,
+        lead_time_days=body.lead_time_days,
+        contact_name=body.contact_name,
+        contact_email=body.contact_email,
+    )
+    return ResponseEnvelope(data=SupplierResponse.from_entity(supplier), message="Supplier created")
+
+
+@router.patch("/suppliers/{supplier_id}", response_model=ResponseEnvelope[SupplierResponse])
+async def update_supplier(
+    supplier_id: uuid.UUID,
+    body: SupplierUpdate,
+    _: dict[str, object] = Depends(_require_suppliers_write),
+    tenant_id: str = Depends(get_tenant_context),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ResponseEnvelope[SupplierResponse]:
+    """Partially update a supplier."""
+    updates = body.model_fields_set
+    supplier = await service.update_supplier(
+        tenant_id,
+        supplier_id,
+        name=body.name if "name" in updates else _UNSET,
+        contact_name=body.contact_name if "contact_name" in updates else _UNSET,
+        contact_email=body.contact_email if "contact_email" in updates else _UNSET,
+        lead_time_days=body.lead_time_days if "lead_time_days" in updates else _UNSET,
+    )
+    return ResponseEnvelope(data=SupplierResponse.from_entity(supplier), message="Supplier updated")
+
+
+@router.delete("/suppliers/{supplier_id}", response_model=ResponseEnvelope[SupplierResponse])
+async def delete_supplier(
+    supplier_id: uuid.UUID,
+    _: dict[str, object] = Depends(_require_suppliers_write),
+    tenant_id: str = Depends(get_tenant_context),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ResponseEnvelope[SupplierResponse]:
+    """Deactivate a supplier (is_active = false).
+
+    Blocked with 409 by the DB while products still reference it (RESTRICT FK);
+    un-archive with POST .../reactivate.
+    """
+    supplier = await service.deactivate_supplier(tenant_id, supplier_id)
+    return ResponseEnvelope(
+        data=SupplierResponse.from_entity(supplier), message="Supplier deactivated"
+    )
+
+
+@router.post(
+    "/suppliers/{supplier_id}/reactivate", response_model=ResponseEnvelope[SupplierResponse]
+)
+async def reactivate_supplier(
+    supplier_id: uuid.UUID,
+    _: dict[str, object] = Depends(_require_suppliers_write),
+    tenant_id: str = Depends(get_tenant_context),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ResponseEnvelope[SupplierResponse]:
+    """Re-activate a supplier (is_active = true)."""
+    supplier = await service.reactivate_supplier(tenant_id, supplier_id)
+    return ResponseEnvelope(
+        data=SupplierResponse.from_entity(supplier), message="Supplier reactivated"
+    )
+
+
+@router.post(
+    "/suppliers/{supplier_id}/performance",
+    response_model=ResponseEnvelope[SupplierPerformanceResponse],
+)
+async def add_supplier_performance(
+    supplier_id: uuid.UUID,
+    body: SupplierPerformanceCreate,
+    _: dict[str, object] = Depends(_require_suppliers_write),
+    tenant_id: str = Depends(get_tenant_context),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ResponseEnvelope[SupplierPerformanceResponse]:
+    """Record one grading-period fact set for a supplier."""
+    performance = await service.add_supplier_performance(
+        tenant_id,
+        supplier_id,
+        period_start=body.period_start,
+        period_end=body.period_end,
+        on_time_delivery_pct=body.on_time_delivery_pct,
+        defect_rate_pct=body.defect_rate_pct,
+        price_stability_index=body.price_stability_index,
+        responsiveness_days=body.responsiveness_days,
+    )
+    return ResponseEnvelope(
+        data=SupplierPerformanceResponse.from_entity(performance),
+        message="Supplier performance recorded",
+    )
+
+
+@router.get(
+    "/suppliers/{supplier_id}/performance",
+    response_model=ListResponse[SupplierPerformanceResponse],
+)
+async def list_supplier_performance(
+    supplier_id: uuid.UUID,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    _: dict[str, object] = Depends(_require_suppliers_read),
+    tenant_id: str = Depends(get_tenant_context),
+    service: InventoryService = Depends(get_inventory_service),
+) -> ListResponse[SupplierPerformanceResponse]:
+    """List a supplier's grading-period facts (newest first)."""
+    params = PaginationParams.create(page, page_size)
+    rows = await service.list_supplier_performance(
+        tenant_id, supplier_id, offset=params.offset, limit=params.limit
+    )
+    total = await service.count_supplier_performance(tenant_id, supplier_id)
+    return ListResponse(
+        data=[SupplierPerformanceResponse.from_entity(p) for p in rows],
+        meta=PaginationMeta.create(total=total, page=params.page, page_size=params.page_size),
     )
 
 

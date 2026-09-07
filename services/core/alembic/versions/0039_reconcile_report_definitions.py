@@ -22,8 +22,8 @@ stale means the stored version is older than the seed's, or the stored SQL
 differs after whitespace normalization. Both paths classify "in sync"
 identically, so re-runs are stable.
 
-Revision ID: 0038
-Revises: 0037
+Revision ID: 0039
+Revises: 0038
 Create Date: 2026-09-07
 """
 
@@ -37,8 +37,8 @@ from alembic import op
 from core.features.reporting.seeds import PHASE_1_REPORT_SEEDS
 from core.features.reporting.validation import require_tenant_filter, validate_read_only_sql
 
-revision = "0038"
-down_revision = "0037"
+revision = "0039"
+down_revision = "0038"
 branch_labels = None
 depends_on = None
 

@@ -23,6 +23,10 @@ WAREHOUSE_REACTIVATED = "inventory.warehouse.reactivated"
 STOCK_ADJUSTED = "inventory.stock.adjusted"
 STOCK_TRANSFERRED = "inventory.stock.transferred"
 STOCK_REORDER_ALERTED = "inventory.stock.reorder_alerted"
+SUPPLIER_CREATED = "inventory.supplier.created"
+SUPPLIER_UPDATED = "inventory.supplier.updated"
+SUPPLIER_DEACTIVATED = "inventory.supplier.deactivated"
+SUPPLIER_PERFORMANCE_ADDED = "inventory.supplier.performance_added"
 
 # ---------------------------------------------------------------------------
 # CRM & Sales (CRM-BE-002 / docs/modules/sales-crm.md §6)
@@ -67,6 +71,10 @@ CATALOG: tuple[str, ...] = (
     STOCK_ADJUSTED,
     STOCK_TRANSFERRED,
     STOCK_REORDER_ALERTED,
+    SUPPLIER_CREATED,
+    SUPPLIER_UPDATED,
+    SUPPLIER_DEACTIVATED,
+    SUPPLIER_PERFORMANCE_ADDED,
     CRM_LEAD_CREATED,
     CRM_LEAD_UPDATED,
     CRM_LEAD_STATUS_CHANGED,
@@ -115,6 +123,10 @@ AUDIT_EVENT_MODULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             STOCK_ADJUSTED,
             STOCK_TRANSFERRED,
             STOCK_REORDER_ALERTED,
+            SUPPLIER_CREATED,
+            SUPPLIER_UPDATED,
+            SUPPLIER_DEACTIVATED,
+            SUPPLIER_PERFORMANCE_ADDED,
         ),
     ),
     (

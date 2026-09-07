@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import uuid
 
+    from ai_agent.domain.supplier_risk import RiskBand
     from ai_agent.features.nl_query.gateway import MovementRow, ProductRef
 
 # Confidence factor weights (spec 3.2).
@@ -47,6 +48,24 @@ _RECENCY_FULL_DAYS = 30
 _CONFIDENCE_FLOOR = Decimal("0.50")
 _CONFIDENCE_CEILING = Decimal("0.95")
 
+# SKY-86 (INV-AI-004) supplier-risk adjustments: a supplier graded by the
+# risk engine stretches the replenishment lead time and safety buffer so the
+# v2 formula orders defensively for unreliable sources. Bands come from
+# ``ai_supplier_risk``; absent a grade (risk_band None) no adjustment applies
+# (low-risk semantics). Fixed, auditable constants - not tuned to data.
+_RISK_LEAD_TIME_MULTIPLIERS: dict[str, Decimal] = {
+    "low": Decimal("1.0"),
+    "medium": Decimal("1.2"),
+    "high": Decimal("1.5"),
+}
+_RISK_SAFETY_BUMPS: dict[str, Decimal] = {
+    "low": Decimal("0.0"),
+    "medium": Decimal("0.10"),
+    "high": Decimal("0.20"),
+}
+_RISK_DEFAULT_MULTIPLIER = Decimal("1.0")
+_RISK_DEFAULT_BUMP = Decimal("0.0")
+
 
 @dataclass(frozen=True, slots=True)
 class SuggestionDraft:
@@ -69,13 +88,16 @@ class DemandProfile:
     *eligible* gates the enhanced formula: only pairs with enough observed
     history (backfilled into ``ai_restock_demand_stats``) graduate from the
     v1 ``reorder_point * 2`` heuristic. Lead time and safety factor come from
-    the tenant's ``ai_restock_settings``; the calculator stays pure.
+    the tenant's ``ai_restock_settings``; *risk_band* comes from the SKY-86
+    supplier-risk engine through the product's supplier (None = ungraded,
+    treated as low risk, no adjustment). The calculator stays pure.
     """
 
     avg_daily_demand: Decimal
     eligible: bool
     lead_time_days: Decimal
     safety_factor: Decimal
+    risk_band: RiskBand | None = None
 
 
 def compute_suggestion(
@@ -103,11 +125,20 @@ def compute_suggestion(
             qty_on_hand=qty_on_hand,
             demand=demand,
         )
+        effective_lead = _effective_lead_time_days(demand).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
         reason = (
             f"Stock ({qty_on_hand}) below reorder point ({product.reorder_point}). "
             f"Avg daily demand: {demand.avg_daily_demand}. "
-            f"Lead time: {demand.lead_time_days} day(s)."
+            f"Lead time: {effective_lead} day(s)."
         )
+        if demand.risk_band is not None and demand.risk_band != "low":
+            reason += (
+                f" Supplier risk {demand.risk_band} applied "
+                f"({_RISK_LEAD_TIME_MULTIPLIERS.get(demand.risk_band, _RISK_DEFAULT_MULTIPLIER)}x "
+                f"lead time, +{_RISK_SAFETY_BUMPS.get(demand.risk_band, _RISK_DEFAULT_BUMP)} safety)."
+            )
     else:
         suggested_qty = product.reorder_point * Decimal(2)
         reason = f"Stock ({qty_on_hand}) below reorder point ({product.reorder_point})."
@@ -149,14 +180,39 @@ def _v2_suggested_qty(
     qty_on_hand: Decimal,
     demand: DemandProfile,
 ) -> Decimal:
-    """``reorder_point + avg_daily_demand * lead_time_days * safety_factor - qty_on_hand``.
+    """``reorder_point + avg_daily_demand * effective_lead * safety - qty_on_hand``.
+
+    Without a risk band this is the plain spec 3.2 formula:
+    ``reorder + avg * lead_time * safety_factor - qty_on_hand``. A graded
+    supplier's band stretches the lead time (x1.0/1.2/1.5) and adds a safety
+    bump (+0.0/0.10/0.20) so unreliable sources order defensively.
 
     Never negative: a pair already at/above the target restock level orders
     nothing. Rounded to 2dp for durable, readable quantities.
     """
-    target = reorder_point + demand.avg_daily_demand * demand.lead_time_days * demand.safety_factor
+    effective_lead = _effective_lead_time_days(demand)
+    effective_safety = _effective_safety_factor(demand)
+    target = reorder_point + demand.avg_daily_demand * effective_lead * effective_safety
     gross = target - qty_on_hand
     return max(Decimal(0), gross.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _effect_multiplier(band: RiskBand | None) -> Decimal:
+    return _RISK_LEAD_TIME_MULTIPLIERS.get(band or "low", _RISK_DEFAULT_MULTIPLIER)
+
+
+def _effect_bump(band: RiskBand | None) -> Decimal:
+    return _RISK_SAFETY_BUMPS.get(band or "low", _RISK_DEFAULT_BUMP)
+
+
+def _effective_lead_time_days(demand: DemandProfile) -> Decimal:
+    """Risk-adjusted lead time: quoted lead * band multiplier (SKY-86)."""
+    return demand.lead_time_days * _effect_multiplier(demand.risk_band)
+
+
+def _effective_safety_factor(demand: DemandProfile) -> Decimal:
+    """Risk-adjusted safety: configured factor + band bump (SKY-86)."""
+    return demand.safety_factor + _effect_bump(demand.risk_band)
 
 
 # ---------------------------------------------------------------------------

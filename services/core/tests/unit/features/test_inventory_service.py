@@ -39,7 +39,7 @@ from core.core.exceptions import (
     StockReservedError,
     TransferRequiresDistinctWarehousesError,
 )
-from core.domain.entities import Product, StockLevel, StockMovement, Warehouse
+from core.domain.entities import Product, StockLevel, StockMovement, Supplier, Warehouse
 from core.domain.value_objects import Money, StockMovementType
 from core.features.inventory.repository import _UNSET
 from core.features.inventory.service import InventoryService
@@ -93,6 +93,7 @@ class FakeRepo:
     def __init__(self) -> None:
         self.products: dict[uuid.UUID, Product] = {}
         self.warehouses: dict[uuid.UUID, Warehouse] = {}
+        self.suppliers: dict[uuid.UUID, Supplier] = {}
         self.movements: list[StockMovement] = []
         self.levels: dict[tuple[uuid.UUID, uuid.UUID], StockLevel] = {}
         self.committed = 0
@@ -103,6 +104,10 @@ class FakeRepo:
         self.committed += 1
 
     # --- products ---
+
+    async def get_supplier(self, supplier_id: uuid.UUID, tenant_id: uuid.UUID) -> Supplier | None:
+        supplier = self.suppliers.get(supplier_id)
+        return supplier if supplier is not None and supplier.tenant_id == tenant_id else None
 
     async def create_product(self, product: Product) -> Product:
         product = Product(
@@ -142,6 +147,7 @@ class FakeRepo:
         cost_price: object = _UNSET,
         sell_price: object = _UNSET,
         reorder_point: object = _UNSET,
+        supplier_id: uuid.UUID | object | None = _UNSET,
     ) -> Product | None:
         product = self.products.get(product_id)
         if product is None or product.tenant_id != tenant_id:
@@ -157,6 +163,7 @@ class FakeRepo:
             sell_price=product.sell_price if sell_price is _UNSET else sell_price,
             reorder_point=(product.reorder_point if reorder_point is _UNSET else reorder_point),
             is_active=product.is_active,
+            supplier_id=(product.supplier_id if supplier_id is _UNSET else supplier_id),
             created_at=product.created_at,
             updated_at=product.updated_at,
         )
@@ -572,6 +579,12 @@ async def _seed_warehouse(repo: FakeRepo, *, name: str = "Main") -> Warehouse:
     return await repo.create_warehouse(Warehouse(tenant_id=TENANT, name=name))
 
 
+async def _seed_supplier(repo: FakeRepo, *, name: str = "Acme") -> Supplier:
+    supplier = Supplier(id=uuid.uuid4(), tenant_id=TENANT, name=name)
+    repo.suppliers[supplier.id] = supplier  # type: ignore[index]
+    return supplier
+
+
 async def _seed_receipt(
     repo: FakeRepo, product_id: uuid.UUID, warehouse_id: uuid.UUID, qty: Decimal
 ) -> None:
@@ -708,6 +721,24 @@ class TestUpdateProduct:
         product = await _seed_product(repo, sku="SKU-1")
         with pytest.raises(ValidationError):
             await service.update_product(TENANT, product.id, sku="  ")
+
+    async def test_sets_and_clears_supplier_link(
+        self, service: InventoryService, repo: FakeRepo
+    ) -> None:
+        supplier = await _seed_supplier(repo)
+        product = await _seed_product(repo, sku="SKU-1")
+        linked = await service.update_product(TENANT, product.id, supplier_id=supplier.id)
+        assert linked.supplier_id == supplier.id
+        cleared = await service.update_product(TENANT, product.id, supplier_id=None)
+        assert cleared.supplier_id is None
+
+    async def test_unknown_supplier_raises_404(
+        self, service: InventoryService, repo: FakeRepo
+    ) -> None:
+        product = await _seed_product(repo, sku="SKU-1")
+        with pytest.raises(NotFoundError):
+            await service.update_product(TENANT, product.id, supplier_id=uuid.uuid4())
+        assert repo.committed == 0  # nothing committed for the failed edit
 
 
 class TestUpdateWarehouse:

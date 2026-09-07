@@ -146,6 +146,20 @@ class TestNarratorForwarding:
         assert seen[0].url.path == "/api/v1/ai/narrator/digest/refresh"
 
 
+class TestSupplierRiskForwarding:
+    def test_list_supplier_risk_forwards(self) -> None:
+        seen: list[httpx.Request] = []
+        client = _app_with_recorder(seen)
+
+        response = client.get(
+            "/api/v1/ai/supplier-risk",
+            headers={"authorization": "Bearer tok"},
+        )
+
+        assert response.status_code == 200
+        assert seen[0].url.path == "/api/v1/ai/supplier-risk"
+
+
 class TestNarratorPermissionGate:
     """The narrator is AND-gated: invoke + every module read (refresh adds the
     dedicated key). Each authorisation is exercised with a stubbed RBAC."""
