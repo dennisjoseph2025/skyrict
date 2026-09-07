@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Receipt } from "lucide-react";
+import Link from "next/link";
+import { Plus, Receipt, ShieldAlert } from "lucide-react";
 
 import { NewRunDialog } from "@/components/dashboard/erp/payroll/run-dialog";
 import { ErpDataTable, ErpDataTableSkeleton, type ErpColumn } from "@/components/dashboard/shared/erp-data-table";
@@ -153,6 +154,15 @@ export function RunsClient({ initialStatus }: { initialStatus?: PayrollRunStatus
             New run
           </Button>
         ) : null}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link
+          href="/dashboard/erp/payroll/void-reasons"
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ShieldAlert aria-hidden="true" className="size-4" />
+          Void reasons
+        </Link>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
