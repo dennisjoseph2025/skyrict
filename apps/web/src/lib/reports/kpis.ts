@@ -88,22 +88,40 @@ function sumColumnNumber(result: ReportRunResult, column: string): number {
   return total;
 }
 
+export class KpiSourceColumnError extends Error {
+  constructor(column: string, slug: string) {
+    super(
+      `Report ${slug} result is missing the "${column}" column required for this KPI.`,
+    );
+    this.name = "KpiSourceColumnError";
+  }
+}
+
+function requireColumn(result: ReportRunResult, id: KpiId, column: string): void {
+  if (!result.columns.includes(column)) {
+    throw new KpiSourceColumnError(column, id);
+  }
+}
+
 export function deriveKpiValue(
   id: KpiId,
   result: ReportRunResult,
 ): { value: string; hint: string } {
   switch (id) {
     case "cash_received":
+      requireColumn(result, id, "total_received");
       return {
         value: formatMoney(sumColumnNumber(result, "total_received")),
         hint: "This month to date",
       };
     case "ar_aging":
+      requireColumn(result, id, "outstanding");
       return {
         value: formatMoney(sumColumnNumber(result, "outstanding")),
         hint: "Open invoices as of today",
       };
     case "pipeline_value":
+      requireColumn(result, id, "pipeline_value");
       return {
         value: formatMoney(sumColumnNumber(result, "pipeline_value")),
         hint: "Open opportunities",
@@ -114,6 +132,7 @@ export function deriveKpiValue(
         hint: "Items at or below reorder point",
       };
     case "headcount":
+      requireColumn(result, id, "headcount");
       return {
         value: formatNumber(sumColumnNumber(result, "headcount")),
         hint: "Current (non-terminated) employees",

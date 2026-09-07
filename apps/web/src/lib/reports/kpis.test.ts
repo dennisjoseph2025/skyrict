@@ -107,6 +107,39 @@ describe("deriveKpiValue - reconciliation with source report runs", () => {
     ]);
     expect(deriveKpiValue("pipeline_value", result).value).toBe("$0.00");
   });
+
+  it("throws KpiSourceColumnError when a KPI's source column is missing (regression: stale ar_aging definition shows ₹0)", () => {
+    // A stale ar_aging definition returns only the 4 legacy columns - no
+    // `outstanding`. The card must surface an error instead of silently
+    // summing a missing column to ₹0.
+    const stale = run(
+      ["invoice_number", "invoice_date", "due_date", "total"],
+      [
+        {
+          invoice_number: "INV-0002",
+          invoice_date: "2026-08-07",
+          due_date: "2026-09-21",
+          total: "18500.00",
+        },
+      ],
+    );
+    expect(() => deriveKpiValue("ar_aging", stale)).toThrow("outstanding");
+  });
+
+  it("throws KpiSourceColumnError for cash_received without total_received", () => {
+    const stale = run(["payment_date"], []);
+    expect(() => deriveKpiValue("cash_received", stale)).toThrow("total_received");
+  });
+
+  it("throws KpiSourceColumnError for pipeline_value without pipeline_value", () => {
+    const stale = run(["stage"], []);
+    expect(() => deriveKpiValue("pipeline_value", stale)).toThrow("pipeline_value");
+  });
+
+  it("throws KpiSourceColumnError for headcount without headcount", () => {
+    const stale = run(["department_name"], []);
+    expect(() => deriveKpiValue("headcount", stale)).toThrow("headcount");
+  });
 });
 
 describe("DASHBOARD_KPI_DEFS", () => {
