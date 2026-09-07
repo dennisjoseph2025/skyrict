@@ -1,11 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ClipboardCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, ClipboardCheck, Gauge, Search, TrendingDown, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/dashboard/shared/page-header";
 import { ErpDataTable, ErpDataTableSkeleton, type ErpColumn } from "@/components/dashboard/shared/erp-data-table";
+import { FilterChipGroup } from "@/components/dashboard/shared/filter-chip-group";
+import { StatCard } from "@/components/dashboard/shared/stat-card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { TruncatedTooltip } from "@/components/ui/truncated-tooltip";
 import {
   getQualityOrgKpi,
@@ -26,6 +30,24 @@ const GRADE_STYLES: Record<QualityGrade, string> = {
   C: "bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-400",
   D: "bg-orange-500/15 text-orange-700 ring-1 ring-orange-500/30 dark:text-orange-400",
   F: "bg-destructive/10 text-destructive ring-1 ring-destructive/30",
+};
+
+const GRADE_BAR: Record<QualityGrade, string> = {
+  A: "bg-emerald-500",
+  B: "bg-sky-500",
+  C: "bg-amber-500",
+  D: "bg-orange-500",
+  F: "bg-destructive",
+};
+
+const GRADE_ORDER: QualityGrade[] = ["A", "B", "C", "D", "F"];
+
+const GRADE_HINT: Record<QualityGrade, string> = {
+  A: "Complete",
+  B: "Minor gaps",
+  C: "Some gaps",
+  D: "Needs attention",
+  F: "Critical gaps",
 };
 
 function GradeBadge({ grade }: { grade: QualityGrade }) {
@@ -58,6 +80,15 @@ function percent(score: number, max: number): string {
   return `${Math.round((score / max) * 100)}%`;
 }
 
+function initials(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+}
+
 type PageStatus =
   | { state: "loading" }
   | { state: "error"; message: string }
@@ -72,8 +103,11 @@ type PageStatus =
     };
 
 export function DataQualityClient() {
+  const router = useRouter();
   const [status, setStatus] = useState<PageStatus>({ state: "loading" });
   const [page, setPage] = useState(1);
+  const [query, setQuery] = useState("");
+  const [gradeFilter, setGradeFilter] = useState<"all" | QualityGrade>("all");
 
   const load = useCallback(async () => {
     setStatus({ state: "loading" });
@@ -123,19 +157,63 @@ export function DataQualityClient() {
     void load();
   }, [load]);
 
+  const gradeOptions = useMemo<{ value: string; label: string }[]>(
+    () => [
+      { value: "all", label: "All grades" },
+      ...GRADE_ORDER.map((grade) => ({
+        value: grade,
+        label: `${grade}${kpiGradeCount(status, grade) > 0 ? ` · ${kpiGradeCount(status, grade)}` : ""}`,
+      })),
+    ],
+    [status],
+  );
+
+  function kpiGradeCount(current: PageStatus, grade: QualityGrade): number {
+    return current.state === "ready" && current.kpi
+      ? (current.kpi.gradeDistribution[grade] ?? 0)
+      : 0;
+  }
+
+  const filtered = useMemo(() => {
+    if (status.state !== "ready") return [];
+    const needle = query.trim().toLowerCase();
+    return status.scores.filter((row) => {
+      if (gradeFilter !== "all" && row.grade !== gradeFilter) return false;
+      if (!needle) return true;
+      const haystack = [
+        row.name ?? "",
+        row.employeeNumber ?? "",
+        row.departmentName ?? "",
+        ...row.issues.mandatory,
+        ...row.issues.contact,
+        ...row.issues.document,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [status, query, gradeFilter]);
+
   const columns: ErpColumn<EmployeeQualityScore>[] = [
     {
-      key: "name",
+      key: "employeeId",
       label: "Employee",
       render: (row) => (
-        <span className="font-medium text-foreground">
-          {row.name ?? row.employeeId}
-          {row.employeeNumber ? (
-            <span className="ml-2 font-normal tabular-nums text-muted-foreground">
-              {row.employeeNumber}
+        <div className="flex items-center gap-2.5">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary-foreground">
+            {row.name ? initials(row.name) : "?"}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate font-medium text-foreground">
+              {row.name ?? row.employeeId}
             </span>
-          ) : null}
-        </span>
+            {row.employeeNumber ? (
+              <span className="tabular-nums text-xs text-muted-foreground">
+                {row.employeeNumber}
+              </span>
+            ) : null}
+          </span>
+        </div>
       ),
     },
     {
@@ -185,9 +263,31 @@ export function DataQualityClient() {
     {
       key: "issues",
       label: "Issues",
-      render: (row) => (
-        <TruncatedTooltip text={issuesSummary(row.issues)} className="text-muted-foreground" />
-      ),
+      render: (row) => {
+        const all = [...row.issues.mandatory, ...row.issues.contact, ...row.issues.document];
+        if (all.length === 0) return <span className="text-muted-foreground">None</span>;
+        const shown = all.slice(0, 2);
+        return (
+          <span className="flex flex-wrap items-center gap-1">
+            {shown.map((issue) => (
+              <span
+                key={issue}
+                className="inline-flex max-w-40 truncate rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              >
+                {humanizeIssue(issue)}
+              </span>
+            ))}
+            {all.length > shown.length ? (
+              <span
+                title={issuesSummary(row.issues)}
+                className="inline-flex rounded-full border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground"
+              >
+                +{all.length - shown.length}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
   ];
 
@@ -229,7 +329,18 @@ export function DataQualityClient() {
   }
 
   const { kpi, scores, totalPages } = status;
-  const gradeOrder: QualityGrade[] = ["A", "B", "C", "D", "F"];
+  const needsAttention = kpi
+    ? (kpi.gradeDistribution["D"] ?? 0) + (kpi.gradeDistribution["F"] ?? 0)
+    : 0;
+  const lowestGrade =
+    kpi && kpi.totalScored > 0
+      ? ([...GRADE_ORDER].reverse().find((grade) => (kpi.gradeDistribution[grade] ?? 0) > 0) ??
+        "-")
+      : "-";
+
+  const segmentTotal = kpi
+    ? GRADE_ORDER.reduce((sum, grade) => sum + (kpi.gradeDistribution[grade] ?? 0), 0)
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -242,35 +353,90 @@ export function DataQualityClient() {
       {kpi ? (
         <section aria-label="Data-quality summary" className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs font-medium text-muted-foreground">Scored employees</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums">{kpi.totalScored}</p>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs font-medium text-muted-foreground">Average score</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums">
-                {kpi.totalScored > 0 ? percent(kpi.averageScore, 1) : "-"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs font-medium text-muted-foreground">Lowest grade present</p>
-              <p className="mt-2 text-2xl font-semibold">
-                {[...gradeOrder].reverse().find((grade) => (kpi.gradeDistribution[grade] ?? 0) > 0) ??
-                  "-"}
-              </p>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs font-medium text-muted-foreground">Needs attention</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums">
-                {(kpi.gradeDistribution["D"] ?? 0) + (kpi.gradeDistribution["F"] ?? 0)}{" "}
-                <span className="text-xs font-normal text-muted-foreground">
-                  D or F grades
-                </span>
-              </p>
-            </div>
+            <StatCard
+              icon={Users}
+              label="Scored employees"
+              value={String(kpi.totalScored)}
+              hint="Records included in scoring"
+            />
+            <StatCard
+              icon={Gauge}
+              label="Average score"
+              value={kpi.totalScored > 0 ? percent(kpi.averageScore, 1) : "-"}
+              hint="Across identity, contact, documents"
+            />
+            <StatCard
+              icon={TrendingDown}
+              label="Lowest grade present"
+              value={String(lowestGrade)}
+              hint="Worst record in the org"
+              tone="warning"
+            />
+            <StatCard
+              icon={AlertTriangle}
+              label="Needs attention"
+              value={String(needsAttention)}
+              hint="D or F grades"
+              tone={needsAttention > 0 ? "destructive" : "success"}
+            />
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4">
+          {segmentTotal > 0 ? (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-display text-sm font-semibold tracking-tight text-foreground">
+                  Grades across the org
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Tap a segment to filter the table below
+                </p>
+              </div>
+              <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-muted" role="img" aria-label="Grade distribution">
+                {GRADE_ORDER.map((grade) => {
+                  const count = kpi.gradeDistribution[grade] ?? 0;
+                  if (count === 0) return null;
+                  return (
+                    <button
+                      key={grade}
+                      type="button"
+                      onClick={() => setGradeFilter(gradeFilter === grade ? "all" : grade)}
+                      aria-label={`Filter to grade ${grade}`}
+                      className={cn(
+                        GRADE_BAR[grade],
+                        "h-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        gradeFilter !== "all" && gradeFilter !== grade && "opacity-30",
+                      )}
+                      style={{ width: `${(count / segmentTotal) * 100}%` }}
+                    />
+                  );
+                })}
+              </div>
+              <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+                {GRADE_ORDER.map((grade) => {
+                  const count = kpi.gradeDistribution[grade] ?? 0;
+                  const active = gradeFilter === grade;
+                  return (
+                    <li key={grade}>
+                      <button
+                        type="button"
+                        onClick={() => setGradeFilter(active ? "all" : grade)}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-full px-1.5 py-0.5 text-xs transition-colors hover:bg-muted",
+                          active ? "font-semibold text-foreground" : "text-muted-foreground",
+                        )}
+                      >
+                        <span className={cn("size-2 rounded-full", GRADE_BAR[grade])} aria-hidden="true" />
+                        {grade} · {count}
+                        <span className="hidden sm:inline"> — {GRADE_HINT[grade]}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-border bg-card p-5">
             <p className="text-sm text-muted-foreground">{kpi.narrative}</p>
             {kpi.departmentAverages.length > 0 ? (
               <div className="mt-3 flex flex-wrap gap-2">
@@ -307,6 +473,28 @@ export function DataQualityClient() {
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:w-64">
+            <Search
+              aria-hidden="true"
+              className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="pl-8"
+              placeholder="Search name, dept, issue…"
+              aria-label="Search employees"
+            />
+          </div>
+          <FilterChipGroup
+            options={gradeOptions}
+            value={gradeFilter}
+            onChange={(value) => setGradeFilter(value as "all" | QualityGrade)}
+            ariaLabel="Filter by grade"
+          />
+        </div>
+
         {status.individualBlocked ? (
           <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             {status.individualBlocked}
@@ -318,17 +506,22 @@ export function DataQualityClient() {
           </p>
         ) : null}
 
-        {status.individualBlocked || status.listError ? null : (
+        {status.individualBlocked || status.listError ? null : filtered.length === 0 ? (
+          <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            No employees match this filter on the current page.
+          </p>
+        ) : (
           <ErpDataTable
             columns={columns}
-            rows={scores}
+            rows={filtered}
             meta={{
-              total: scores.length,
+              total: filtered.length,
               page,
               page_size: PAGE_SIZE,
               total_pages: totalPages,
             }}
             onPageChange={setPage}
+            onRowClick={(row) => router.push(`/dashboard/erp/hr/employees/${row.employeeId}`)}
           />
         )}
       </section>

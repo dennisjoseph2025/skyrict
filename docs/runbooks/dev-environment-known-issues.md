@@ -34,6 +34,15 @@ Notes:
 - **Before using `bridgeon-solutions` for anything real**, re-enable MFA and
   rotate to a non-shared password on the accounts above.
 
+### Update (2026-09-07)
+
+MFA is now **enrolled** on `abhikrishna616@gmail.com` (`mfa_enabled=true`)
+with a known dev TOTP secret, and the password was rotated to
+`Abhikrishna61@` during the HR-UI-003 gate run (screenshot pass). Prior
+state above is stale on the password. Verify via the DB before assuming;
+rotate both again before any real use of the tenant. The dev TOTP secret is
+recorded in the gate tooling (temp scripts), not in the repo.
+
 ---
 
 ## Entry B — identity migration stamp conflict (teammate's unpushed branch)

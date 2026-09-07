@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Calculator,
+  Check,
   CircleX,
   LoaderCircle,
   Receipt,
@@ -43,6 +44,7 @@ import {
   voidPayrollRun,
   type PayrollEntry,
   type PayrollRun,
+  type PayrollRunStatus,
   type Payslip,
   type RunPrediction,
   type SkippedEmployee,
@@ -153,6 +155,82 @@ function StatusPip({ status }: { status: string }) {
             : "bg-amber-500",
       )}
     />
+  );
+}
+
+const RUN_STEPS = ["draft", "computed", "approved", "paid"] as const;
+
+const RUN_STEP_LABEL: Record<(typeof RUN_STEPS)[number], string> = {
+  draft: "Draft",
+  computed: "Computed",
+  approved: "Approved",
+  paid: "Paid",
+};
+
+/** The pay-period lifecycle this run travels: draft → computed → approved → paid. */
+function RunLifecycle({ status }: { status: PayrollRunStatus }) {
+  if (status === "void") {
+    return (
+      <div className="mt-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+        <CircleX aria-hidden="true" className="size-4 shrink-0 text-destructive" />
+        <p className="text-xs font-medium text-destructive">
+          Voided — the run was cancelled before reaching payment.
+        </p>
+      </div>
+    );
+  }
+  const currentIndex = RUN_STEPS.indexOf(status as (typeof RUN_STEPS)[number]);
+  return (
+    <div className="mt-4" aria-label="Run lifecycle">
+      <div className="flex items-center">
+        {RUN_STEPS.map((step, index) => {
+          const reached = index <= currentIndex;
+          const isCurrent = index === currentIndex;
+          const last = index === RUN_STEPS.length - 1;
+          return (
+            <Fragment key={step}>
+              <span className={cn("flex items-center", !last && "flex-1")}>
+                <span
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                    reached
+                      ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                      : "bg-muted text-muted-foreground",
+                    isCurrent && "ring-2 ring-emerald-500",
+                  )}
+                >
+                  {reached ? (
+                    <Check aria-hidden="true" className="size-3.5" />
+                  ) : (
+                    index + 1
+                  )}
+                </span>
+                {!last ? (
+                  <span
+                    aria-hidden="true"
+                    className={cn("h-px flex-1", index < currentIndex ? "bg-emerald-500/60" : "bg-border")}
+                  />
+                ) : null}
+              </span>
+            </Fragment>
+          );
+        })}
+      </div>
+      <div className="mt-1.5 flex">
+        {RUN_STEPS.map((step, index) => (
+          <span
+            key={step}
+            className={cn(
+              "text-[11px] font-medium",
+              index === RUN_STEPS.length - 1 && "flex-none",
+              index === currentIndex ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {RUN_STEP_LABEL[step]}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -502,18 +580,19 @@ export function RunDetailClient({ runId }: { runId: string }) {
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-card p-5">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">
-              {run.runCode}
-            </h1>
-            <StatusBadge status={run.status} />
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">
+                {run.runCode}
+              </h1>
+              <StatusBadge status={run.status} />
+            </div>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {formatDate(run.periodStart)} → {formatDate(run.periodEnd)}
+            </p>
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {formatDate(run.periodStart)} → {formatDate(run.periodEnd)}
-          </p>
-        </div>
         <div className="flex flex-wrap items-center gap-2">
           {canCompute ? (
             <Button
@@ -577,6 +656,8 @@ export function RunDetailClient({ runId }: { runId: string }) {
             </Button>
           ) : null}
         </div>
+        </div>
+        <RunLifecycle status={run.status} />
       </div>
 
       {notice ? (
@@ -646,6 +727,15 @@ export function RunDetailClient({ runId }: { runId: string }) {
           <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-foreground">
             <Calculator aria-hidden="true" className="size-4 text-primary" />
             Run prediction
+            {driftedDepartments.length > 0 ? (
+              <Badge
+                variant="secondary"
+                className="bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              >
+                <AlertTriangle aria-hidden="true" className="mr-1 size-3" />
+                {driftedDepartments.length} dept(s) drifted
+              </Badge>
+            ) : null}
             <span className="ml-auto text-xs font-normal text-muted-foreground">
               Read-only estimate vs previous period — nothing persisted
             </span>

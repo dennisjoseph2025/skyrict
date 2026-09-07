@@ -39,6 +39,10 @@ type PageStatus =
 
 type Notice = { tone: "success" | "error"; text: string };
 
+function initials(firstName: string, lastName: string): string {
+  return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+}
+
 /** "All statuses" on the active view excludes terminated employees -
  * they live in their own read-only list under the Terminated tab. */
 const ACTIVE_STATUS_OPTIONS: { value: "all" | Exclude<EmployeeStatus, "terminated">; label: string }[] = [
@@ -278,11 +282,16 @@ export function EmployeesClient({ initialView = "active" }: { initialView?: Empl
             key: "lastName",
             label: "Employee",
             render: (employee) => (
-              <div>
-                <p className="font-medium text-foreground">
-                  {employee.firstName} {employee.lastName}
-                </p>
-                <p className="text-xs text-muted-foreground">{employee.employeeNumber}</p>
+              <div className="flex items-center gap-2.5">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary-foreground">
+                  {initials(employee.firstName, employee.lastName)}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-foreground">
+                    {employee.firstName} {employee.lastName}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{employee.employeeNumber}</span>
+                </span>
               </div>
             ),
           },
@@ -345,11 +354,16 @@ export function EmployeesClient({ initialView = "active" }: { initialView?: Empl
             key: "lastName",
             label: "Employee",
             render: (employee) => (
-              <div>
-                <p className="font-medium text-foreground">
-                  {employee.firstName} {employee.lastName}
-                </p>
-                <p className="text-xs text-muted-foreground">{employee.employeeNumber}</p>
+              <div className="flex items-center gap-2.5">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary-foreground">
+                  {initials(employee.firstName, employee.lastName)}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-foreground">
+                    {employee.firstName} {employee.lastName}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{employee.employeeNumber}</span>
+                </span>
               </div>
             ),
           },

@@ -4,15 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BarChart3, CalendarClock, ShieldAlert } from "lucide-react";
 
 import { PageHeader } from "@/components/dashboard/shared/page-header";
+import { FilterChipGroup } from "@/components/dashboard/shared/filter-chip-group";
+import { SearchableSelect, type SearchableSelectOption } from "@/components/dashboard/shared/searchable-select";
+import { StatCard } from "@/components/dashboard/shared/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   getAnomalySummary,
   getEmployeeAnomalies,
@@ -36,6 +32,14 @@ const SEVERITY_STYLES: Record<string, string> = {
   medium: "bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-400",
   low: "bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/30 dark:text-sky-400",
 };
+
+const SEVERITY_BAR: Record<string, string> = {
+  high: "bg-destructive",
+  medium: "bg-amber-500",
+  low: "bg-sky-500",
+};
+
+const SEVERITY_ORDER = ["high", "medium", "low"] as const;
 
 const SEVERITY_LABEL: Record<string, string> = {
   high: "High",
@@ -80,6 +84,33 @@ function L2Badge() {
   );
 }
 
+function CountBar({
+  label,
+  count,
+  max,
+  barClass,
+}: {
+  label: string;
+  count: number;
+  max: number;
+  barClass: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="w-24 shrink-0 truncate text-muted-foreground">{label}</span>
+      <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <span
+          className={cn("absolute inset-y-0 left-0 rounded-full", barClass)}
+          style={{ width: `${max > 0 ? (count / max) * 100 : 0}%` }}
+        />
+      </span>
+      <span className="w-6 shrink-0 text-right font-medium tabular-nums text-foreground">
+        {count}
+      </span>
+    </div>
+  );
+}
+
 function SummaryCards({
   total,
   byType,
@@ -94,6 +125,10 @@ function SummaryCards({
   narrative: string;
 }) {
   const typeEntries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+  const severityEntries = SEVERITY_ORDER.map((severity) => [severity, bySeverity[severity] ?? 0] as const);
+  const typeMax = Math.max(1, ...typeEntries.map(([, count]) => count));
+  const severityMax = Math.max(1, ...severityEntries.map(([, count]) => count));
+
   return (
     <section aria-label="Alert summary" className="space-y-4">
       <div className="flex items-center gap-2">
@@ -101,34 +136,41 @@ function SummaryCards({
         <p className="text-xs text-muted-foreground">Aggregated counts only — no per-person data.</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">Total</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{total}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">By type</p>
-          <div className="mt-2 space-y-1.5">
-            {typeEntries.length > 0 ? (
-              typeEntries.map(([type, count]) => (
-                <div key={type} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{humanize(type)}</span>
-                  <span className="font-medium tabular-nums text-foreground">{count}</span>
-                </div>
+        <StatCard
+          icon={ShieldAlert}
+          label="Total alerts"
+          value={String(total)}
+          hint={typeEntries.length > 0 ? `${typeEntries[0][0]} is the most common` : ""}
+          tone={total > 0 ? "warning" : "success"}
+        />
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            By severity
+          </p>
+          <div className="mt-3 space-y-2">
+            {severityEntries.length > 0 ? (
+              severityEntries.map(([severity, count]) => (
+                <CountBar
+                  key={severity}
+                  label={SEVERITY_LABEL[severity] ?? humanize(severity)}
+                  count={count}
+                  max={severityMax}
+                  barClass={SEVERITY_BAR[severity] ?? "bg-muted"}
+                />
               ))
             ) : (
               <p className="text-sm text-muted-foreground">None</p>
             )}
           </div>
         </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">By severity</p>
-          <div className="mt-2 space-y-1.5">
-            {Object.entries(bySeverity).length > 0 ? (
-              Object.entries(bySeverity).map(([severity, count]) => (
-                <div key={severity} className="flex items-center justify-between gap-2 text-sm">
-                  <SeverityBadge severity={severity} />
-                  <span className="font-medium tabular-nums text-foreground">{count}</span>
-                </div>
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            By type
+          </p>
+          <div className="mt-3 space-y-2">
+            {typeEntries.length > 0 ? (
+              typeEntries.map(([type, count]) => (
+                <CountBar key={type} label={humanize(type)} count={count} max={typeMax} barClass="bg-primary/70" />
               ))
             ) : (
               <p className="text-sm text-muted-foreground">None</p>
@@ -137,7 +179,7 @@ function SummaryCards({
         </div>
       </div>
       {narrative ? (
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-5">
           <p className="text-sm text-muted-foreground">{narrative}</p>
           {generatedAt ? (
             <p className="mt-2 text-xs text-muted-foreground">As of {formatDateTime(generatedAt)}</p>
@@ -155,12 +197,15 @@ type DetailState =
   | { state: "error"; message: string }
   | { state: "ready"; rows: HrUtilizationAlert[] | HrLeaveAnomaly[] };
 
+type SeverityFilter = "all" | "high" | "medium" | "low";
+
 export function AiAlertsClient() {
   const [tab, setTab] = useState<Tab>("utilization");
   const [summary, setSummary] = useState<{ util: HrUtilizationOrg | null; anomaly: HrAnomalyOrg | null } | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedId, setSelectedId] = useState("");
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [detail, setDetail] = useState<Record<Tab, DetailState>>({
     utilization: { state: "idle" },
     anomaly: { state: "idle" },
@@ -248,8 +293,41 @@ export function AiAlertsClient() {
   );
 
   const currentSummary = tab === "utilization" ? summary?.util : summary?.anomaly;
+
+  const employeeOptions = useMemo<SearchableSelectOption[]>(
+    () =>
+      employees.map((employee) => ({
+        value: employee.id,
+        label: `${employee.firstName} ${employee.lastName}`,
+        keywords: employee.employeeNumber ?? undefined,
+      })),
+    [employees],
+  );
+
+  const severityOptions = useMemo<{ value: string; label: string }[]>(
+    () => [
+      { value: "all", label: "All" },
+      { value: "high", label: "High" },
+      { value: "medium", label: "Medium" },
+      { value: "low", label: "Low" },
+    ],
+    [],
+  );
+
   const currentDetail = detail[tab];
-  const maxEmployees = useMemo(() => employees.length, [employees]);
+  const visibleRows = useMemo(() => {
+    if (currentDetail.state !== "ready") return [];
+    const rows = currentDetail.rows;
+    const severityRank = (severity: string) => {
+      const index = SEVERITY_ORDER.indexOf(severity as (typeof SEVERITY_ORDER)[number]);
+      return index === -1 ? SEVERITY_ORDER.length : index;
+    };
+    const filtered =
+      severityFilter === "all"
+        ? rows
+        : rows.filter((row) => row.severity === severityFilter);
+    return [...filtered].sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  }, [currentDetail, severityFilter]);
 
   return (
     <div className="space-y-6">
@@ -310,28 +388,20 @@ export function AiAlertsClient() {
           />
 
           <section aria-label="Employee alerts" className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <h2 className="font-display text-sm font-semibold tracking-tight text-foreground">
                   Per-employee alerts
                 </h2>
                 <L2Badge />
               </div>
-              <Select value={selectedId || "none"} onValueChange={handleSelect}>
-                <SelectTrigger className="w-[280px]" aria-label="Employee">
-                  <SelectValue placeholder={`Select an employee (${maxEmployees} available)`} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none" disabled>
-                    Select an employee
-                  </SelectItem>
-                  {employees.map((employee) => (
-                    <SelectItem key={employee.id} value={employee.id}>
-                      {employee.firstName} {employee.lastName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                className="w-full sm:w-64"
+                options={employeeOptions}
+                value={selectedId || null}
+                onValueChange={handleSelect}
+                placeholder={`Select an employee (${employees.length} available)`}
+              />
             </div>
 
             {currentDetail.state === "blocked" ? (
@@ -346,73 +416,83 @@ export function AiAlertsClient() {
             ) : null}
 
             {selectedId && currentDetail.state !== "idle" ? (
-              <div className="overflow-hidden rounded-xl border border-border bg-card">
-                {currentDetail.state === "loading" ? (
-                  <div className="space-y-2 p-4">
-                    <div className="h-14 animate-pulse rounded-lg bg-muted" />
-                    <div className="h-14 animate-pulse rounded-lg bg-muted" />
-                  </div>
-                ) : null}
-                {currentDetail.state === "ready" && currentDetail.rows.length === 0 ? (
-                  <p className="p-4 text-sm text-muted-foreground">
-                    No open {tab === "utilization" ? "utilization alerts" : "leave anomalies"} for this employee.
-                  </p>
-                ) : null}
+              <>
                 {currentDetail.state === "ready" && currentDetail.rows.length > 0 ? (
-                  <ul className="divide-y divide-border">
-                    {currentDetail.rows.map((row, index) => {
-                      const isAlert = tab === "utilization";
-                      const alert = row as HrUtilizationAlert;
-                      const anomaly = row as HrLeaveAnomaly;
-                      return (
-                        <li key={`${tab}-${index}`} className="flex items-start justify-between gap-4 p-4">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-medium text-foreground">
-                                {isAlert ? humanize(alert.alertType) : anomaly.title}
-                              </span>
-                              <SeverityBadge severity={isAlert ? alert.severity : anomaly.severity} />
-                              {isAlert && alert.leaveType ? (
-                                <span className="text-xs text-muted-foreground">
-                                  {humanize(alert.leaveType)}
+                  <FilterChipGroup
+                    options={severityOptions}
+                    value={severityFilter}
+                    onChange={(value) => setSeverityFilter(value as SeverityFilter)}
+                    ariaLabel="Filter by severity"
+                  />
+                ) : null}
+                <div className="overflow-hidden rounded-xl border border-border bg-card">
+                  {currentDetail.state === "loading" ? (
+                    <div className="space-y-2 p-4">
+                      <div className="h-14 animate-pulse rounded-lg bg-muted" />
+                      <div className="h-14 animate-pulse rounded-lg bg-muted" />
+                    </div>
+                  ) : null}
+                  {currentDetail.state === "ready" && visibleRows.length === 0 ? (
+                    <p className="p-4 text-sm text-muted-foreground">
+                      {currentDetail.rows.length === 0
+                        ? `No open ${tab === "utilization" ? "utilization alerts" : "leave anomalies"} for this employee.`
+                        : "No alerts match the current severity filter."}
+                    </p>
+                  ) : null}
+                  {visibleRows.length > 0 ? (
+                    <ul className="divide-y divide-border">
+                      {visibleRows.map((row, index) => {
+                        const isAlert = tab === "utilization";
+                        const alert = row as HrUtilizationAlert;
+                        const anomaly = row as HrLeaveAnomaly;
+                        return (
+                          <li key={`${tab}-${index}`} className="flex items-start justify-between gap-4 p-4">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-medium text-foreground">
+                                  {isAlert ? humanize(alert.alertType) : anomaly.title}
                                 </span>
+                                <SeverityBadge severity={isAlert ? alert.severity : anomaly.severity} />
+                                {isAlert && alert.leaveType ? (
+                                  <span className="text-xs text-muted-foreground">
+                                    {humanize(alert.leaveType)}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {isAlert
+                                  ? `${alert.balanceDays} day(s) balance` +
+                                    (alert.projectedForfeitureDays != null
+                                      ? `, ${alert.projectedForfeitureDays} projected to forfeit`
+                                      : "") +
+                                    (alert.daysRemainingInYear != null
+                                      ? `, ${alert.daysRemainingInYear} day(s) left in year`
+                                      : "")
+                                  : anomaly.description}
+                              </p>
+                              {!isAlert && anomaly.teamSize > 0 ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Team of {anomaly.teamSize}
+                                </p>
                               ) : null}
                             </div>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {isAlert
-                                ? `${alert.balanceDays} day(s) balance` +
-                                  (alert.projectedForfeitureDays != null
-                                    ? `, ${alert.projectedForfeitureDays} projected to forfeit`
-                                    : "") +
-                                  (alert.daysRemainingInYear != null
-                                    ? `, ${alert.daysRemainingInYear} day(s) left in year`
-                                    : "")
-                                : anomaly.description}
-                            </p>
-                            {!isAlert && anomaly.teamSize > 0 ? (
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Team of {anomaly.teamSize}
-                              </p>
-                            ) : null}
-                          </div>
-                          <div className="shrink-0 text-right text-xs text-muted-foreground">
-                            <p>{row.name}</p>
-                            <p>{row.departmentName ?? "Unassigned"}</p>
-                            <p>{formatDateTime(row.createdAt)}</p>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
-              </div>
-            ) : (
-              currentDetail.state === "idle" && (
-                <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                  Pick an employee to view their per-person alerts.
-                </p>
-              )
-            )}
+                            <div className="shrink-0 text-right text-xs text-muted-foreground">
+                              <p>{row.name}</p>
+                              <p>{row.departmentName ?? "Unassigned"}</p>
+                              <p>{formatDateTime(row.createdAt)}</p>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                </div>
+              </>
+            ) : currentDetail.state === "idle" ? (
+              <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                Pick an employee to see which risks or anomalies apply to them individually.
+              </p>
+            ) : null}
           </section>
         </>
       ) : (
