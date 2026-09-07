@@ -14,6 +14,8 @@
  * rotation window.
  */
 
+import { readFile } from "node:fs/promises";
+
 import {
   expect,
   test as base,
@@ -53,7 +55,9 @@ async function waitForResult(page: Page) {
     .waitFor({ state: "visible", timeout: 20_000 });
 }
 
-test("reports workspace smoke: auth and page load", async ({ workspacePage: page }) => {
+test("reports workspace smoke: auth, live catalog, and report run", async ({
+  workspacePage: page,
+}) => {
   // ── workspace listing ────────────────────────────────────────────────
   await test.step("page loads authenticated", async () => {
     await page.goto("/dashboard/erp/reports");
@@ -71,5 +75,59 @@ test("reports workspace smoke: auth and page load", async ({ workspacePage: page
 
     // KPI section is rendered (even if metrics show unavailable).
     await expect(page.getByRole("region", { name: "Report KPIs" })).toBeVisible();
+  });
+
+  // ── live catalog ─────────────────────────────────────────────────────
+  await test.step("live report catalog loads from Core (no mock fallback)", async () => {
+    // The catalog is served from the seeded erp_report_definitions table, so
+    // the sample-data banner must NOT be shown and a known report must appear.
+    await expect(
+      page.getByRole("link", { name: /Pipeline value by stage/ }),
+    ).toBeVisible({ timeout: 20_000 });
+
+    // The mock-fallback banner ("Live report data is currently unavailable")
+    // must be absent now that the Core data layer is seeded.
+    await expect(
+      page.getByText(/Live report data is currently unavailable/),
+    ).toHaveCount(0);
+  });
+
+  // ── parameter-less report run ─────────────────────────────────────────
+  await test.step("parameter-less report auto-runs and renders results", async () => {
+    await page
+      .getByRole("link", { name: /Pipeline value by stage/ })
+      .first()
+      .click();
+
+    // Report detail heading (the client-side router has already landed on the
+    // detail route at this point).
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Pipeline value by stage" }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // Pipeline value by stage only declares tenant_id (a server param), which
+    // is filtered out of the form, so it auto-runs on first load. Await a
+    // rendered results table (with rows) or the "No rows" empty state.
+    await waitForResult(page);
+  });
+
+  // ── CSV export ───────────────────────────────────────────────────────
+  await test.step("CSV export downloads real CSV content (not an empty {})", async () => {
+    // Regression: the BFF proxy used to JSON-wrap the text/csv body, so the
+    // "downloaded" file contained only "{}". The body must now be the real
+    // CSV - at minimum the header row, whether or not the tenant has data.
+    const downloadPromise = page.waitForEvent("download", { timeout: 20_000 });
+    await page.getByRole("button", { name: "Export CSV" }).click();
+    const download = await downloadPromise;
+
+    // Content-Disposition from Core ("attachment; filename=slug-period.csv").
+    expect(download.suggestedFilename()).toMatch(/^pipeline_value_by_stage-.+\.csv$/);
+
+    const content = await readFile(await download.path(), "utf8");
+    expect(content).toBeTruthy();
+    expect(content).not.toBe("{}");
+    expect(content).toContain("stage");
+    expect(content).toContain("opportunity_count");
+    expect(content).toContain("pipeline_value");
   });
 });

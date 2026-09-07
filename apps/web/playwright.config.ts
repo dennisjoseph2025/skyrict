@@ -74,7 +74,9 @@ export default defineConfig({
     // resolve `*.localhost` (only Chromium can). Tests still navigate the
     // tenant surface via baseURL above.
     url: "http://localhost:3000/",
-    reuseExistingServer: false,
+    // Reuse an already-running dev server locally (avoids the "port in use"
+    // error and keeps iteration fast); CI always boots its own.
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 });
