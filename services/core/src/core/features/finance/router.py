@@ -13,16 +13,20 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from core.api.deps import get_finance_service, require_permission
+from core.domain.value_objects import SUPPORTED_CURRENCIES
 from core.features.finance.schemas import (
     AccountCreateRequest,
     AccountResponse,
     ArAgingResponse,
     BalanceSheetResponse,
+    ExchangeRateResponse,
+    ExchangeRateWriteRequest,
     FiscalPeriodCreateRequest,
     FiscalPeriodResponse,
+    FxContextResponse,
     InvoiceCreateRequest,
     InvoiceResponse,
     JournalEntryCreateRequest,
@@ -45,6 +49,8 @@ router = APIRouter(prefix="/finance", tags=["finance"])
 require_finance_read = require_permission("erp.finance.read")
 require_finance_write = require_permission("erp.finance.write")
 require_finance_approve = require_permission("erp.finance.approve")
+require_fx_read = require_permission("core.fx.read")
+require_fx_write = require_permission("core.fx.write")
 
 
 def _tenant_id(current_user: dict[str, Any]) -> uuid.UUID:
@@ -253,6 +259,7 @@ async def create_invoice(
         customer_id=body.customer_id,
         invoice_date=body.invoice_date,
         due_date=body.due_date,
+        currency=body.currency,
         lines=[
             InvoiceLineInput(
                 description=line.description,
@@ -432,6 +439,75 @@ async def get_ar_aging(
 ) -> ResponseEnvelope[ArAgingResponse]:
     report = await svc.ar_aging(_tenant_id(current_user), as_of)
     return ResponseEnvelope(data=ArAgingResponse.model_validate(report))
+
+
+# ---------------------------------------------------------------------------
+# FX rates (SKY-67 C2)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/fx/context", response_model=ResponseEnvelope[FxContextResponse])
+async def get_fx_context(
+    current_user: dict[str, Any] = Depends(require_fx_read),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ResponseEnvelope[FxContextResponse]:
+    tenant_id = _tenant_id(current_user)
+    return ResponseEnvelope(
+        data=FxContextResponse(
+            default_currency=await svc.default_currency(tenant_id),
+            currencies=sorted(SUPPORTED_CURRENCIES),
+        )
+    )
+
+
+@router.get("/fx/rates", response_model=ListResponse[ExchangeRateResponse])
+async def list_fx_rates(
+    currency: str | None = Query(default=None, max_length=3),
+    offset: int = 0,
+    limit: int = Query(default=50, le=200),
+    current_user: dict[str, Any] = Depends(require_fx_read),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ListResponse[ExchangeRateResponse]:
+    rates = await svc.list_exchange_rates(_tenant_id(current_user), currency=currency)
+    page = rates[offset : offset + limit]
+    return ListResponse(
+        data=[ExchangeRateResponse.model_validate(rate) for rate in page],
+        meta=PaginationMeta.create(
+            total=len(rates), page=(offset // limit) + 1 if limit else 1, page_size=limit
+        ),
+    )
+
+
+@router.get(
+    "/fx/rates/{quote_currency}",
+    response_model=ResponseEnvelope[ExchangeRateResponse],
+)
+async def get_fx_rate(
+    quote_currency: str,
+    on: date = Query(default_factory=date.today),
+    current_user: dict[str, Any] = Depends(require_fx_read),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ResponseEnvelope[ExchangeRateResponse]:
+    rate = await svc.exchange_rate_to_default(
+        _tenant_id(current_user), quote_currency=quote_currency, on_date=on
+    )
+    return ResponseEnvelope(data=ExchangeRateResponse.model_validate(rate))
+
+
+@router.put("/fx/rates", response_model=ResponseEnvelope[ExchangeRateResponse])
+async def put_fx_rate(
+    body: ExchangeRateWriteRequest,
+    current_user: dict[str, Any] = Depends(require_fx_write),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ResponseEnvelope[ExchangeRateResponse]:
+    rate = await svc.set_exchange_rate(
+        _tenant_id(current_user),
+        base_currency=body.base_currency,
+        quote_currency=body.quote_currency,
+        effective_date=body.effective_date,
+        rate=body.rate,
+    )
+    return ResponseEnvelope(data=ExchangeRateResponse.model_validate(rate))
 
 
 # ---------------------------------------------------------------------------

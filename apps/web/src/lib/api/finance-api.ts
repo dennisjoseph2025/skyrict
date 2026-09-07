@@ -138,6 +138,8 @@ export interface Invoice {
     due_date: string;
     status: InvoiceStatus;
     total: number;
+    currency: string;
+    exchange_rate: number;
     source: string;
     source_ref: string | null;
     source_order_number?: string | null;
@@ -154,6 +156,19 @@ export interface InvoiceCreateInput {
     invoice_date: string;
     due_date: string;
     lines: InvoiceLineInput[];
+    currency?: string;
+}
+
+export interface ExchangeRateEntry {
+    base_currency: string;
+    quote_currency: string;
+    effective_date: string;
+    rate: number;
+}
+
+export interface FxContext {
+    default_currency: string;
+    currencies: string[];
 }
 
 export type InvoiceListParams = {
@@ -319,6 +334,33 @@ export function getInvoice(invoiceId: string): Promise<Invoice> {
 
 export function createInvoice(input: InvoiceCreateInput): Promise<Invoice> {
     return apiPost<Invoice>(`${FINANCE}/invoices`, input);
+}
+
+// --- FX rates (invoice currency) ---
+
+export function getFxContext(): Promise<FxContext> {
+    return apiFetch<FxContext>(`${FINANCE}/fx/context`);
+}
+
+export function getFxRate(
+    quoteCurrency: string,
+    on: string,
+): Promise<ExchangeRateEntry> {
+    return apiFetch<ExchangeRateEntry>(
+        `${FINANCE}/fx/rates/${encodeURIComponent(quoteCurrency)}${queryString({ on })}`,
+    );
+}
+
+export function upsertFxRate(input: {
+    base_currency: string;
+    quote_currency: string;
+    effective_date: string;
+    rate: number;
+}): Promise<ExchangeRateEntry> {
+    return apiFetch<ExchangeRateEntry>(`${FINANCE}/fx/rates`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+    });
 }
 
 export function issueInvoice(invoiceId: string): Promise<Invoice> {

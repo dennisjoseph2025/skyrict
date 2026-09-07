@@ -619,12 +619,25 @@ class Invoice:
     source: str
     source_ref: str | None
     lines: tuple[InvoiceLine, ...] = ()
+    currency: str = "USD"
+    exchange_rate: Decimal = Decimal("1")
     id: uuid.UUID | None = None
     issued_at: datetime | None = None
     approved_at: datetime | None = None
     voided_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ExchangeRate:
+    """A tenant FX rate: one ``quote_currency`` unit priced in ``base_currency``."""
+
+    tenant_id: uuid.UUID
+    base_currency: str
+    quote_currency: str
+    effective_date: date
+    rate: Decimal
 
 
 @dataclass(frozen=True)

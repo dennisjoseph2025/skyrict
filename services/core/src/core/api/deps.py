@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     )
     from core.features.inventory.service import InventoryService
     from core.features.payroll.ports import PayslipApprovedNotifierPort
+    from core.features.payroll.repository import PayrollRepository
     from core.features.payroll.service import PayrollService
     from core.features.payroll_automation.service import PayrollAutomationService
     from core.features.reporting.service import DashboardService
@@ -612,6 +613,27 @@ async def get_hr_ai_individual(
     return grants_permission(granted, ERP_HR_AI_INDIVIDUAL)
 
 
+class _PayrollDefaultCurrencyPort:
+    """Wires the finance FX base currency to payroll's ``default_currency`` (SKY-67 C2).
+
+    Implements :class:`TenantDefaultCurrencyPort` over
+    ``PayrollRepository.get_settings``; returns ``None`` (service falls back to
+    ``settings.DEFAULT_CURRENCY``) when a tenant has never seeded a payroll
+    setting, so FX never 500s an unfinished tenant's invoice dialog.
+    """
+
+    def __init__(self, repo: PayrollRepository) -> None:
+        self._repo = repo
+
+    async def get_default_currency(self, tenant_id: uuid.UUID) -> str | None:
+        try:
+            settings = await self._repo.get_settings(tenant_id)
+        except Exception:  # ponytail: tenant may predate payroll seeding
+            return None
+        code = getattr(settings, "default_currency", None)
+        return code or None
+
+
 def get_finance_service(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -630,6 +652,7 @@ def get_finance_service(
     from core.features.crm.repository import CrmRepository
     from core.features.finance.repository import FinanceRepository
     from core.features.finance.service import FinanceService
+    from core.features.payroll.repository import PayrollRepository
     from core.features.sales.repository import SalesRepository
 
     correlation_id = getattr(request.state, "request_id", None)
@@ -643,6 +666,9 @@ def get_finance_service(
         customers=crm_repo,
         timeline=crm_repo,
         order_lookup=sales_repo,
+        default_currency=_PayrollDefaultCurrencyPort(
+        PayrollRepository(db, next_sequence=SequenceRepository(db).next_value)
+    ),
     )
 
 

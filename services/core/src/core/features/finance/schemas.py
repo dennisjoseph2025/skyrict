@@ -56,12 +56,22 @@ class InvoiceCreateRequest(BaseModel):
     invoice_date: date
     due_date: date
     lines: list[InvoiceLineRequest] = Field(..., min_length=1)
+    currency: str | None = Field(
+        default=None, max_length=3, description="ISO 4217; defaults to the tenant's base currency"
+    )
 
 
 class PaymentApplyRequest(BaseModel):
     amount: Decimal = Field(..., gt=0)
     method: str = Field(..., min_length=1, max_length=32)
     paid_at: datetime
+
+
+class ExchangeRateWriteRequest(BaseModel):
+    base_currency: str = Field(..., min_length=3, max_length=3)
+    quote_currency: str = Field(..., min_length=3, max_length=3)
+    effective_date: date
+    rate: Decimal = Field(..., gt=0)
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +160,8 @@ class InvoiceResponse(BaseModel):
     due_date: date
     status: InvoiceStatus
     total: Decimal
+    currency: str
+    exchange_rate: Decimal
     source: str
     source_ref: str | None
     source_order_number: str | None = None
@@ -159,6 +171,22 @@ class InvoiceResponse(BaseModel):
     voided_at: datetime | None
     created_at: datetime | None
     updated_at: datetime | None
+
+
+class ExchangeRateResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    base_currency: str
+    quote_currency: str
+    effective_date: date
+    rate: Decimal
+
+
+class FxContextResponse(BaseModel):
+    """What the invoice currency selector needs on open (C2)."""
+
+    default_currency: str
+    currencies: list[str]
 
 
 class PaymentResponse(BaseModel):

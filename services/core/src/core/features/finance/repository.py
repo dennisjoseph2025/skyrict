@@ -58,6 +58,7 @@ from core.domain.entities import (
     ComparativePnlRow,
     DuplicateCandidate,
     DuplicateGroup,
+    ExchangeRate,
     FiscalPeriod,
     HealthComponent,
     HealthScore,
@@ -84,6 +85,7 @@ from core.features.finance.models.ai_finance_anomaly import AiFinanceAnomalyMode
 from core.features.finance.models.ai_finance_quality_score import AiFinanceQualityScoreModel
 from core.features.finance.models.ai_finance_suggestion import AiFinanceSuggestionModel
 from core.features.finance.models.chart_of_account import ErpChartOfAccountModel
+from core.features.finance.models.exchange_rate import ErpExchangeRateModel
 from core.features.finance.models.fiscal_period import ErpFiscalPeriodModel
 from core.features.finance.models.invoice import ErpInvoiceModel
 from core.features.finance.models.invoice_line import ErpInvoiceLineModel
@@ -225,6 +227,8 @@ def _invoice_from_orm(model: ErpInvoiceModel, lines: Sequence[InvoiceLine]) -> I
         due_date=model.due_date,
         status=model.status,
         total=model.total,
+        currency=model.currency,
+        exchange_rate=model.exchange_rate,
         source=model.source,
         source_ref=model.source_ref,
         lines=tuple(lines),
@@ -234,6 +238,16 @@ def _invoice_from_orm(model: ErpInvoiceModel, lines: Sequence[InvoiceLine]) -> I
         voided_at=model.voided_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
+    )
+
+
+def _exchange_rate_from_orm(model: ErpExchangeRateModel) -> ExchangeRate:
+    return ExchangeRate(
+        tenant_id=model.tenant_id,
+        base_currency=model.base_currency,
+        quote_currency=model.quote_currency,
+        effective_date=model.effective_date,
+        rate=model.rate,
     )
 
 
@@ -605,10 +619,12 @@ class FinanceRepository:
             customer_id=invoice.customer_id,
             invoice_date=invoice.invoice_date,
             due_date=invoice.due_date,
-            status=invoice.status,
-            total=invoice.total,
-            source=invoice.source,
-            source_ref=invoice.source_ref,
+status=invoice.status,
+        total=invoice.total,
+        currency=invoice.currency,
+        exchange_rate=invoice.exchange_rate,
+        source=invoice.source,
+        source_ref=invoice.source_ref,
         )
         self.session.add(model)
         try:
@@ -825,6 +841,56 @@ class FinanceRepository:
             ErpInvoiceModel.invoice_date >= since.date(),
         )
         return int((await self.session.execute(stmt)).scalar_one())
+
+    async def get_exchange_rate(
+        self,
+        tenant_id: uuid.UUID,
+        base_currency: str,
+        quote_currency: str,
+        on_date: date,
+    ) -> ExchangeRate | None:
+        stmt = (
+            select(ErpExchangeRateModel)
+            .where(
+                ErpExchangeRateModel.tenant_id == tenant_id,
+                ErpExchangeRateModel.base_currency == base_currency,
+                ErpExchangeRateModel.quote_currency == quote_currency,
+                ErpExchangeRateModel.effective_date <= on_date,
+            )
+            .order_by(ErpExchangeRateModel.effective_date.desc())
+            .limit(1)
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        return _exchange_rate_from_orm(model) if model is not None else None
+
+    async def upsert_exchange_rate(self, rate: ExchangeRate) -> ExchangeRate:
+        model = ErpExchangeRateModel(
+            tenant_id=rate.tenant_id,
+            base_currency=rate.base_currency,
+            quote_currency=rate.quote_currency,
+            effective_date=rate.effective_date,
+            rate=rate.rate,
+        )
+        await self.session.merge(model)
+        await self.session.flush()
+        return rate
+
+    async def list_exchange_rates(
+        self, tenant_id: uuid.UUID, *, currency: str | None = None
+    ) -> Sequence[ExchangeRate]:
+        stmt = select(ErpExchangeRateModel).where(ErpExchangeRateModel.tenant_id == tenant_id)
+        if currency is not None:
+            stmt = stmt.where(
+                (ErpExchangeRateModel.base_currency == currency)
+                | (ErpExchangeRateModel.quote_currency == currency)
+            )
+        stmt = stmt.order_by(
+            ErpExchangeRateModel.base_currency,
+            ErpExchangeRateModel.quote_currency,
+            ErpExchangeRateModel.effective_date.desc(),
+        )
+        models = (await self.session.execute(stmt)).scalars().all()
+        return [_exchange_rate_from_orm(model) for model in models]
 
     async def next_payment_number(self, tenant_id: uuid.UUID, year: int) -> str:
         stmt = select(text("nextval('seq_erp_payment_number')"))
