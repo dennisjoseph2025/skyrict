@@ -77,7 +77,9 @@ _require_inventory_adjust = require_permission(ERP_INVENTORY_ADJUST)
 _resolve_inventory_cost = resolve_permission(ERP_INVENTORY_COST)
 # Supplier views (SKY-86/INV-AI-004) gate risk data behind their own key so
 # read alone does not leak supplier risk facts; writes use the supplier write key.
-_require_suppliers_read = require_permission(ERP_INVENTORY_SUPPLIERS_READ)
+# Reads additionally accept ai-agent's m2m ingest secret so the risk engine can
+# pull supplier master + performance facts without a user JWT (mirrors products).
+_require_suppliers_read = require_ingest_m2m_or_permission(ERP_INVENTORY_SUPPLIERS_READ)
 _require_suppliers_write = require_permission(ERP_INVENTORY_SUPPLIERS_WRITE)
 # The catalog list (reindex/ingest target) additionally accepts ai-agent's m2m
 # ingest secret (CORE_AI_INGEST_TOKEN); every other route stays JWT-only.

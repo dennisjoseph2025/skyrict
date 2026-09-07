@@ -23,6 +23,8 @@ from core.core.permissions import (
     ERP_INVENTORY_ADJUST,
     ERP_INVENTORY_ADJUST_APPROVE,
     ERP_INVENTORY_READ,
+    ERP_INVENTORY_SUPPLIERS_READ,
+    ERP_INVENTORY_SUPPLIERS_WRITE,
     ERP_INVENTORY_WRITE,
 )
 from core.db.session import async_session_factory
@@ -102,6 +104,8 @@ async def rbac_world(integration_db: dict[str, str]) -> AsyncGenerator[dict[str,
                         ERP_INVENTORY_WRITE,
                         ERP_INVENTORY_ADJUST,
                         ERP_INVENTORY_ADJUST_APPROVE,
+                        ERP_INVENTORY_SUPPLIERS_READ,
+                        ERP_INVENTORY_SUPPLIERS_WRITE,
                     ],
                 ),
                 CoreRoleModel(
@@ -1171,6 +1175,39 @@ class TestIngestM2MCatalog:
         )
         assert response.status_code == 401
         assert response.json()["type"].endswith("/token-invalid")
+
+    async def test_supplier_list_via_ingest_secret(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(settings, "AI_INGEST_TOKEN", "ingest-secret")
+        response = await client.get(
+            "/api/v1/inventory/suppliers",
+            headers={"X-Tenant-Slug": "olympus", "Authorization": "Bearer ingest-secret"},
+        )
+        assert response.status_code == 200, response.text
+        assert isinstance(response.json()["data"], list)
+
+    async def test_supplier_listing_still_requires_read_permission_with_jwt(
+        self,
+        client: AsyncClient,
+        rbac_tokens: dict[str, str],
+    ) -> None:
+        # read-only role holds erp.inventory.read but NOT the suppliers key -> 403.
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(settings, "AI_INGEST_TOKEN", "ingest-secret")
+        try:
+            response = await client.get(
+                "/api/v1/inventory/suppliers",
+                headers={
+                    "X-Tenant-Slug": "olympus",
+                    "Authorization": f"Bearer {rbac_tokens['readonly']}",
+                },
+            )
+            assert response.status_code == 403, response.text
+        finally:
+            monkeypatch.undo()
 
 
 class TestTenantIsolation:
