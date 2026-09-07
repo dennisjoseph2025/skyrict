@@ -116,6 +116,21 @@ export interface AbcItem {
   band: "A" | "B" | "C";
 }
 
+export type SupplierRiskBand = "low" | "medium" | "high";
+
+export interface SupplierRiskItem {
+  supplier_id: string;
+  score: string;
+  risk_band: SupplierRiskBand;
+  confidence: string;
+  reason: string;
+}
+
+export interface SupplierRiskListResponse {
+  data: SupplierRiskItem[];
+  meta: { count: number };
+}
+
 // ---------------------------------------------------------------------------
 // NL Query
 // ---------------------------------------------------------------------------
@@ -192,6 +207,14 @@ export async function listAbcClassifications(): Promise<{ data: AbcItem[] }> {
 
 export async function getAbcSummary(): Promise<{ data: Record<string, number> }> {
   return apiFetchBody("/api/v1/ai/abc/summary");
+}
+
+// ---------------------------------------------------------------------------
+// Supplier risk (SKY-86 / INV-AI-004)
+// ---------------------------------------------------------------------------
+
+export async function listSupplierRisk(): Promise<SupplierRiskListResponse> {
+  return apiFetchBody<SupplierRiskListResponse>("/api/v1/ai/supplier-risk");
 }
 
 // ---------------------------------------------------------------------------
