@@ -53,6 +53,9 @@ class ProductRef:
     # Semantic-search snapshot fields (SKY-70); None when core omits them.
     category: str | None = None
     unit: str | None = None
+    # Source supplier (SKY-86): the risk-adjusted restock formula looks the
+    # supplier's risk band up through this id to stretch lead time / safety.
+    supplier_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +246,7 @@ def _parse_product(item: dict[str, object]) -> ProductRef:
             cost_currency = str(raw_cost[1])
     category = item.get("category")
     unit = item.get("unit")
+    raw_supplier_id = item.get("supplier_id")
     return ProductRef(
         id=uuid.UUID(str(item["id"])),
         sku=str(item["sku"]),
@@ -252,6 +256,7 @@ def _parse_product(item: dict[str, object]) -> ProductRef:
         cost_currency=cost_currency,
         category=None if category is None else str(category),
         unit=None if unit is None else str(unit),
+        supplier_id=None if raw_supplier_id is None else uuid.UUID(str(raw_supplier_id)),
     )
 
 
