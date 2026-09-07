@@ -1,13 +1,17 @@
 """Phase-1 report seed catalog tests (RPT-DATA-001).
 
 The catalog is the single source of truth for the report pack used by both
-migration 0036 and the tenant-provisioning hook. These tests pin its shape:
+migration 0036/0038 and the tenant-provisioning hook. These tests pin its
+shape:
 
   - exactly the 12 reports from erp-phase1.md §M-RPT (unique slugs)
   - modules finance / sales / inventory / hr, three reports each
   - every SQL passes the read-only validator
   - every used bind is declared, and no declared bind is unused (tight whitelist)
   - every seed references the catalogue `erp.reports.read` permission
+  - versioning: every seed declares a version, and version bumps are only
+    accepted when the SQL actually changed (a version bump with no content
+    change is a catalog error - it would rewrite identical rows forever)
 """
 
 from __future__ import annotations
@@ -17,7 +21,10 @@ from collections import Counter
 import pytest
 
 from core.core.permissions import CATALOG, ERP_REPORTS_READ
-from core.features.reporting.seeds import PHASE_1_REPORT_SEEDS
+from core.features.reporting.seeds import (
+    PHASE_1_REPORT_SEEDS,
+    is_seed_stale,
+)
 from core.features.reporting.validation import (
     ReportDefinitionValidationError,
     require_tenant_filter,
@@ -62,6 +69,35 @@ class TestCatalogShape:
             assert seed.title
             assert seed.description
             assert seed.params
+
+    def test_every_seed_declares_a_version(self) -> None:
+        for seed in PHASE_1_REPORT_SEEDS:
+            assert seed.version >= 1
+
+
+class TestSeedVersioning:
+    """The drift contract shared by migration 0038 and the provisioning hook."""
+
+    def test_newer_version_with_identical_sql_is_not_stale(self) -> None:
+        """is_seed_stale compares SQL content too - a stored version newer than
+        the seed with identical SQL is NOT stale (would rewrite forever)."""
+        seed = next(s for s in PHASE_1_REPORT_SEEDS if s.slug == "ar_aging")
+        assert not is_seed_stale(seed, version=seed.version + 1, sql=seed.sql)
+
+    def test_same_version_with_different_sql_is_stale(self) -> None:
+        seed = next(s for s in PHASE_1_REPORT_SEEDS if s.slug == "ar_aging")
+        assert is_seed_stale(seed, version=seed.version, sql="SELECT 1")
+
+    def test_whitespace_only_sql_difference_is_not_stale(self) -> None:
+        """The legacy write paths collapsed whitespace; that must not count as
+        drift or every existing tenant would be rewritten on first reconcile."""
+        seed = next(s for s in PHASE_1_REPORT_SEEDS if s.slug == "ar_aging")
+        collapsed = " ".join(seed.sql.split())
+        assert not is_seed_stale(seed, version=seed.version, sql=collapsed)
+
+    def test_older_version_with_different_sql_is_stale(self) -> None:
+        seed = next(s for s in PHASE_1_REPORT_SEEDS if s.slug == "ar_aging")
+        assert is_seed_stale(seed, version=seed.version - 1, sql="SELECT 1")
 
 
 class TestPageOneValidity:

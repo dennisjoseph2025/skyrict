@@ -47,6 +47,7 @@ class ReportDefinitionSeed:
     sql: str
     params: tuple[str, ...]
     permission_key: str = ERP_REPORTS_READ
+    version: int = 1
 
 
 PHASE_1_REPORT_SEEDS: tuple[ReportDefinitionSeed, ...] = (
@@ -108,10 +109,11 @@ SELECT i.invoice_number,
         AND p.status = 'applied'
  WHERE i.tenant_id = :tenant_id
    AND i.status IN ('issued', 'approved')
- GROUP BY i.invoice_number, i.invoice_date, i.due_date, i.total
- ORDER BY i.due_date, i.invoice_number
+GROUP BY i.invoice_number, i.invoice_date, i.due_date, i.total
+  ORDER BY i.due_date, i.invoice_number
 """.strip(),
         params=("tenant_id", "as_of_date"),
+        version=2,
     ),
     ReportDefinitionSeed(
         slug="cash_received",
@@ -187,11 +189,12 @@ SELECT c.customer_code,
         AND o.status IN ('confirmed', 'fulfilled')
  WHERE c.tenant_id = :tenant_id
    AND c.is_active = TRUE
- GROUP BY c.customer_code, c.name
- ORDER BY lifetime_value DESC
- LIMIT 10
+GROUP BY c.customer_code, c.name
+  ORDER BY lifetime_value DESC
+  LIMIT 10
 """.strip(),
         params=("tenant_id",),
+        version=2,
     ),
     # ------------------------------------------------------------------ #
     # Inventory                                                           #
@@ -211,12 +214,13 @@ SELECT p.sku,
   LEFT JOIN erp_stock_levels sl
          ON sl.tenant_id = p.tenant_id
         AND sl.product_id = p.id
- WHERE p.tenant_id = :tenant_id
+WHERE p.tenant_id = :tenant_id
    AND p.is_active = TRUE
    AND COALESCE(sl.qty_on_hand, 0) < p.reorder_point
- ORDER BY gap_to_reorder DESC
+  ORDER BY gap_to_reorder DESC
 """.strip(),
         params=("tenant_id",),
+        version=2,
     ),
     ReportDefinitionSeed(
         slug="movement_by_type",
@@ -258,13 +262,14 @@ SELECT p.sku,
        ) mv
          ON mv.tenant_id = p.tenant_id
         AND mv.product_id = p.id
- WHERE p.tenant_id = :tenant_id
+WHERE p.tenant_id = :tenant_id
    AND p.is_active = TRUE
    AND COALESCE(mv.movement_count, 0) = 0
- ORDER BY p.sku
- LIMIT 10
+  ORDER BY p.sku
+  LIMIT 10
 """.strip(),
         params=("tenant_id", "from_date", "to_date"),
+        version=2,
     ),
     # ------------------------------------------------------------------ #
     # HR                                                                  #
@@ -305,10 +310,11 @@ SELECT lt.code AS leave_type_code,
  WHERE lm.tenant_id = :tenant_id
    AND lm.ref_type = 'leave_request'
    AND DATE(lm.occurred_at) BETWEEN :from_date AND :to_date
- GROUP BY lt.code, lt.name
- ORDER BY days_used DESC
+GROUP BY lt.code, lt.name
+  ORDER BY days_used DESC
 """.strip(),
         params=("tenant_id", "from_date", "to_date"),
+        version=2,
     ),
     ReportDefinitionSeed(
         slug="payroll_cost_by_period",
@@ -330,11 +336,35 @@ SELECT pr.period_start,
  WHERE pr.tenant_id = :tenant_id
    AND pr.status IN ('computed', 'approved', 'paid')
    AND pr.period_start BETWEEN :from_date AND :to_date
- GROUP BY pr.period_start, pr.period_end, pr.run_code
- ORDER BY pr.period_start, pr.run_code
+GROUP BY pr.period_start, pr.period_end, pr.run_code
+  ORDER BY pr.period_start, pr.run_code
 """.strip(),
         params=("tenant_id", "from_date", "to_date"),
+        version=2,
     ),
 )
 
-__all__ = ["PHASE_1_REPORT_SEEDS", "ReportDefinitionSeed"]
+
+def is_seed_stale(seed: ReportDefinitionSeed, *, version: int, sql: str) -> bool:
+    """Return whether a stored definition lags the canonical seed.
+
+    A stored definition is stale when its version is older than the seed's or
+    when its stored SQL differs from the canonical seed after normalizing
+    whitespace (the two write paths historically collapsed whitespace, so a
+    whitespace-only difference must NOT count as drift).
+
+    This is the single drift signal the migration and the provisioning hook
+    share - both must classify "in sync" the same way so re-runs are stable
+    and never rewrite identical rows.
+    """
+    if version < seed.version:
+        return True
+    return _normalize_sql(sql) != _normalize_sql(seed.sql)
+
+
+def _normalize_sql(sql: str) -> str:
+    """Collapse whitespace for content comparison (whitespace != drift)."""
+    return " ".join(sql.split())
+
+
+__all__ = ["PHASE_1_REPORT_SEEDS", "ReportDefinitionSeed", "is_seed_stale"]
