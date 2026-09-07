@@ -206,7 +206,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0038", f"head is {version}, expected 0038"
+            assert version == "0039", f"head is {version}, expected 0039"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -825,6 +825,41 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                 )
             ).scalar_one()
             assert product_supplier_fk == 1, "0038 must add erp_products.supplier_id FK"
+
+            # 0039: reconcile report definitions from the canonical catalog
+            # (RPT-DATA-001). 0036 stamped every seeded definition at version 1
+            # even though the catalog carried v2 for the six improved reports,
+            # so 0039 must have bumped them to the canonical version AND kept
+            # the canonical SQL (e.g. ar_aging carries the `outstanding`
+            # column the Open Receivables KPI sums).
+            drifted_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT d.tenant_id, d.slug, d.version "
+                        "FROM erp_report_definitions d "
+                        "JOIN tenants t ON t.id = d.tenant_id "
+                        "WHERE NOT ("
+                        "  (d.slug IN ('ar_aging', 'top_customers', "
+                        "   'stock_on_hand_vs_reorder', 'slow_movers', "
+                        "   'leave_usage', 'payroll_cost_by_period') AND d.version = 2)"
+                        "  OR (d.slug NOT IN ('ar_aging', 'top_customers', "
+                        "   'stock_on_hand_vs_reorder', 'slow_movers', "
+                        "   'leave_usage', 'payroll_cost_by_period') AND d.version = 1)"
+                        ")"
+                    )
+                )
+            ).all()
+            assert drifted_rows == [], f"0039 left drifted definitions: {drifted_rows}"
+
+            ar_aging_sql = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM erp_report_definitions "
+                        "WHERE slug = 'ar_aging' AND sql LIKE '%outstanding%'"
+                    )
+                )
+            ).scalar_one()
+            assert ar_aging_sql == 2, "0039 must ship the canonical ar_aging SQL per tenant"
     finally:
         await engine.dispose()
 

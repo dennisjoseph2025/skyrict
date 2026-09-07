@@ -66,6 +66,11 @@ class FakeSession:
     async def flush(self) -> None:
         self.flushed += 1
 
+    async def refresh(self, model: Any, attribute_names: list[str] | None = None) -> None:
+        # Server-generated columns (e.g. generated_at) are "refreshed" from the
+        # fake as a no-op; the returned object is simply left as-is.
+        return None
+
 
 def _definition(tenant_id: uuid.UUID, slug: str, is_active: bool = True) -> Any:
     model = type("Definition", (), {})()

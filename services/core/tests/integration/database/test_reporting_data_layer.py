@@ -226,6 +226,12 @@ class TestSnapshotContract:
                 period=period,
                 payload=payload,
             )
+            # Regression: generated_at is server-side (ON UPDATE now()), so after the
+            # upsert flush the attribute used to be expired; reading it synchronously
+            # triggered a lazy refresh that cannot run in the async session
+            # (MissingGreenlet -> 500 on POST /reports/{slug}/run). eager_defaults
+            # must keep it readable here, right after the flush, before commit.
+            assert stored.generated_at is not None
             await session.commit()
 
             fetched = await repo.get_snapshot(
@@ -259,6 +265,9 @@ class TestSnapshotContract:
                 period=period,
                 payload=[{"new": True}],
             )
+            # Same regression as the round-trip test, but on the UPDATE path
+            # (onupdate=now()); generated_at must be readable before commit.
+            assert refreshed.generated_at is not None
             await session.commit()
 
             rows = (

@@ -12,8 +12,8 @@ import { AttentionStrip } from "@/components/dashboard/erp/attention-strip";
 import { CrossModuleKpis } from "@/components/dashboard/erp/cross-module-kpis";
 import { DigestCard } from "@/components/dashboard/erp/digest-card";
 import { ErpOverviewSummary } from "@/components/dashboard/erp/erp-overview-summary";
-import { ErpReportsKpis } from "@/components/dashboard/erp/erp-reports-kpis";
 import { ModuleQuickLinks } from "@/components/dashboard/erp/module-quick-links";
+import { ReportKpis } from "@/features/reports/components/report-kpis";
 
 export interface WidgetDefinition {
   /** Unique identifier - matches the layout JSONB `id` field. */
@@ -96,10 +96,10 @@ export const WIDGET_REGISTRY: WidgetDefinition[] = [
   },
   {
     id: "reports_kpis",
-    title: "Report KPIs (Legacy)",
-    description: "Key performance indicators from ERP reports.",
-    component: ErpReportsKpis,
-    defaultCols: 3,
+    title: "Report KPIs",
+    description: "Live report-derived metrics - cash, receivables, pipeline, stock alerts, headcount.",
+    component: ReportKpis,
+    defaultCols: 4,
     minCols: 1,
     maxCols: 4,
     group: "overview",
@@ -112,8 +112,14 @@ export function getWidget(id: string): WidgetDefinition | undefined {
   return WIDGET_REGISTRY.find((w) => w.id === id);
 }
 
-/** Default 4-widget ERP layout in priority hierarchy order. */
-const DEFAULT_PRIMARY_WIDGET_IDS = ["attention_strip", "cross_module_kpis", "module_quick_links", "ai_digest"];
+/** Default ERP dashboard layout in priority hierarchy order. */
+const DEFAULT_PRIMARY_WIDGET_IDS = [
+  "attention_strip",
+  "cross_module_kpis",
+  "reports_kpis",
+  "module_quick_links",
+  "ai_digest",
+];
 
 /** Return the default layout (prioritized default widgets, order and sizes). */
 export function getDefaultLayout(): { id: string; order: number; cols: 1 | 2 | 3 | 4; visible: boolean }[] {
