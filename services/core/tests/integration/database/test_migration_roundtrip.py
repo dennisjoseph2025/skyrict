@@ -809,9 +809,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             ):
                 perm_row = (
                     await conn.execute(
-                        text(
-                            "SELECT description FROM core_permissions WHERE key = :key"
-                        ),
+                        text("SELECT description FROM core_permissions WHERE key = :key"),
                         {"key": perm_key},
                     )
                 ).scalar_one_or_none()

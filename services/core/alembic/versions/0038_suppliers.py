@@ -63,9 +63,7 @@ def upgrade() -> None:
             primary_key=True,
             nullable=False,
         ),
-        sa.Column(
-            "id", sa.Uuid(), primary_key=True, server_default=sa.text("gen_random_uuid()")
-        ),
+        sa.Column("id", sa.Uuid(), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("contact_name", sa.String(255), nullable=True),
         sa.Column("contact_email", sa.String(255), nullable=True),
@@ -84,9 +82,7 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         sa.UniqueConstraint("tenant_id", "name", name="uq_erp_suppliers_tenant_name"),
-        sa.CheckConstraint(
-            "lead_time_days >= 0", name="ck_erp_suppliers_lead_time_non_negative"
-        ),
+        sa.CheckConstraint("lead_time_days >= 0", name="ck_erp_suppliers_lead_time_non_negative"),
     )
 
     op.create_table(
@@ -98,18 +94,14 @@ def upgrade() -> None:
             primary_key=True,
             nullable=False,
         ),
-        sa.Column(
-            "id", sa.Uuid(), primary_key=True, server_default=sa.text("gen_random_uuid()")
-        ),
+        sa.Column("id", sa.Uuid(), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("supplier_id", sa.Uuid(), nullable=False),
         sa.Column("period_start", sa.Date(), nullable=False),
         sa.Column("period_end", sa.Date(), nullable=False),
         sa.Column(
             "on_time_delivery_pct", sa.Numeric(5, 2), nullable=False, server_default=sa.text("0")
         ),
-        sa.Column(
-            "defect_rate_pct", sa.Numeric(5, 2), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("defect_rate_pct", sa.Numeric(5, 2), nullable=False, server_default=sa.text("0")),
         sa.Column(
             "price_stability_index",
             sa.Numeric(5, 2),

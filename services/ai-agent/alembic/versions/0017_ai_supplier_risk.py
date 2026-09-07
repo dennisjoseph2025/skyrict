@@ -87,9 +87,7 @@ def upgrade() -> None:
             ondelete="CASCADE",
             name="fk_ai_supplier_risk_supplier_tenant",
         ),
-        sa.CheckConstraint(
-            "score >= 0 AND score <= 1", name="ck_ai_supplier_risk_score_range"
-        ),
+        sa.CheckConstraint("score >= 0 AND score <= 1", name="ck_ai_supplier_risk_score_range"),
         sa.CheckConstraint(
             "risk_band IN ('low', 'medium', 'high')", name="ck_ai_supplier_risk_band"
         ),
