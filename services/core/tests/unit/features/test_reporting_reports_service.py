@@ -465,6 +465,53 @@ class TestCreateDefinition:
         assert repo.definitions["ar_aging_90plus"].sql == seed.sql
 
     @pytest.mark.asyncio
+    async def test_create_resolves_template_sql_when_sql_omitted(self) -> None:
+        """The NL builder never has the SQL: omitting it must resolve the
+        template SQL from source_slug and persist it byte-for-byte."""
+        tenant_id = uuid.uuid4()
+        seed = find_seed_by_slug("ar_aging")
+        assert seed is not None
+        repo = FakeRepo()
+        service = ReportService(repository=repo)  # type: ignore[arg-type]
+
+        await service.create_definition(
+            **self._persist_kwargs(
+                tenant_id=tenant_id,
+                user_id=uuid.uuid4(),
+                sql=None,
+            )
+        )
+
+        persisted = repo.definitions["ar_aging_90plus"]
+        assert persisted.sql == seed.sql
+        assert persisted.params == list(seed.params)
+        assert persisted.permission_key == "erp.reports.read"
+
+    @pytest.mark.asyncio
+    async def test_create_with_omitted_sql_on_user_defined_slug(self) -> None:
+        """Even with a brand-new user slug, omitting sql persists exactly the
+        template SQL of the named source - never anything the builder crafted."""
+        tenant_id = uuid.uuid4()
+        seed = find_seed_by_slug("cash_received")
+        assert seed is not None
+        repo = FakeRepo()
+        service = ReportService(repository=repo)  # type: ignore[arg-type]
+
+        await service.create_definition(
+            **self._persist_kwargs(
+                tenant_id=tenant_id,
+                user_id=uuid.uuid4(),
+                slug="my_cash_focus",
+                source_slug="cash_received",
+                sql=None,
+            )
+        )
+
+        persisted = repo.definitions["my_cash_focus"]
+        assert persisted.sql == seed.sql
+        assert persisted.params == list(seed.params)
+
+    @pytest.mark.asyncio
     async def test_create_rejects_mismatched_param_allowlist(self) -> None:
         tenant_id = uuid.uuid4()
         service = _make_service({})

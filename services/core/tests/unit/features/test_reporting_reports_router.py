@@ -299,6 +299,24 @@ def test_create_report_route_422_on_invalid_slug() -> None:
     service.create_definition.assert_not_awaited()
 
 
+def test_create_report_route_accepts_omitted_sql() -> None:
+    """The ai-agent never has the SQL; Core resolves it from source_slug."""
+    client, service = _app_with_create_mocks()
+    service.create_definition.return_value = {
+        "definition": _definition("ar_aging_90plus", sql=_AR_AGING_SEED.sql),
+        "default_params": {"as_of_date": "2026-09-30"},
+    }
+
+    payload = _create_payload()
+    payload.pop("sql")
+    response = client.post("/api/v1/reports", json=payload)
+
+    assert response.status_code == 201, response.text
+    kwargs = service.create_definition.await_args.kwargs
+    assert kwargs["sql"] is None
+    assert kwargs["source_slug"] == "ar_aging"
+
+
 def test_create_route_requires_create_permission() -> None:
     app = FastAPI()
     app.include_router(reports_router.router, prefix="/api/v1")

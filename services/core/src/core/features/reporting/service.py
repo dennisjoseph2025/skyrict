@@ -183,23 +183,24 @@ class ReportService:
         title: str,
         module: str,
         description: str | None,
-        sql: str,
         params: list[str],
         source_slug: str,
         default_params: dict[str, Any] | None = None,
+        sql: str | None = None,
     ) -> Any:
         """Persist a new report definition whose SQL is a whitelisted template.
 
         The NL report builder (RPT-AI-001, SKY-80) hands us a spec that names
-        the canonical template it matched (``source_slug``). This method is the
-        security boundary that guarantees NO arbitrary or AI-generated SQL can
-        reach the database:
+        the canonical template it matched (``source_slug``) but never the SQL.
+        This method is the security boundary that guarantees NO arbitrary or
+        AI-generated SQL can reach the database:
 
         1. Resolve the canonical seed by ``source_slug`` - unknown template is
            422 (we only ever accept known whitelisted reports).
-        2. Require the submitted ``sql`` to normalize-match the template EXACTLY
-           (whitespace-insensitive). Any divergence is rejected - the stored
-           definition is byte-for-byte the reviewed read-only template.
+        2. Require the ``sql`` (when supplied) to normalize-match the template
+           EXACTLY (whitespace-insensitive). When omitted - the normal NL
+           builder path - the template SQL is resolved server-side, so the
+           stored definition is byte-for-byte the reviewed read-only template.
         3. Defense-in-depth re-validation: the resolved template SQL must still
            pass ``validate_read_only_sql`` + ``require_tenant_filter`` (fail
            closed at create time, not just at run time).
@@ -217,7 +218,8 @@ class ReportService:
         seed = find_seed_by_slug(source_slug)
         if seed is None:
             raise ValidationError(f"Report template {source_slug!r} is not whitelisted")
-        if normalize_sql(sql) != normalize_sql(seed.sql):
+        resolved_sql = seed.sql if sql is None else sql
+        if normalize_sql(resolved_sql) != normalize_sql(seed.sql):
             raise ValidationError(
                 "Report SQL must exactly match the whitelisted template "
                 f"{source_slug!r}; custom SQL is not allowed"

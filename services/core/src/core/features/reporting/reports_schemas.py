@@ -48,18 +48,28 @@ class ReportCreateRequest(BaseModel):
 
     Carries everything needed to persist a generated report spec as a new
     definition. ``source_slug`` names the canonical whitelisted template the
-    builder matched - the create path only ever accepts SQL that is
-    byte-for-byte one of those templates (no arbitrary or AI-generated SQL).
-    ``params`` must equal the template's declared params; ``default_params``
-    are never persisted here (no schema column by design) and travel back to
-    the client only so the run form can be pre-filled.
+    builder matched - the create path never accepts arbitrary or AI-generated
+    SQL. When ``sql`` is omitted the server resolves the template SQL from
+    ``source_slug`` itself (the ai-agent never has the SQL, so Core keeps the
+    stored SQL byte-for-byte the reviewed read-only template); when supplied
+    it must match that template exactly. ``params`` must equal the template's
+    declared params; ``default_params`` are never persisted here (no schema
+    column by design) and travel back to the client only so the run form can
+    be pre-filled.
     """
 
     slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:[_-][a-z0-9]+)*$")
     title: str = Field(min_length=1, max_length=255)
     module: str = Field(min_length=1, max_length=32)
     description: str | None = Field(default=None, max_length=2000)
-    sql: str = Field(min_length=1, description="Must exactly match the whitelisted template SQL")
+    sql: str | None = Field(
+        default=None,
+        max_length=64_000,
+        description=(
+            "Template SQL; omit to resolve it server-side from source_slug "
+            "(must match the whitelisted template exactly when supplied)"
+        ),
+    )
     source_slug: str = Field(
         min_length=1,
         max_length=64,
