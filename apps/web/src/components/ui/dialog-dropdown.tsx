@@ -59,38 +59,26 @@ function useDialogDropdown(open: boolean) {
 
     const render = useMemo(
         () =>
-            // eslint-disable-next-line react/display-name
             (children: ReactNode, className?: string): ReactNode => {
-                if (children == null) return null;
-                if (content && rect) {
-                    return createPortal(
-                        <div
-                            ref={popoverRef}
-                            className={cn("absolute z-50", className)}
-                            style={{
-                                top: `${rect.top + 4}px`,
-                                left: `${rect.left}px`,
-                                width: `${rect.width}px`,
-                            }}
-                        >
-                            {children}
-                        </div>,
-                        content,
-                    );
+                if (!open || children == null || !content || !rect) {
+                    return null;
                 }
-                return (
+                return createPortal(
                     <div
                         ref={popoverRef}
-                        className={cn(
-                            "absolute left-0 top-[calc(100%+4px)] z-50 w-full",
-                            className,
-                        )}
+                        className={cn("absolute z-50", className)}
+                        style={{
+                            top: `${rect.top + 4}px`,
+                            left: `${rect.left}px`,
+                            width: `${rect.width}px`,
+                        }}
                     >
                         {children}
-                    </div>
+                    </div>,
+                    content,
                 );
             },
-        [content, rect],
+        [open, content, rect],
     );
 
     return { anchorRef, popoverRef, render };
