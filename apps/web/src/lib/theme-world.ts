@@ -12,9 +12,9 @@
  * so rendering never throws.
  */
 export function getThemeContainer(): HTMLElement | null {
-  if (typeof document === "undefined") return null;
-  return (
-    document.querySelector<HTMLElement>("[data-theme-world]") ??
-    document.querySelector<HTMLElement>("[data-theme-scope]")
-  );
+    if (typeof document === "undefined") return null;
+    return (
+        document.querySelector<HTMLElement>("[data-theme-world]") ??
+        document.querySelector<HTMLElement>("[data-theme-scope]")
+    );
 }

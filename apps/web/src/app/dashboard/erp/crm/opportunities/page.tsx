@@ -5,16 +5,16 @@ import { RequirePermission } from "@/components/dashboard/shared/require-permiss
 import { OpportunitiesBoard } from "@/components/dashboard/erp/crm/opportunities-board";
 
 export default function CrmOpportunitiesPage() {
-  return (
-    <RequirePermission permission="erp.crm.read">
-      <div className="space-y-6">
-        <PageHeader
-          title="Opportunities"
-          description="Deals move forward one stage at a time winning one creates the customer automatically."
-          icon={TrendingUp}
-        />
-        <OpportunitiesBoard />
-      </div>
-    </RequirePermission>
-  );
+    return (
+        <RequirePermission permission="erp.crm.read">
+            <div className="space-y-6">
+                <PageHeader
+                    title="Opportunities"
+                    description="Deals move forward one stage at a time winning one creates the customer automatically."
+                    icon={TrendingUp}
+                />
+                <OpportunitiesBoard />
+            </div>
+        </RequirePermission>
+    );
 }

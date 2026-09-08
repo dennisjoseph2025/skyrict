@@ -2,9 +2,9 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { CompensationClient } from "./compensation";
 
 export default function CompensationPage() {
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.payroll.read">
-      <CompensationClient />
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.payroll.read">
+            <CompensationClient />
+        </ModuleAccessBoundary>
+    );
 }

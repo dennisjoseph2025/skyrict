@@ -57,7 +57,8 @@ import {
 } from "@/features/finance/components/automation-widgets";
 import { cn } from "@/lib/utils";
 
-type ReportKey = "trial-balance" | "profit-and-loss" | "balance-sheet" | "automation";
+type ReportKey =
+    "trial-balance" | "profit-and-loss" | "balance-sheet" | "automation";
 
 const REPORT_TABS: { key: ReportKey; label: string }[] = [
     { key: "trial-balance", label: "Trial Balance" },
@@ -220,7 +221,9 @@ function StatementTable({
                                         className={cn(
                                             "px-4 py-2",
                                             labelClass,
-                                            row.kind === "line" && row.indent && "pl-8",
+                                            row.kind === "line" &&
+                                                row.indent &&
+                                                "pl-8",
                                         )}
                                     >
                                         {row.label}
@@ -273,14 +276,15 @@ function groupBySection<T extends LineItem>(
         .sort(([a], [b]) => sortOrder[a] - sortOrder[b])
         .map(([section, lines]) => ({
             section,
-            lines: lines.sort((x, y) => x.code.localeCompare(y.code, undefined, { numeric: true })),
+            lines: lines.sort((x, y) =>
+                x.code.localeCompare(y.code, undefined, { numeric: true }),
+            ),
         }));
 }
 
-function sumAmounts<T extends { amount?: number | string; balance?: number | string }>(
-    items: T[],
-    field: "amount" | "balance",
-): number {
+function sumAmounts<
+    T extends { amount?: number | string; balance?: number | string },
+>(items: T[], field: "amount" | "balance"): number {
     return items.reduce<number>((sum, item) => {
         const raw = item[field];
         return sum + (raw === undefined ? 0 : toMoney(raw));
@@ -359,7 +363,8 @@ function TrialBalanceView({ periods }: { periods: FiscalPeriod[] }) {
     }, [data]);
 
     const isBalanced = data
-        ? Math.abs(toMoney(data.total_debit) - toMoney(data.total_credit)) < 0.01
+        ? Math.abs(toMoney(data.total_debit) - toMoney(data.total_credit)) <
+          0.01
         : false;
 
     return (
@@ -451,7 +456,11 @@ function buildPnlRows(data: ProfitAndLoss): StatementRow[] {
             amount: line.amount,
         });
     }
-    rows.push({ kind: "total", label: "Total Revenue", amount: data.total_revenue });
+    rows.push({
+        kind: "total",
+        label: "Total Revenue",
+        amount: data.total_revenue,
+    });
 
     // Split expenses by code range
     const cogs: typeof data.expenses = [];
@@ -468,7 +477,9 @@ function buildPnlRows(data: ProfitAndLoss): StatementRow[] {
 
     // Cost of Goods Sold (only show if non-empty)
     if (cogs.length > 0) {
-        cogs.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+        cogs.sort((a, b) =>
+            a.code.localeCompare(b.code, undefined, { numeric: true }),
+        );
         const totalCogs = sumAmounts(cogs, "amount");
         rows.push({ kind: "section", label: "Cost of Goods Sold" });
         for (const line of cogs) {
@@ -478,15 +489,25 @@ function buildPnlRows(data: ProfitAndLoss): StatementRow[] {
                 amount: line.amount,
             });
         }
-        rows.push({ kind: "total", label: "Total Cost of Goods Sold", amount: totalCogs });
+        rows.push({
+            kind: "total",
+            label: "Total Cost of Goods Sold",
+            amount: totalCogs,
+        });
 
         const grossProfit = toMoney(data.total_revenue) - totalCogs;
-        rows.push({ kind: "subtotal", label: "Gross Profit", amount: grossProfit });
+        rows.push({
+            kind: "subtotal",
+            label: "Gross Profit",
+            amount: grossProfit,
+        });
     }
 
     // Operating Expenses
     if (operating.length > 0) {
-        operating.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+        operating.sort((a, b) =>
+            a.code.localeCompare(b.code, undefined, { numeric: true }),
+        );
         const totalOperating = sumAmounts(operating, "amount");
         rows.push({ kind: "section", label: "Operating Expenses" });
         for (const line of operating) {
@@ -496,14 +517,20 @@ function buildPnlRows(data: ProfitAndLoss): StatementRow[] {
                 amount: line.amount,
             });
         }
-        rows.push({ kind: "total", label: "Total Operating Expenses", amount: totalOperating });
+        rows.push({
+            kind: "total",
+            label: "Total Operating Expenses",
+            amount: totalOperating,
+        });
     }
 
     // Other Income / Expenses (only show if non-empty)
     const hasOther = otherIncome.length > 0 || otherExpense.length > 0;
     if (hasOther) {
         rows.push({ kind: "section", label: "Other Income / Expenses" });
-        otherIncome.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+        otherIncome.sort((a, b) =>
+            a.code.localeCompare(b.code, undefined, { numeric: true }),
+        );
         for (const line of otherIncome) {
             rows.push({
                 kind: "line",
@@ -511,7 +538,9 @@ function buildPnlRows(data: ProfitAndLoss): StatementRow[] {
                 amount: line.amount,
             });
         }
-        otherExpense.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+        otherExpense.sort((a, b) =>
+            a.code.localeCompare(b.code, undefined, { numeric: true }),
+        );
         for (const line of otherExpense) {
             rows.push({
                 kind: "line",
@@ -520,7 +549,8 @@ function buildPnlRows(data: ProfitAndLoss): StatementRow[] {
             });
         }
         const totalOther =
-            sumAmounts(otherIncome, "amount") - sumAmounts(otherExpense, "amount");
+            sumAmounts(otherIncome, "amount") -
+            sumAmounts(otherExpense, "amount");
         rows.push({ kind: "total", label: "Total Other", amount: totalOther });
     }
 
@@ -565,10 +595,7 @@ function ProfitAndLossView({ periods }: { periods: FiscalPeriod[] }) {
         void run(fromDate, toDate);
     }, [fromDate, toDate, run]);
 
-    const rows = useMemo(
-        () => (data ? buildPnlRows(data) : []),
-        [data],
-    );
+    const rows = useMemo(() => (data ? buildPnlRows(data) : []), [data]);
 
     if (loading) return <TableSkeleton rows={6} />;
     if (error)
@@ -839,7 +866,9 @@ function AutomationView() {
     const todayStr = today();
     const [aging, setAging] = useState<ArAging | null>(null);
     const [agingLoading, setAgingLoading] = useState(true);
-    const [projection, setProjection] = useState<CashflowProjection | null>(null);
+    const [projection, setProjection] = useState<CashflowProjection | null>(
+        null,
+    );
     const [comparative, setComparative] = useState<ComparativePnl | null>(null);
     const [compLoading, setCompLoading] = useState(true);
     const [compError, setCompError] = useState<string | null>(null);
@@ -868,7 +897,9 @@ function AutomationView() {
         try {
             setProjection(await getCashflowProjection(todayStr));
         } catch (err) {
-            setProjError(errorMessage(err, "Could not load the cash-flow projection."));
+            setProjError(
+                errorMessage(err, "Could not load the cash-flow projection."),
+            );
         }
     }, [todayStr]);
 
@@ -877,10 +908,17 @@ function AutomationView() {
         setCompError(null);
         try {
             setComparative(
-                await getComparativePnl(currentFrom, todayStr, priorFrom, priorTo),
+                await getComparativePnl(
+                    currentFrom,
+                    todayStr,
+                    priorFrom,
+                    priorTo,
+                ),
             );
         } catch (err) {
-            setCompError(errorMessage(err, "Could not load the comparative P&L."));
+            setCompError(
+                errorMessage(err, "Could not load the comparative P&L."),
+            );
         } finally {
             setCompLoading(false);
         }
@@ -905,7 +943,10 @@ function AutomationView() {
             <section className="space-y-4">
                 <ArAgingWidget aging={aging} loading={agingLoading} />
                 {agingError ? (
-                    <FinanceErrorState message={agingError} onRetry={() => void loadAging()} />
+                    <FinanceErrorState
+                        message={agingError}
+                        onRetry={() => void loadAging()}
+                    />
                 ) : null}
             </section>
             <section className="space-y-4">

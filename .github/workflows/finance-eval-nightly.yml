@@ -1,0 +1,89 @@
+name: Finance - Nightly Prompt Eval
+
+# Finance AI prompt quality (FIN-AI-002, SKY-67). Runs nightly against the
+# REAL production prompt functions (a1_suggest / a2_draft / a7_narrate /
+# a8_remind) over the curated cases in tests/eval/finance_prompts.yaml and
+# records one row per feature in ai_finance_eval_runs. warn-not-fail by
+# contract: `eval-finance` never exits nonzero, so prompt regressions surface
+# as WARNINGS + persisted rows instead of blocking development.
+#
+# Secrets required:
+#   OPENAI_API_KEY         - LLM provider for the prompt functions
+# Repo variables (all optional):
+#   AI_FINANCE_EVAL_MODEL  - LLM model to evaluate (default gpt-4o-mini)
+
+on:
+  schedule:
+    - cron: "29 2 * * *" # 02:29 UTC daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finance-eval-nightly
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    name: Finance Prompt Eval
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: skyrict
+          POSTGRES_PASSWORD: skyrict
+          POSTGRES_DB: skyrict_identity
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U skyrict -d skyrict_identity"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AI_DATABASE_URL: postgresql+asyncpg://skyrict:skyrict@localhost:5432/skyrict_identity
+      AI_ENVIRONMENT: dev
+      AI_JWKS_ISSUER: https://auth.skyrict.io
+      AI_JWKS_AUDIENCE: api.skyrict.io
+      AI_PROVIDER: openai
+      AI_MODEL: ${{ vars.AI_FINANCE_EVAL_MODEL || 'gpt-4o-mini' }}
+      AI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-packages --frozen
+
+      # The eval CLI imports the app settings which validate the JWT public
+      # key path at import time; the CLI never verifies tokens, so a self-made
+      # dev key is enough to satisfy the settings validator.
+      - name: Generate boot JWT public key
+        run: |
+          mkdir -p /tmp/skyrict-jwt
+          openssl genrsa -out /tmp/skyrict-jwt/private.pem 2048 >/dev/null 2>&1
+          openssl rsa -in /tmp/skyrict-jwt/private.pem -pubout -out /tmp/skyrict-jwt/public.pem >/dev/null 2>&1
+          echo "AI_JWT_PUBLIC_KEY_PATH=/tmp/skyrict-jwt/public.pem" >> "$GITHUB_ENV"
+
+      - name: Migrate database
+        working-directory: services/ai-agent
+        run: uv run ai-agent migrate
+
+      - name: Run eval-finance
+        continue-on-error: true # warn-not-fail: never gate on eval
+        working-directory: services/ai-agent
+        run: uv run ai-agent eval-finance
+
+      - name: Summarize
+        if: always()
+        run: echo "Finance prompt eval finished (see ai_finance_eval_runs for the historical record)."

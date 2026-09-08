@@ -17,33 +17,34 @@ TLS certificate**, resolved from an external network.
 2. **ingress-nginx** installed (the Ingress resources use
    `ingressClassName: nginx`):
 
-   ```bash
-   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
-   ```
+    ```bash
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
+    ```
 
-   The load balancer it provisions is the target of the wildcard DNS record.
+    The load balancer it provisions is the target of the wildcard DNS record.
+
 3. **cert-manager** installed:
 
-   ```bash
-   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
-   ```
+    ```bash
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.3/cert-manager.yaml
+    ```
 
-   cert-manager installs into the `cert-manager` namespace - the CD pipeline
-   puts the Route 53 credentials secret there (required for `ClusterIssuer`s).
+    cert-manager installs into the `cert-manager` namespace - the CD pipeline
+    puts the Route 53 credentials secret there (required for `ClusterIssuer`s).
 
 ## 2. GitHub secrets (one-time, manual)
 
 Set these on the **`staging` environment** (Settings → Environments → staging)
 or as repository secrets:
 
-| Secret | Purpose |
-|--------|---------|
-| `KUBE_CONFIG_STAGING` | base64-encoded kubeconfig for the staging cluster |
-| `AWS_ACCESS_KEY_ID` | Route 53 write credentials (Terraform + cert-manager secret) |
-| `AWS_SECRET_ACCESS_KEY` | Route 53 write credentials |
-| `AWS_REGION` | e.g. `us-east-1` |
-| `TF_STATE_BUCKET` | S3 bucket for Terraform remote state (see §3) |
-| `TF_LOCK_TABLE` | DynamoDB table for Terraform state locking (see §3) |
+| Secret                  | Purpose                                                      |
+| ----------------------- | ------------------------------------------------------------ |
+| `KUBE_CONFIG_STAGING`   | base64-encoded kubeconfig for the staging cluster            |
+| `AWS_ACCESS_KEY_ID`     | Route 53 write credentials (Terraform + cert-manager secret) |
+| `AWS_SECRET_ACCESS_KEY` | Route 53 write credentials                                   |
+| `AWS_REGION`            | e.g. `us-east-1`                                             |
+| `TF_STATE_BUCKET`       | S3 bucket for Terraform remote state (see §3)                |
+| `TF_LOCK_TABLE`         | DynamoDB table for Terraform state locking (see §3)          |
 
 > The AWS user/role only needs `route53:ChangeResourceRecordSets`,
 > `route53:ListHostedZones`, and `route53:GetChange` on the
@@ -150,32 +151,32 @@ staging acceptance criteria.
 
 - **Manual redeploy of a previous image** (rollback):
 
-  ```bash
-  kubectl set image deployment/identity identity=ghcr.io/nkswalih/skyrict/identity:<previous-sha> -n skyrict-staging
-  kubectl rollout status deployment/identity -n skyrict-staging
-  ```
+    ```bash
+    kubectl set image deployment/identity identity=ghcr.io/nkswalih/skyrict/identity:<previous-sha> -n skyrict-staging
+    kubectl rollout status deployment/identity -n skyrict-staging
+    ```
 
 - **Certificate status / renewal**: cert-manager renews automatically (~2/3 of
   lifetime). Check:
 
-  ```bash
-  kubectl get certificate skyrict-staging-wildcard -n skyrict-staging
-  kubectl describe certificate skyrict-staging-wildcard -n skyrict-staging
-  ```
+    ```bash
+    kubectl get certificate skyrict-staging-wildcard -n skyrict-staging
+    kubectl describe certificate skyrict-staging-wildcard -n skyrict-staging
+    ```
 
 - **DNS drift**: re-run `terraform plan` in `infra/terraform/environments/staging`
   (with backend flags from §4) - the CD `dns` job does this on every deploy.
 
 ## 8. Troubleshooting
 
-| Symptom | Likely cause | Check |
-|---------|--------------|-------|
-| CD fails at "Wait for wildcard certificate" | DNS-01 challenge failed | `kubectl describe certificate -n skyrict-staging`; `kubectl logs -n cert-manager deploy/cert-manager`; confirm NS delegation (§4) and the `cert-manager-dns-credentials` secret |
-| Pods stuck `ImagePullBackOff` | `skyrict-registry` secret missing/stale | `kubectl get secret skyrict-registry -n skyrict-staging`; re-run CD (it recreates the secret from `GITHUB_TOKEN`) |
-| Pods `CreateContainerConfigError` | `identity-secrets-staging` missing a required key | `kubectl get secret identity-secrets-staging -n skyrict-staging -o jsonpath='{.data}'`; compare with §5 |
-| Identity refuses to start | fail-fast config (missing `IDENTITY_BASE_DOMAIN`, debug on, bad CORS, fixture keys) | `kubectl logs deploy/identity -n skyrict-staging --previous` |
-| `acme-test...` resolves to the wrong IP | DNS propagation / stale wildcard record | `getent hosts acme-test.staging.skyrict.com`; compare with the ingress LB address |
-| `curl` reports an untrusted certificate | certificate not yet issued or wrong secret | `kubectl get certificate -n skyrict-staging`; check `skyrict-staging-wildcard-tls` secret |
+| Symptom                                     | Likely cause                                                                        | Check                                                                                                                                                                           |
+| ------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CD fails at "Wait for wildcard certificate" | DNS-01 challenge failed                                                             | `kubectl describe certificate -n skyrict-staging`; `kubectl logs -n cert-manager deploy/cert-manager`; confirm NS delegation (§4) and the `cert-manager-dns-credentials` secret |
+| Pods stuck `ImagePullBackOff`               | `skyrict-registry` secret missing/stale                                             | `kubectl get secret skyrict-registry -n skyrict-staging`; re-run CD (it recreates the secret from `GITHUB_TOKEN`)                                                               |
+| Pods `CreateContainerConfigError`           | `identity-secrets-staging` missing a required key                                   | `kubectl get secret identity-secrets-staging -n skyrict-staging -o jsonpath='{.data}'`; compare with §5                                                                         |
+| Identity refuses to start                   | fail-fast config (missing `IDENTITY_BASE_DOMAIN`, debug on, bad CORS, fixture keys) | `kubectl logs deploy/identity -n skyrict-staging --previous`                                                                                                                    |
+| `acme-test...` resolves to the wrong IP     | DNS propagation / stale wildcard record                                             | `getent hosts acme-test.staging.skyrict.com`; compare with the ingress LB address                                                                                               |
+| `curl` reports an untrusted certificate     | certificate not yet issued or wrong secret                                          | `kubectl get certificate -n skyrict-staging`; check `skyrict-staging-wildcard-tls` secret                                                                                       |
 
 ## References
 

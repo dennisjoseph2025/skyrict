@@ -223,6 +223,32 @@ def seed_demo(
 
 
 @app.command()
+def seed_overdue_invoices(
+    tenant_id: str = typer.Option(
+        ...,
+        "--tenant-id",
+        help="UUID of a tenant to seed overdue invoices for",
+    ),
+) -> None:
+    """Seed overdue invoices so the A8 payment-reminder flow can be tested.
+
+    Non-destructive and idempotent: inserts a few APPROVED/ISSUED invoices
+    (``INV-OVR-*``) whose due date is in the past; existing rows are untouched.
+    """
+    import asyncio
+
+    from core.seed_overdue_invoices import seed_overdue_invoices as _seed
+
+    async def _run() -> None:
+        counts = await _seed(uuid.UUID(tenant_id))
+        typer.echo(f"seeded overdue invoices for tenant {tenant_id}:")
+        for key, value in counts.items():
+            typer.echo(f"  {key}: {value}")
+
+    asyncio.run(_run())
+
+
+@app.command()
 def provision_rbac(
     tenant_id: str = typer.Option(
         ...,

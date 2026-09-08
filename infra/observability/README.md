@@ -22,13 +22,13 @@ observability/
 
 ## What Goes Where
 
-| File | Purpose |
-|------|---------|
+| File                         | Purpose                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------- |
 | `otel-collector-config.yaml` | OTel Collector: receives traces/metrics/logs from services, exports to backends |
-| `prometheus.yml` | Prometheus: scrape targets, recording rules, alert rules |
-| `grafana/dashboards/*.json` | Grafana dashboards as JSON - committed to git, auto-provisioned |
-| `grafana/provisioning/` | Tells Grafana where to find dashboards and datasources |
-| `alerts/*.yml` | Prometheus alert rules - fire PagerDuty/Slack when thresholds breach |
+| `prometheus.yml`             | Prometheus: scrape targets, recording rules, alert rules                        |
+| `grafana/dashboards/*.json`  | Grafana dashboards as JSON - committed to git, auto-provisioned                 |
+| `grafana/provisioning/`      | Tells Grafana where to find dashboards and datasources                          |
+| `alerts/*.yml`               | Prometheus alert rules - fire PagerDuty/Slack when thresholds breach            |
 
 ## Adding a New Service Dashboard
 
@@ -40,10 +40,10 @@ observability/
 
 ## Stack
 
-| Component | Purpose |
-|-----------|---------|
+| Component               | Purpose                                 |
+| ----------------------- | --------------------------------------- |
 | OpenTelemetry Collector | Trace/metric/log collection and routing |
-| Prometheus | Metrics storage and alerting |
-| Grafana | Dashboards and visualization |
-| Loki (optional) | Log aggregation |
-| Jaeger (optional) | Distributed tracing |
+| Prometheus              | Metrics storage and alerting            |
+| Grafana                 | Dashboards and visualization            |
+| Loki (optional)         | Log aggregation                         |
+| Jaeger (optional)       | Distributed tracing                     |

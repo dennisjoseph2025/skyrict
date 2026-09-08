@@ -2,9 +2,9 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { DepartmentsClient } from "./departments";
 
 export default function DepartmentsPage() {
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.hr.read">
-      <DepartmentsClient />
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.hr.read">
+            <DepartmentsClient />
+        </ModuleAccessBoundary>
+    );
 }

@@ -665,12 +665,25 @@ class Invoice:
     source: str
     source_ref: str | None
     lines: tuple[InvoiceLine, ...] = ()
+    currency: str = "USD"
+    exchange_rate: Decimal = Decimal("1")
     id: uuid.UUID | None = None
     issued_at: datetime | None = None
     approved_at: datetime | None = None
     voided_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ExchangeRate:
+    """A tenant FX rate: one ``quote_currency`` unit priced in ``base_currency``."""
+
+    tenant_id: uuid.UUID
+    base_currency: str
+    quote_currency: str
+    effective_date: date
+    rate: Decimal
 
 
 @dataclass(frozen=True)
@@ -862,6 +875,9 @@ class AccountCodeSuggestion:
     side: str = "debit"
     contra_code: str = ""
     contra_name: str = ""
+    id: uuid.UUID | None = None
+    status: str = "pending"  # "pending" | "accepted" | "dismissed"
+    feature: str = "account_suggest"
 
 
 @dataclass(frozen=True)
@@ -994,8 +1010,34 @@ class AiFinanceSuggestion:
     suggested_name: str
     confidence: Decimal
     status: str = "pending"  # "pending" | "accepted" | "dismissed"
+    feature: str = "account_suggest"
     id: uuid.UUID | None = None
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class InvoiceLineSuggestion:
+    """Suggested invoice line item from the tenant's own line history (C1)."""
+
+    description: str
+    account_code: str
+    account_name: str
+    times_used: int
+    score: float
+
+
+@dataclass(frozen=True)
+class AiFinanceQualityScore:
+    """Acceptance-rate snapshot for one suggestion feature (window)."""
+
+    tenant_id: uuid.UUID
+    feature: str
+    window_days: int
+    sample_count: int
+    acceptance_rate: Decimal | None
+    below_threshold: bool
+    id: uuid.UUID | None = None
+    computed_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------

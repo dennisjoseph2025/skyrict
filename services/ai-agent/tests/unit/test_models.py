@@ -56,8 +56,12 @@ class TestRegistry:
             "ai_episodic_memory",
             "ai_query_cache",
             "ai_eval_runs",
+            # FIN-AI-002 finance prompt-eval results
+            "ai_finance_eval_runs",
             # SKY-70 product-embedding snapshot
             "ai_inv_item_embeddings",
+            # SKY-67 C1 finance-line snapshot
+            "ai_finance_line_embeddings",
             # LangGraph orchestration (SKY-59)
             "graph_checkpoints",
             "graph_checkpoint_writes",

@@ -4,13 +4,13 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { DataQualityClient } from "./data-quality";
 
 export const metadata: Metadata = {
-  title: "Data quality · HR",
+    title: "Data quality · HR",
 };
 
 export default function DataQualityPage() {
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.hr.read">
-      <DataQualityClient />
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.hr.read">
+            <DataQualityClient />
+        </ModuleAccessBoundary>
+    );
 }

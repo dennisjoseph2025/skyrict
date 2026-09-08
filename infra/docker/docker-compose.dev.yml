@@ -105,6 +105,9 @@ services:
       # compose network the ai-agent service listens on port 8000 internally
       # (host 8002 → container 8000).
       CORE_AI_AGENT_URL: http://skyrict-ai-agent:8000
+      # Outbound payment-reminder email -> Mailpit container (Web UI: http://localhost:8025).
+      CORE_EMAIL_SMTP_HOST: mailpit
+      CORE_EMAIL_SMTP_PORT: "1025"
     volumes:
       - ../../services/core/src:/app/services/core/src
       - ../../services/core/alembic:/app/services/core/alembic

@@ -11,7 +11,7 @@
   ],
   "risk_band_thresholds": {
     "low_to_medium": 0.45,
-    "medium_to_high": 0.70
+    "medium_to_high": 0.7
   },
   "abstention_rule": {
     "description": "confidence < 0.75 -> no score returned or stored (business-wide)",

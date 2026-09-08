@@ -13,16 +13,25 @@ import uuid
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
-from core.api.deps import get_finance_service, require_permission
+from core.api.deps import (
+    get_finance_service,
+    get_tenant_id,
+    require_ingest_m2m_or_permission,
+    require_permission,
+)
+from core.domain.value_objects import SUPPORTED_CURRENCIES
 from core.features.finance.schemas import (
     AccountCreateRequest,
     AccountResponse,
     ArAgingResponse,
     BalanceSheetResponse,
+    ExchangeRateResponse,
+    ExchangeRateWriteRequest,
     FiscalPeriodCreateRequest,
     FiscalPeriodResponse,
+    FxContextResponse,
     InvoiceCreateRequest,
     InvoiceResponse,
     JournalEntryCreateRequest,
@@ -45,6 +54,12 @@ router = APIRouter(prefix="/finance", tags=["finance"])
 require_finance_read = require_permission("erp.finance.read")
 require_finance_write = require_permission("erp.finance.write")
 require_finance_approve = require_permission("erp.finance.approve")
+require_fx_read = require_permission("core.fx.read")
+require_fx_write = require_permission("core.fx.write")
+# The invoice list additionally accepts ai-agent's m2m ingest secret
+# (CORE_AI_INGEST_TOKEN) so ``finance reindex`` can pull line history; every
+# other route stays JWT-only (same posture as inventory catalog reads).
+require_invoice_read_m2m = require_ingest_m2m_or_permission("erp.finance.read")
 
 
 def _tenant_id(current_user: dict[str, Any]) -> uuid.UUID:
@@ -80,7 +95,7 @@ async def create_account(
 @router.get("/accounts", response_model=ResponseEnvelope[list[AccountResponse]])
 async def list_accounts(
     include_inactive: bool = False,
-    current_user: dict[str, Any] = Depends(require_finance_read),
+    current_user: dict[str, Any] = Depends(require_invoice_read_m2m),
     svc: FinanceService = Depends(get_finance_service),
 ) -> ResponseEnvelope[list[AccountResponse]]:
     accounts = await svc.list_accounts(_tenant_id(current_user), include_inactive=include_inactive)
@@ -253,6 +268,7 @@ async def create_invoice(
         customer_id=body.customer_id,
         invoice_date=body.invoice_date,
         due_date=body.due_date,
+        currency=body.currency,
         lines=[
             InvoiceLineInput(
                 description=line.description,
@@ -271,10 +287,10 @@ async def list_invoices(
     status: str | None = None,
     offset: int = 0,
     limit: int = 50,
-    current_user: dict[str, Any] = Depends(require_finance_read),
+    _: dict[str, object] = Depends(require_invoice_read_m2m),
+    tenant_id: uuid.UUID = Depends(get_tenant_id),
     svc: FinanceService = Depends(get_finance_service),
 ) -> ListResponse[InvoiceResponse]:
-    tenant_id = _tenant_id(current_user)
     invoices, customer_names = await svc.list_invoices_with_customer_names(
         tenant_id,
         status=_parse_invoice_status(status),
@@ -432,6 +448,75 @@ async def get_ar_aging(
 ) -> ResponseEnvelope[ArAgingResponse]:
     report = await svc.ar_aging(_tenant_id(current_user), as_of)
     return ResponseEnvelope(data=ArAgingResponse.model_validate(report))
+
+
+# ---------------------------------------------------------------------------
+# FX rates (SKY-67 C2)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/fx/context", response_model=ResponseEnvelope[FxContextResponse])
+async def get_fx_context(
+    current_user: dict[str, Any] = Depends(require_fx_read),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ResponseEnvelope[FxContextResponse]:
+    tenant_id = _tenant_id(current_user)
+    return ResponseEnvelope(
+        data=FxContextResponse(
+            default_currency=await svc.default_currency(tenant_id),
+            currencies=sorted(SUPPORTED_CURRENCIES),
+        )
+    )
+
+
+@router.get("/fx/rates", response_model=ListResponse[ExchangeRateResponse])
+async def list_fx_rates(
+    currency: str | None = Query(default=None, max_length=3),
+    offset: int = 0,
+    limit: int = Query(default=50, le=200),
+    current_user: dict[str, Any] = Depends(require_fx_read),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ListResponse[ExchangeRateResponse]:
+    rates = await svc.list_exchange_rates(_tenant_id(current_user), currency=currency)
+    page = rates[offset : offset + limit]
+    return ListResponse(
+        data=[ExchangeRateResponse.model_validate(rate) for rate in page],
+        meta=PaginationMeta.create(
+            total=len(rates), page=(offset // limit) + 1 if limit else 1, page_size=limit
+        ),
+    )
+
+
+@router.get(
+    "/fx/rates/{quote_currency}",
+    response_model=ResponseEnvelope[ExchangeRateResponse],
+)
+async def get_fx_rate(
+    quote_currency: str,
+    on: date = Query(default_factory=date.today),
+    current_user: dict[str, Any] = Depends(require_fx_read),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ResponseEnvelope[ExchangeRateResponse]:
+    rate = await svc.exchange_rate_to_default(
+        _tenant_id(current_user), quote_currency=quote_currency, on_date=on
+    )
+    return ResponseEnvelope(data=ExchangeRateResponse.model_validate(rate))
+
+
+@router.put("/fx/rates", response_model=ResponseEnvelope[ExchangeRateResponse])
+async def put_fx_rate(
+    body: ExchangeRateWriteRequest,
+    current_user: dict[str, Any] = Depends(require_fx_write),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ResponseEnvelope[ExchangeRateResponse]:
+    rate = await svc.set_exchange_rate(
+        _tenant_id(current_user),
+        base_currency=body.base_currency,
+        quote_currency=body.quote_currency,
+        effective_date=body.effective_date,
+        rate=body.rate,
+    )
+    return ResponseEnvelope(data=ExchangeRateResponse.model_validate(rate))
 
 
 # ---------------------------------------------------------------------------

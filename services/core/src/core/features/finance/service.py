@@ -34,6 +34,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from core.core import audit_events
+from core.core.config import settings
 from core.core.constants import (
     ACCRUED_SALARIES_PAYABLE_ACCOUNT_CODE,
     AR_ACCOUNT_CODE,
@@ -54,6 +55,7 @@ from core.domain.entities import (
     ArAging,
     BalanceSheet,
     ChartOfAccount,
+    ExchangeRate,
     FiscalPeriod,
     Invoice,
     InvoiceLine,
@@ -64,6 +66,7 @@ from core.domain.entities import (
     TrialBalance,
 )
 from core.domain.value_objects import (
+    SUPPORTED_CURRENCIES,
     AccountType,
     CrmEntityType,
     CrmTimelineEventType,
@@ -86,6 +89,7 @@ if TYPE_CHECKING:
         FinanceTimelinePort,
         OrderLookupPort,
         SalesOrderForInvoicing,
+        TenantDefaultCurrencyPort,
     )
 
 from core.features.finance.ports import PayrollAccrualOutcome
@@ -126,6 +130,7 @@ class FinanceService:
         customers: CustomerPort | None = None,
         timeline: FinanceTimelinePort | None = None,
         order_lookup: OrderLookupPort | None = None,
+        default_currency: TenantDefaultCurrencyPort | None = None,
     ) -> None:
         self._repo = repo
         self._audit = audit
@@ -134,6 +139,7 @@ class FinanceService:
         self._customers = customers
         self._timeline = timeline
         self._order_lookup = order_lookup
+        self._default_currency = default_currency
 
     # ------------------------------------------------------------------
     # Chart of accounts
@@ -411,6 +417,7 @@ class FinanceService:
         invoice_date: date,
         due_date: date,
         lines: Sequence[InvoiceLineInput],
+        currency: str | None = None,
     ) -> Invoice:
         if not lines:
             raise ValidationError("An invoice must have at least one line")
@@ -418,6 +425,8 @@ class FinanceService:
             raise ValidationError("Invoice due date must be on or after its invoice date")
 
         invoice_lines, total = await self._resolve_invoice_lines(tenant_id, lines)
+        currency_code = await self._resolve_invoice_currency(tenant_id, currency)
+        exchange_rate = await self._resolve_exchange_rate(tenant_id, currency_code, invoice_date)
         number = await self._repo.next_invoice_number(tenant_id, invoice_date.year)
         invoice = Invoice(
             tenant_id=tenant_id,
@@ -427,6 +436,8 @@ class FinanceService:
             due_date=due_date,
             status=InvoiceStatus.DRAFT,
             total=total,
+            currency=currency_code,
+            exchange_rate=exchange_rate,
             source=INVOICE_SOURCE_MANUAL,
             source_ref=None,
             lines=invoice_lines,
@@ -479,6 +490,10 @@ class FinanceService:
             )
 
         total = sum((line.amount for line in invoice_lines), Decimal("0"))
+        currency_code = (order.currency or settings.DEFAULT_CURRENCY).strip().upper()
+        exchange_rate = await self._resolve_exchange_rate(
+            order.tenant_id, currency_code, order.invoice_date
+        )
         number = await self._repo.next_invoice_number(order.tenant_id, order.invoice_date.year)
         invoice = Invoice(
             tenant_id=order.tenant_id,
@@ -488,6 +503,8 @@ class FinanceService:
             due_date=order.due_date,
             status=InvoiceStatus.ISSUED,
             total=total,
+            currency=currency_code,
+            exchange_rate=exchange_rate,
             source=INVOICE_SOURCE_SALES_ORDER,
             source_ref=order.order_id,
             lines=tuple(invoice_lines),
@@ -990,6 +1007,114 @@ class FinanceService:
                 )
             )
         return tuple(invoice_lines), total
+
+    # ------------------------------------------------------------------
+    # Currency / FX (SKY-67 C2)
+    # ------------------------------------------------------------------
+
+    async def default_currency(self, tenant_id: uuid.UUID) -> str:
+        """The tenant's base currency (payroll setting, else platform default)."""
+        return await self._default_currency_code(tenant_id)
+
+    async def get_exchange_rate(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        base_currency: str,
+        quote_currency: str,
+        on_date: date,
+    ) -> ExchangeRate:
+        rate = await self._repo.get_exchange_rate(tenant_id, base_currency, quote_currency, on_date)
+        if rate is None:
+            raise NotFoundError(
+                f"No exchange rate for {base_currency}/{quote_currency} on {on_date}"
+            )
+        return rate
+
+    async def set_exchange_rate(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        base_currency: str,
+        quote_currency: str,
+        effective_date: date,
+        rate: Decimal,
+    ) -> ExchangeRate:
+        base_currency = base_currency.strip().upper()
+        quote_currency = quote_currency.strip().upper()
+        for code in (base_currency, quote_currency):
+            if code not in SUPPORTED_CURRENCIES:
+                raise ValidationError(f"Unsupported currency '{code}'")
+        if base_currency == quote_currency:
+            raise ValidationError("Base and quote currencies must differ")
+        if rate <= 0:
+            raise ValidationError("Exchange rate must be positive")
+        quantized = rate.quantize(Decimal("0.000001"))
+        return await self._repo.upsert_exchange_rate(
+            ExchangeRate(
+                tenant_id=tenant_id,
+                base_currency=base_currency,
+                quote_currency=quote_currency,
+                effective_date=effective_date,
+                rate=quantized,
+            )
+        )
+
+    async def list_exchange_rates(
+        self, tenant_id: uuid.UUID, *, currency: str | None = None
+    ) -> Sequence[ExchangeRate]:
+        return await self._repo.list_exchange_rates(tenant_id, currency=currency)
+
+    async def exchange_rate_to_default(
+        self, tenant_id: uuid.UUID, *, quote_currency: str, on_date: date
+    ) -> ExchangeRate:
+        """Latest rate from ``quote_currency`` to the tenant default (identity=1)."""
+        base = await self._default_currency_code(tenant_id)
+        quote = quote_currency.strip().upper()
+        if quote == base:
+            return ExchangeRate(
+                tenant_id=tenant_id,
+                base_currency=base,
+                quote_currency=base,
+                effective_date=on_date,
+                rate=Decimal("1"),
+            )
+        return await self.get_exchange_rate(
+            tenant_id, base_currency=base, quote_currency=quote, on_date=on_date
+        )
+
+    async def _default_currency_code(self, tenant_id: uuid.UUID) -> str:
+        """Tenant default currency: payroll setting, else ``settings.DEFAULT_CURRENCY``."""
+        if self._default_currency is not None:
+            configured = await self._default_currency.get_default_currency(tenant_id)
+            if configured:
+                return configured.strip().upper()
+        return settings.DEFAULT_CURRENCY.strip().upper()
+
+    async def _resolve_invoice_currency(self, tenant_id: uuid.UUID, currency: str | None) -> str:
+        code = (currency or await self._default_currency_code(tenant_id)).strip().upper()
+        if code not in SUPPORTED_CURRENCIES:
+            raise ValidationError(f"Unsupported currency '{code}'")
+        return code
+
+    async def _resolve_exchange_rate(
+        self, tenant_id: uuid.UUID, currency: str, on_date: date
+    ) -> Decimal:
+        """Rate from ``currency`` to the tenant default - 1 for the default itself.
+
+        Raises when the currency differs from the tenant default and no rate is
+        on file: invoice creation never guesses an FX rate (C2 guardrail).
+        """
+        base = await self._default_currency_code(tenant_id)
+        if currency == base:
+            return Decimal("1")
+        rate = await self._repo.get_exchange_rate(tenant_id, base, currency, on_date)
+        if rate is None:
+            raise ValidationError(
+                f"No exchange rate on file for {currency} to {base} on {on_date} "
+                "- enter one before creating this invoice"
+            )
+        return rate.rate.quantize(Decimal("0.000001"))
 
     async def _announce_invoice_created(
         self, tenant_id: uuid.UUID, invoice: Invoice, *, user_id: uuid.UUID | None

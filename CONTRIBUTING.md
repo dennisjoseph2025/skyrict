@@ -113,12 +113,12 @@ strict = true
 
 ## Testing
 
-| Type | Tool | Target | Run |
-|------|------|--------|-----|
-| Unit | pytest | 80%+ on business logic | `make test-unit` |
-| Integration | pytest + Testcontainers | Critical paths | `make test-integration` |
-| E2E | Playwright | User flows | `make test-e2e` |
-| Performance | Locust / k6 | API benchmarks | `make benchmark` |
+| Type        | Tool                    | Target                 | Run                     |
+| ----------- | ----------------------- | ---------------------- | ----------------------- |
+| Unit        | pytest                  | 80%+ on business logic | `make test-unit`        |
+| Integration | pytest + Testcontainers | Critical paths         | `make test-integration` |
+| E2E         | Playwright              | User flows             | `make test-e2e`         |
+| Performance | Locust / k6             | API benchmarks         | `make benchmark`        |
 
 Every PR must include tests for the functionality being added or changed. Bug fix PRs must include a regression test.
 
@@ -205,15 +205,19 @@ Significant design decisions should be documented as Architecture Decision Recor
 # ADR-{number}: {title}
 
 ## Status
+
 Accepted | Proposed | Deprecated | Superseded by ADR-{number}
 
 ## Context
+
 What is the issue that motivates this decision?
 
 ## Decision
+
 What is the change being proposed or decided?
 
 ## Consequences
+
 What are the tradeoffs? What becomes easier? What becomes harder?
 ```
 

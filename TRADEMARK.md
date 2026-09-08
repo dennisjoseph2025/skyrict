@@ -8,10 +8,10 @@ This policy defines the rules for using Skyrict trademarks, logos, and brand ass
 
 The following are registered or common-law trademarks of Skyrict:
 
-| Mark | Type | Status |
-|------|------|--------|
-| **Skyrict** | Word mark | Registered |
-| **Skyrict** logo | Design mark | Registered |
+| Mark                   | Type               | Status     |
+| ---------------------- | ------------------ | ---------- |
+| **Skyrict**            | Word mark          | Registered |
+| **Skyrict** logo       | Design mark        | Registered |
 | **skyrict** (logotype) | Stylized word mark | Registered |
 
 This list may be updated from time to time. Marks not listed here may still be protected under applicable trademark law.
@@ -129,4 +129,4 @@ For trademark inquiries, permissions, or questions:
 
 ---
 
-*Last updated: July 2026*
+_Last updated: July 2026_

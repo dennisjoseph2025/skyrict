@@ -34,8 +34,8 @@ python -m skyrict_testing.generate_keys
 
 ## Modules
 
-| Module | Purpose |
-|--------|---------|
-| `fixtures` | `rsa_private_key`, `rsa_public_key`, `anyio_backend` pytest fixtures |
-| `factories` | `UserFactory`, `TenantFactory`, `SessionFactory` (factory_boy) |
+| Module          | Purpose                                                                |
+| --------------- | ---------------------------------------------------------------------- |
+| `fixtures`      | `rsa_private_key`, `rsa_public_key`, `anyio_backend` pytest fixtures   |
+| `factories`     | `UserFactory`, `TenantFactory`, `SessionFactory` (factory_boy)         |
 | `generate_keys` | CLI to generate RSA 2048-bit key pairs for local RS256 JWT development |

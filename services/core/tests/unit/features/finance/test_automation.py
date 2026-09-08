@@ -24,9 +24,12 @@ from core.core.exceptions import AiServiceUnavailableError
 from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
+    AiFinanceSuggestion,
+    AnomalyNarration,
     ChartOfAccount,
     Invoice,
     JournalEntry,
+    ReminderDraft,
 )
 from core.domain.value_objects import AccountType, EntryStatus, InvoiceStatus
 from core.features.finance.automation import FinanceAutomationService
@@ -39,7 +42,7 @@ class StubRepo:
     def __init__(self) -> None:
         self.journal_entry: JournalEntry | None = None
         self.reversed_calls: list[tuple[object, object, object, object]] = []
-        self.setting_value: str | None = None
+        self.settings: dict[str, str] = {}
         self.setting_writes: list[tuple[object, str, str]] = []
         self.accounts: list[ChartOfAccount] = []
         self.keyword_result: AccountCodeSuggestion | None = None
@@ -51,6 +54,13 @@ class StubRepo:
         self.invoice_calls: list[tuple[object, object]] = []
         self.overdue_invoices: list[Invoice] = []
         self.overdue_calls: list[object] = []
+        # SKY-67 acceptance telemetry stub state
+        self.reviewed_suggestion: AiFinanceSuggestion | None = None
+        self.review_calls: list[tuple[object, object, bool]] = []
+        self.acceptance_counts: list[tuple[str, int, int]] = []
+        self.quality_upserts: list[object] = []
+        # C6 numbering-scheme stub state
+        self.invoice_count = 0
 
     async def get_journal_entry(self, entry_id, tenant_id):
         return self.journal_entry
@@ -60,12 +70,16 @@ class StubRepo:
         return self.journal_entry
 
     async def get_tenant_setting(self, tenant_id, key):
-        return SimpleNamespace(value=self.setting_value) if self.setting_value is not None else None
+        value = self.settings.get(key)
+        return SimpleNamespace(value=value) if value is not None else None
 
     async def upsert_tenant_setting(self, tenant_id, key, value):
         self.setting_writes.append((tenant_id, key, value))
-        self.setting_value = value
+        self.settings[key] = value
         return SimpleNamespace(value=value)
+
+    async def count_invoices_since(self, tenant_id, since):
+        return self.invoice_count
 
     async def list_accounts(self, tenant_id):
         return self.accounts
@@ -80,6 +94,17 @@ class StubRepo:
 
     async def upsert_ai_suggestion(self, tenant_id, suggestion):
         pass
+
+    async def review_ai_suggestion(self, tenant_id, suggestion_id, *, accepted):
+        self.review_calls.append((tenant_id, suggestion_id, accepted))
+        return self.reviewed_suggestion
+
+    async def suggestion_acceptance_counts(self, tenant_id, window_days):
+        return self.acceptance_counts
+
+    async def upsert_ai_quality_score(self, tenant_id, score):
+        self.quality_upserts.append(score)
+        return score
 
     # --- FIN-AI-001 additions ---
 
@@ -172,6 +197,47 @@ async def test_settings_roundtrip_persists_threshold() -> None:
     persisted = await svc.get_settings(object())
     assert persisted.working_capital_threshold == Decimal("2.0")
     assert len(repo.setting_writes) == 1
+
+
+async def test_settings_roundtrip_persists_numbering_scheme() -> None:
+    repo = StubRepo()
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    got = await svc.put_settings(
+        object(), Decimal("1.5"), invoice_numbering_scheme="INV-2026-######"
+    )
+
+    assert got.invoice_numbering_scheme == "INV-2026-######"
+    assert any(key == "invoice_numbering_scheme" for _, key, _ in repo.setting_writes)
+
+
+async def test_settings_put_without_scheme_preserves_existing() -> None:
+    repo = StubRepo()
+    repo.settings["invoice_numbering_scheme"] = "FAC-2026-#####"
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    got = await svc.put_settings(object(), Decimal("2.0"))
+
+    assert got.invoice_numbering_scheme == "FAC-2026-#####"
+    assert len(repo.setting_writes) == 1  # only the threshold write happened
+
+
+async def test_recommend_numbering_scheme_scales_width_with_volume() -> None:
+    base = date(2026, 6, 1)
+    for volume, expected_width, expected_scheme in [
+        (500, 5, "INV-2026-#####"),
+        (50_000, 6, "INV-2026-######"),
+        (150_000, 7, "INV-2026-#######"),
+    ]:
+        repo = StubRepo()
+        repo.invoice_count = volume
+        svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+        got = await svc.recommend_numbering_scheme(object(), today=base)
+
+        assert got.seq_width == expected_width
+        assert got.scheme == expected_scheme
+        assert "INV" in got.prefix
 
 
 def _account(code: str, name: str) -> ChartOfAccount:
@@ -379,6 +445,71 @@ async def test_narrate_anomaly_raises_when_missing() -> None:
         await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
 
 
+async def test_narrate_anomaly_uses_ai_when_cites_figure() -> None:
+    repo = StubRepo()
+    repo.anomaly = _anomaly()
+    audit = RecordingAudit()
+
+    async def ai_narrate(anomaly_type, description, severity):
+        return AnomalyNarration(
+            narration="Duplicate entry flagged - both posts total 1,200. Review...",
+            model_used="gpt-test",
+        )
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["narration"].startswith("Duplicate entry flagged")
+    assert result["model_used"] == "gpt-test"
+    assert audit.logs[0]["details"]["model_used"] == "gpt-test"
+
+
+async def test_narrate_anomaly_falls_back_when_ai_omits_figure() -> None:
+    repo = StubRepo()
+    anomaly = _anomaly()
+    repo.anomaly = anomaly
+
+    async def ai_narrate(anomaly_type, description, severity):
+        return AnomalyNarration(narration="A duplicate entry was detected.", model_used="gpt-test")
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["model_used"] == ""
+    assert result["narration"] == (
+        f"Anomaly detected: {anomaly.anomaly_type} — {anomaly.description}"
+    )
+
+
+async def test_narrate_anomaly_falls_back_when_ai_fails() -> None:
+    repo = StubRepo()
+    anomaly = _anomaly()
+    repo.anomaly = anomaly
+
+    async def ai_narrate(anomaly_type, description, severity):
+        raise AiServiceUnavailableError("down")
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["model_used"] == ""
+    assert "Anomaly detected" in result["narration"]
+
+
+async def test_narrate_anomaly_falls_back_when_ai_abstains() -> None:
+    repo = StubRepo()
+    repo.anomaly = _anomaly()
+
+    async def ai_narrate(anomaly_type, description, severity):
+        return None
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_narrate=ai_narrate)
+    result = await svc.narrate_anomaly(_TENANT, _ANOMALY_ID)
+
+    assert result["model_used"] == ""
+    assert "Anomaly detected" in result["narration"]
+
+
 # ---------------------------------------------------------------------------
 # generate_reminder tests
 # ---------------------------------------------------------------------------
@@ -432,6 +563,63 @@ async def test_generate_reminder_raises_when_invoice_missing() -> None:
         await svc.generate_reminder(_TENANT, _INVOICE_ID)
 
 
+async def test_generate_reminder_uses_ai() -> None:
+    repo = StubRepo()
+    invoice = _invoice(due_offset=-10, total=Decimal("1500"))
+    repo.invoice = invoice
+    audit = RecordingAudit()
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        return ReminderDraft(
+            invoice_number=invoice_number,
+            customer_name="Acme Corp",
+            amount=amount,
+            days_overdue=days_overdue,
+            tone=tone,
+            subject=f"Overdue Invoice {invoice_number}",
+            body="Please remit payment for invoice INV-001 totaling 1,500.",
+            model_used="gpt-test",
+        )
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminder = await svc.generate_reminder(_TENANT, _INVOICE_ID)
+
+    assert reminder.customer_name == "Acme Corp"
+    assert reminder.subject == "Overdue Invoice INV-001"
+    assert reminder.model_used == "gpt-test"
+    assert audit.logs[0]["details"]["model_used"] == "gpt-test"
+
+
+async def test_generate_reminder_falls_back_when_ai_fails() -> None:
+    repo = StubRepo()
+    repo.invoice = _invoice(due_offset=-10, total=Decimal("1500"))
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        raise AiServiceUnavailableError("down")
+
+    audit = RecordingAudit()
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminder = await svc.generate_reminder(_TENANT, _INVOICE_ID)
+
+    assert reminder.model_used == ""
+    assert "Payment Reminder" in reminder.subject
+    assert audit.logs[0]["details"]["model_used"] == ""
+
+
+async def test_generate_reminder_falls_back_when_ai_returns_empty() -> None:
+    repo = StubRepo()
+    repo.invoice = _invoice(due_offset=-10, total=Decimal("1500"))
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        return None
+
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit(), ai_remind=ai_remind)
+    reminder = await svc.generate_reminder(_TENANT, _INVOICE_ID)
+
+    assert reminder.model_used == ""
+    assert "Payment Reminder" in reminder.subject
+
+
 # ---------------------------------------------------------------------------
 # batch_reminders tests
 # ---------------------------------------------------------------------------
@@ -471,3 +659,125 @@ async def test_batch_reminders_empty_list() -> None:
     reminders = await svc.batch_reminders(_TENANT)
 
     assert reminders == []
+
+
+async def test_batch_reminders_uses_ai_and_audits_ai_generated() -> None:
+    repo = StubRepo()
+    inv1 = _invoice(due_offset=-10, total=Decimal("100"))
+    repo.overdue_invoices = [inv1]
+    audit = RecordingAudit()
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        return ReminderDraft(
+            invoice_number=invoice_number,
+            customer_name=None,
+            amount=amount,
+            days_overdue=days_overdue,
+            tone=tone,
+            subject=f"Overdue {invoice_number}",
+            body="Please pay now, thanks.",
+            model_used="gpt-test",
+        )
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminders = await svc.batch_reminders(_TENANT)
+
+    assert reminders[0].model_used == "gpt-test"
+    assert len(audit.logs) == 1
+    assert audit.logs[0]["action"] == FINANCE_AI_REMINDER_GENERATED
+
+
+async def test_batch_reminders_falls_back_per_invoice_when_ai_fails() -> None:
+    repo = StubRepo()
+    repo.overdue_invoices = [_invoice(due_offset=-10)]
+    audit = RecordingAudit()
+
+    async def ai_remind(customer_name, invoice_number, amount, days_overdue, tone):
+        raise AiServiceUnavailableError("down")
+
+    svc = FinanceAutomationService(repo=repo, audit=audit, ai_remind=ai_remind)
+    reminders = await svc.batch_reminders(_TENANT)
+
+    assert reminders[0].model_used == ""
+    assert len(audit.logs) == 0
+
+
+async def test_accept_suggestion_marks_accepted() -> None:
+    repo = StubRepo()
+    repo.reviewed_suggestion = AiFinanceSuggestion(
+        tenant_id=_TENANT,
+        description="rent",
+        suggested_code="5000",
+        suggested_name="Rent Expense",
+        confidence=Decimal("0.9"),
+        status="accepted",
+        id=uuid.uuid4(),
+    )
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.accept_suggestion(_TENANT, uuid.uuid4())
+
+    assert result.status == "accepted"
+    assert repo.review_calls == [(_TENANT, repo.review_calls[0][1], True)]
+
+
+async def test_dismiss_suggestion_marks_dismissed() -> None:
+    repo = StubRepo()
+    repo.reviewed_suggestion = AiFinanceSuggestion(
+        tenant_id=_TENANT,
+        description="rent",
+        suggested_code="5000",
+        suggested_name="Rent Expense",
+        confidence=Decimal("0.9"),
+        status="dismissed",
+        id=uuid.uuid4(),
+    )
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.dismiss_suggestion(_TENANT, uuid.uuid4())
+
+    assert result.status == "dismissed"
+    assert repo.review_calls[0][2] is False
+
+
+async def test_accept_suggestion_raises_when_missing() -> None:
+    repo = StubRepo()
+    repo.reviewed_suggestion = None
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    with pytest.raises(NotFoundError):
+        await svc.accept_suggestion(_TENANT, uuid.uuid4())
+
+
+async def test_suggestion_quality_computes_rates_and_persists_scores() -> None:
+    repo = StubRepo()
+    repo.acceptance_counts = [
+        ("account_suggest", 2, 8),  # 20% -> below threshold
+        ("draft_entry", 9, 1),  # 90% -> above threshold
+    ]
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.suggestion_quality(_TENANT, window_days=30)
+
+    assert len(result.features) == 2
+    assert len(repo.quality_upserts) == 2
+    scores = {s.feature: s for s in result.features}
+    assert scores["account_suggest"].acceptance_rate == Decimal("0.2")
+    assert scores["account_suggest"].below_threshold is True
+    assert scores["draft_entry"].below_threshold is False
+    assert result.overall_acceptance_rate == Decimal("0.55")  # 11/20
+    assert result.low_quality is True
+    assert result.window_days == 30
+
+
+async def test_suggestion_quality_no_signal_is_not_low_quality() -> None:
+    repo = StubRepo()
+    repo.acceptance_counts = []
+    svc = FinanceAutomationService(repo=repo, audit=RecordingAudit())
+
+    result = await svc.suggestion_quality(_TENANT, window_days=30)
+
+    assert result.features == []
+    assert result.overall_acceptance_rate is None
+    assert result.low_quality is False
+    assert repo.quality_upserts == []

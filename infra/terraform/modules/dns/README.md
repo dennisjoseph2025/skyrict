@@ -8,14 +8,14 @@ identical variables and outputs.
 
 ## Module contract
 
-| Element | Definition |
-|---------|------------|
-| `zone_name` | zone apex, e.g. `staging.skyrict.com` |
-| `create_zone` | `true` = create + own the zone (first bootstrap); `false` = look up an existing zone by name |
-| `zone_tags` | tags applied when the zone is created |
-| `records` | `list(object({ name, type, ttl, records }))` - names are relative to the zone apex (`"*"` is a wildcard) |
-| `zone_id` (output) | provider-specific zone identifier |
-| `nameservers` (output) | authoritative NS records, for parent-zone delegation |
+| Element                | Definition                                                                                               |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `zone_name`            | zone apex, e.g. `staging.skyrict.com`                                                                    |
+| `create_zone`          | `true` = create + own the zone (first bootstrap); `false` = look up an existing zone by name             |
+| `zone_tags`            | tags applied when the zone is created                                                                    |
+| `records`              | `list(object({ name, type, ttl, records }))` - names are relative to the zone apex (`"*"` is a wildcard) |
+| `zone_id` (output)     | provider-specific zone identifier                                                                        |
+| `nameservers` (output) | authoritative NS records, for parent-zone delegation                                                     |
 
 Example record set (what the staging environment passes in):
 
@@ -36,7 +36,7 @@ records = [
    `versions.tf`) implementing the contract above.
 2. In `environments/<env>/main.tf`, change the module `source` to
    `"../../modules/dns/<provider>"` and add the provider's `required_providers`
-   + provider config in `provider.tf`.
+    - provider config in `provider.tf`.
 3. Update `terraform.tfvars` only if the new provider needs a different zone
    model (e.g. Cloudflare zones are looked up by name, so `create_zone=false`
    stays correct).

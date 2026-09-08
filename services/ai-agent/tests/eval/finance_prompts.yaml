@@ -1,0 +1,132 @@
+# Finance AI prompt-eval registry (FIN-AI-002, SKY-67).
+#
+# Drives the REAL production prompt functions (a1_suggest / a2_draft /
+# a7_narrate / a8_remind) through `ai-agent eval-finance`. Each case is the
+# exact request shape the deployed endpoints build; scoring rules live in
+# ai_agent/features/finance_eval/harness.py. warn-not-fail by contract: a
+# below-threshold feature prints a WARNING and is recorded, never gates CI.
+
+threshold: 0.80
+prompt_id: prompts-v1-2026-09
+features:
+  - name: a1_suggest
+    cases:
+      - id: a1-001
+        description: "Paid monthly office rent using cash"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "5000", name: "Rent Expense" }
+        expected_code: "5000"
+      - id: a1-002
+        description: "Received payment from customer Beta Inc for invoice INV-041"
+        accounts:
+          - { code: "1100", name: "Accounts Receivable" }
+          - { code: "1000", name: "Cash" }
+        expected_code: "1100"
+      - id: a1-003
+        description: "Purchased office equipment on credit"
+        accounts:
+          - { code: "1500", name: "Equipment" }
+          - { code: "2000", name: "Accounts Payable" }
+        expected_code: "1500"
+      - id: a1-004
+        description: "Owner invested cash into the business"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "3000", name: "Owner Equity" }
+        expected_code: "3000"
+
+  - name: a2_draft
+    cases:
+      - id: a2-001
+        description: "Paid cash for monthly office rent $2,000"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "5000", name: "Rent Expense" }
+        expected_min_lines: 2
+      - id: a2-002
+        description: "Purchased equipment for $5,000, paid by bank transfer"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "1500", name: "Equipment" }
+        expected_min_lines: 2
+      - id: a2-003
+        description: "Paid $1,200 electricity bill and $800 water bill from cash"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "5100", name: "Utilities Expense" }
+        expected_min_lines: 3
+      - id: a2-004
+        description: "Paid £1,500 for UK consulting services"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "5200", name: "Contractor Expense" }
+        expected_min_lines: 2
+      - id: a2-005
+        description: "Lunch with client"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "6000", name: "Meals Expense" }
+        expected_min_lines: 0
+      - id: a2-006
+        description: "The quarterly review went well"
+        accounts:
+          - { code: "1000", name: "Cash" }
+          - { code: "4000", name: "Revenue" }
+        expected_min_lines: 0
+
+  - name: a7_narrate
+    cases:
+      - id: a7-001
+        anomaly_type: duplicate_entry
+        severity: medium
+        description: "Gross sales jumped 45% while refunds rose to $12,400 in July."
+        expected_cites_figure: true
+      - id: a7-002
+        anomaly_type: negative_balance
+        severity: low
+        description: "The cash account dipped to -$180 after the supplier run."
+        expected_cites_figure: true
+      - id: a7-003
+        anomaly_type: late_posted
+        severity: low
+        description: "Three entries from last month were posted 12 days late."
+        expected_cites_figure: true
+      - id: a7-004
+        anomaly_type: low_working_capital
+        severity: high
+        description: "Working capital fell below $50,000 this week."
+        expected_cites_figure: true
+      - id: a7-005
+        anomaly_type: duplicate_entry
+        severity: medium
+        description: "Two invoices totalling $8,100 appear twice in the ledger."
+        expected_cites_figure: true
+
+  - name: a8_remind
+    cases:
+      - id: a8-001
+        invoice_number: "INV-2026-00042"
+        amount: 1840.50
+        days_overdue: 18
+        tone: polite
+      - id: a8-002
+        invoice_number: "INV-2026-00117"
+        amount: 5200.00
+        days_overdue: 45
+        tone: firm
+      - id: a8-003
+        invoice_number: "INV-2026-00063"
+        amount: 275.00
+        days_overdue: 90
+        tone: final
+      - id: a8-004
+        invoice_number: "INV-2026-00099"
+        amount: 12400.00
+        days_overdue: 12
+        tone: polite
+      - id: a8-005
+        invoice_number: "INV-2026-00010"
+        amount: 60.75
+        days_overdue: 30
+        tone: firm

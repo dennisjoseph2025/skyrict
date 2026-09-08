@@ -16,7 +16,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -36,19 +36,24 @@ from core.core.audit_events import (
     FINANCE_DUPLICATE_SUGGESTION_CREATED,
     FINANCE_JOURNAL_ENTRY_REVERSED,
 )
+from core.core.constants import INVOICE_PREFIX
 from core.core.exceptions import AiServiceUnavailableError
 from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
+    AiFinanceQualityScore,
     AiFinanceSuggestion,
+    AnomalyNarration,
     ChartOfAccount,
     DraftEntry,
     DraftEntryLine,
+    InvoiceLineSuggestion,
     ReminderDraft,
     RevenueConcentration,
     RevenueConcentrationEntry,
 )
 from core.features.finance.ports import AuditSink, CustomerPort, FinanceRepositoryPort
+from core.features.finance.reminder_email import send_reminder_email
 from core.features.finance.schemas import (
     AccountCodeSuggestionResponse,
     AnomalyNarrationResponse,
@@ -64,6 +69,8 @@ from core.features.finance.schemas import (
     DraftEntryResponse,
     DuplicateGroupResponse,
     HealthScoreResponse,
+    InvoiceLineSuggestionResponse,
+    InvoiceNumberingSchemeResponse,
     JournalEntryResponse,
     PaymentMethodAnalyticsResponse,
     ReminderDraftLineResponse,
@@ -71,6 +78,8 @@ from core.features.finance.schemas import (
     ReminderGenerateRequest,
     RevenueConcentrationResponse,
     SuggestAccountCodeRequest,
+    SuggestInvoiceLinesRequest,
+    SuggestionQualityResponse,
     TenantSettingsResponse,
     WorkingCapitalAlertResponse,
     WorkingCapitalSeriesResponse,
@@ -100,6 +109,14 @@ def _user_id(current_user: dict[str, Any]) -> uuid.UUID:
 
 AiSuggester = Callable[[str, Sequence[ChartOfAccount]], Awaitable[AccountCodeSuggestion | None]]
 AiDrafter = Callable[[str, Sequence[ChartOfAccount]], Awaitable[DraftEntry | None]]
+AiNarrater = Callable[[str, str, str], Awaitable[AnomalyNarration | None]]
+AiReminder = Callable[[str | None, str, Decimal, int, str], Awaitable[ReminderDraft | None]]
+AiLineSuggester = Callable[[str], Awaitable[list[InvoiceLineSuggestion] | None]]
+
+
+def _narration_cites_figure(narration: str) -> bool:
+    """AI narration must quote at least one triggering figure (spec A7)."""
+    return any(ch.isdigit() for ch in narration)
 
 
 @dataclass
@@ -111,6 +128,9 @@ class FinanceAutomationService:
     customers: CustomerPort | None = field(default=None)
     ai_suggest: AiSuggester | None = field(default=None)
     ai_draft: AiDrafter | None = field(default=None)
+    ai_narrate: AiNarrater | None = field(default=None)
+    ai_remind: AiReminder | None = field(default=None)
+    ai_lines: AiLineSuggester | None = field(default=None)
 
     async def close_checklist(self, tenant_id: uuid.UUID, period_id: uuid.UUID) -> Any:
         return await self.repo.close_checklist(tenant_id, period_id)
@@ -129,8 +149,9 @@ class FinanceAutomationService:
             suggestion = ai or await self.repo.suggest_account_code(tenant_id, description)
         else:
             suggestion = await self.repo.suggest_account_code(tenant_id, description)
+        persisted: AiFinanceSuggestion | None = None
         if suggestion.suggested_code:
-            await self.repo.upsert_ai_suggestion(
+            persisted = await self.repo.upsert_ai_suggestion(
                 tenant_id,
                 AiFinanceSuggestion(
                     tenant_id=tenant_id,
@@ -147,7 +168,106 @@ class FinanceAutomationService:
                 target="finance:suggestion",
                 details={"code": suggestion.suggested_code},
             )
-        return suggestion
+        if persisted is None:
+            return suggestion
+        return AccountCodeSuggestion(
+            description=suggestion.description,
+            suggested_code=suggestion.suggested_code,
+            suggested_name=suggestion.suggested_name,
+            confidence=suggestion.confidence,
+            reasoning=suggestion.reasoning,
+            amount=suggestion.amount,
+            side=suggestion.side,
+            contra_code=suggestion.contra_code,
+            contra_name=suggestion.contra_name,
+            id=persisted.id,
+            status=persisted.status,
+            feature=persisted.feature,
+        )
+
+    async def suggest_invoice_lines(
+        self, tenant_id: uuid.UUID, description: str
+    ) -> list[InvoiceLineSuggestion]:
+        """Best-effort line-item suggestions from the tenant's line history (C1).
+
+        The ai-agent vector store is a read-only enhancement over the plain
+        invoice form (never an auto-insert); any failure returns an empty list
+        so the dialog degrades to manual entry without an error.
+        """
+        if self.ai_lines is not None:
+            try:
+                suggestions = await self.ai_lines(description)
+            except AiServiceUnavailableError:
+                return []
+            return suggestions or []
+        return []
+
+    async def accept_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion:
+        result = await self.repo.review_ai_suggestion(tenant_id, suggestion_id, accepted=True)
+        if result is None:
+            raise NotFoundError("Suggestion not found")
+        return result
+
+    async def dismiss_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion:
+        result = await self.repo.review_ai_suggestion(tenant_id, suggestion_id, accepted=False)
+        if result is None:
+            raise NotFoundError("Suggestion not found")
+        return result
+
+    async def suggestion_quality(self, tenant_id: uuid.UUID, window_days: int = 30) -> Any:
+        counts = await self.repo.suggestion_acceptance_counts(tenant_id, window_days)
+        from decimal import Decimal
+
+        feature_scores = []
+        total_accepted = 0
+        total_decisions = 0
+        for feature, accepted, dismissed in counts:
+            total_accepted += accepted
+            total_decisions += accepted + dismissed
+            rate = (
+                Decimal(accepted) / Decimal(accepted + dismissed)
+                if accepted + dismissed > 0
+                else None
+            )
+            below = rate is not None and rate < Decimal("0.30")
+            score = AiFinanceQualityScore(
+                tenant_id=tenant_id,
+                feature=feature,
+                window_days=window_days,
+                sample_count=accepted + dismissed,
+                acceptance_rate=rate,
+                below_threshold=below,
+            )
+            persisted_score = await self.repo.upsert_ai_quality_score(tenant_id, score)
+            feature_scores.append(persisted_score)
+        overall_rate = (
+            Decimal(total_accepted) / Decimal(total_decisions) if total_decisions > 0 else None
+        )
+        from core.features.finance.schemas import (
+            SuggestionQualityResponse,
+            SuggestionQualityScoreResponse,
+        )
+
+        return SuggestionQualityResponse(
+            window_days=window_days,
+            overall_acceptance_rate=overall_rate,
+            low_quality=any(s.below_threshold for s in feature_scores),
+            features=[
+                SuggestionQualityScoreResponse(
+                    feature=s.feature,
+                    window_days=s.window_days,
+                    sample_count=s.sample_count,
+                    acceptance_rate=s.acceptance_rate,
+                    below_threshold=s.below_threshold,
+                    computed_at=s.computed_at,
+                )
+                for s in feature_scores
+            ],
+        )
 
     async def working_capital_alert(self, tenant_id: uuid.UUID, as_of: date) -> Any:
         return await self.repo.working_capital_alert(tenant_id, as_of)
@@ -273,13 +393,58 @@ class FinanceAutomationService:
     async def get_settings(self, tenant_id: uuid.UUID) -> TenantSettingsResponse:
         setting = await self.repo.get_tenant_setting(tenant_id, "working_capital_threshold")
         value = setting.value if setting else "1.5"
-        return TenantSettingsResponse(working_capital_threshold=Decimal(value))
+        scheme = await self.repo.get_tenant_setting(tenant_id, "invoice_numbering_scheme")
+        return TenantSettingsResponse(
+            working_capital_threshold=Decimal(value),
+            invoice_numbering_scheme=scheme.value if scheme else None,
+        )
 
-    async def put_settings(self, tenant_id: uuid.UUID, threshold: Any) -> TenantSettingsResponse:
+    async def put_settings(
+        self,
+        tenant_id: uuid.UUID,
+        threshold: Decimal,
+        invoice_numbering_scheme: str | None = None,
+    ) -> TenantSettingsResponse:
         await self.repo.upsert_tenant_setting(
             tenant_id, "working_capital_threshold", str(threshold)
         )
-        return TenantSettingsResponse(working_capital_threshold=Decimal(str(threshold)))
+        if invoice_numbering_scheme is not None:
+            await self.repo.upsert_tenant_setting(
+                tenant_id, "invoice_numbering_scheme", invoice_numbering_scheme
+            )
+        return await self.get_settings(tenant_id)
+
+    async def recommend_numbering_scheme(
+        self, tenant_id: uuid.UUID, today: date | None = None
+    ) -> InvoiceNumberingSchemeResponse:
+        """Suggest a sequence width this year's volume won't overflow in ~10 years.
+
+        Deterministic rule keyed off this year's invoice volume (spec C6).
+        ``next_invoice_number`` keeps emitting INV-YYYY-##### today -- applying
+        the suggested scheme is a separate future step, so this never renumbers
+        active invoices.
+        """
+        if today is None:
+            today = date.today()
+        since = datetime(today.year, 1, 1, tzinfo=UTC)
+        volume = await self.repo.count_invoices_since(tenant_id, since)
+        if volume >= 100_000:
+            seq_width = 7
+        elif volume >= 10_000:
+            seq_width = 6
+        else:
+            seq_width = 5
+        scheme = f"{INVOICE_PREFIX}-{today.year}-{'#' * seq_width}"
+        rationale = (
+            f"{volume:,} invoices this year. A {seq_width}-digit sequence "
+            f"leaves room for the next ~10 years at the current volume."
+        )
+        return InvoiceNumberingSchemeResponse(
+            prefix=INVOICE_PREFIX,
+            scheme=scheme,
+            seq_width=seq_width,
+            rationale=rationale,
+        )
 
     async def draft_journal_entry(self, tenant_id: uuid.UUID, description: str) -> DraftEntry:
         accounts = await self.repo.list_accounts(tenant_id)
@@ -335,19 +500,26 @@ class FinanceAutomationService:
         anomaly = await self.repo.get_ai_anomaly(tenant_id, anomaly_id)
         if anomaly is None:
             raise NotFoundError(f"Anomaly {anomaly_id} not found")
-        # AI narration requires the ai_suggest callable to be wired with
-        # the narrate function. This is handled in the deps factory.
         # Fallback: return a basic narration from the description
         narration = {
             "narration": f"Anomaly detected: {anomaly.anomaly_type} — {anomaly.description}",
             "model_used": "",
         }
+        if self.ai_narrate is not None:
+            try:
+                ai = await self.ai_narrate(
+                    anomaly.anomaly_type, anomaly.description, anomaly.severity
+                )
+            except AiServiceUnavailableError:
+                ai = None
+            if ai is not None and _narration_cites_figure(ai.narration):
+                narration = {"narration": ai.narration, "model_used": ai.model_used}
         await self.audit.log(
             tenant_id=tenant_id,
             user_id=None,
             action=FINANCE_AI_ANOMALY_NARRATED,
             target=f"finance:anomaly:{anomaly_id}",
-            details={"anomaly_type": anomaly.anomaly_type},
+            details={"anomaly_type": anomaly.anomaly_type, "model_used": narration["model_used"]},
         )
         return narration
 
@@ -369,12 +541,24 @@ class FinanceAutomationService:
             body=f"Please remit payment for invoice {invoice.invoice_number} totaling {invoice.total}.",
             model_used="",
         )
+        model_used = ""
+        if self.ai_remind is not None:
+            try:
+                ai = await self.ai_remind(
+                    None, invoice.invoice_number, invoice.total, days_overdue, tone
+                )
+            except AiServiceUnavailableError:
+                ai = None
+            if ai is not None and ai.subject and ai.body:
+                reminder = ai
+                model_used = ai.model_used
+        await send_reminder_email(reminder=reminder)
         await self.audit.log(
             tenant_id=tenant_id,
             user_id=None,
             action=FINANCE_AI_REMINDER_GENERATED,
             target=f"finance:invoice:{invoice_id}",
-            details={"invoice": invoice.invoice_number, "tone": tone},
+            details={"invoice": invoice.invoice_number, "tone": tone, "model_used": model_used},
         )
         return reminder
 
@@ -386,18 +570,38 @@ class FinanceAutomationService:
 
             days_overdue = (_date.today() - inv.due_date).days if inv.due_date else 0
             tone = "polite" if days_overdue < 30 else "firm" if days_overdue < 60 else "final"
-            reminders.append(
-                ReminderDraft(
-                    invoice_number=inv.invoice_number,
-                    customer_name=None,
-                    amount=inv.total,
-                    days_overdue=days_overdue,
-                    tone=tone,
-                    subject=f"Payment Reminder — Invoice {inv.invoice_number}",
-                    body=f"Please remit payment for invoice {inv.invoice_number} totaling {inv.total}.",
-                    model_used="",
-                )
+            reminder = ReminderDraft(
+                invoice_number=inv.invoice_number,
+                customer_name=None,
+                amount=inv.total,
+                days_overdue=days_overdue,
+                tone=tone,
+                subject=f"Payment Reminder — Invoice {inv.invoice_number}",
+                body=f"Please remit payment for invoice {inv.invoice_number} totaling {inv.total}.",
+                model_used="",
             )
+            model_used = ""
+            if self.ai_remind is not None:
+                try:
+                    ai = await self.ai_remind(
+                        None, inv.invoice_number, inv.total, days_overdue, tone
+                    )
+                except AiServiceUnavailableError:
+                    ai = None
+                if ai is not None and ai.subject and ai.body:
+                    reminder = ai
+                    model_used = ai.model_used
+            if model_used:
+                await self.audit.log(
+                    tenant_id=tenant_id,
+                    user_id=None,
+                    action=FINANCE_AI_REMINDER_GENERATED,
+                    target=f"finance:invoice:{inv.id}",
+                    details={"invoice": inv.invoice_number, "tone": tone, "model_used": model_used},
+                )
+            reminders.append(reminder)
+        for reminder in reminders:
+            await send_reminder_email(reminder=reminder)
         return reminders
 
 
@@ -632,8 +836,39 @@ async def put_settings(
     current_user: dict[str, Any] = Depends(require_finance_write),
     svc: FinanceAutomationService = Depends(get_finance_automation_service),
 ) -> ResponseEnvelope[TenantSettingsResponse]:
-    settings = await svc.put_settings(_tenant_id(current_user), body.threshold)
+    settings = await svc.put_settings(
+        _tenant_id(current_user),
+        body.threshold,
+        invoice_numbering_scheme=body.invoice_numbering_scheme,
+    )
     return ResponseEnvelope(data=settings)
+
+
+@router.get(
+    "/invoice-numbering-scheme",
+    response_model=ResponseEnvelope[InvoiceNumberingSchemeResponse],
+)
+async def invoice_numbering_scheme(
+    current_user: dict[str, Any] = Depends(require_finance_ai_read),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[InvoiceNumberingSchemeResponse]:
+    suggestion = await svc.recommend_numbering_scheme(_tenant_id(current_user))
+    return ResponseEnvelope(data=suggestion)
+
+
+@router.post(
+    "/suggest-invoice-lines",
+    response_model=ResponseEnvelope[list[InvoiceLineSuggestionResponse]],
+)
+async def suggest_invoice_lines(
+    body: SuggestInvoiceLinesRequest,
+    current_user: dict[str, Any] = Depends(require_finance_ai_read),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service_with_ai),
+) -> ResponseEnvelope[list[InvoiceLineSuggestionResponse]]:
+    suggestions = await svc.suggest_invoice_lines(_tenant_id(current_user), body.description)
+    return ResponseEnvelope(
+        data=[InvoiceLineSuggestionResponse.model_validate(item) for item in suggestions]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -724,3 +959,62 @@ async def batch_reminders(
             ]
         )
     )
+
+
+@router.post(
+    "/suggestions/{suggestion_id}/accept",
+    response_model=ResponseEnvelope[AccountCodeSuggestionResponse],
+)
+async def accept_suggestion(
+    suggestion_id: uuid.UUID,
+    current_user: dict[str, Any] = Depends(require_finance_ai_write),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[AccountCodeSuggestionResponse]:
+    suggestion = await svc.accept_suggestion(_tenant_id(current_user), suggestion_id)
+    return ResponseEnvelope(
+        data=AccountCodeSuggestionResponse(
+            description=suggestion.description,
+            suggested_code=suggestion.suggested_code,
+            suggested_name=suggestion.suggested_name,
+            confidence=suggestion.confidence,
+            id=suggestion.id,
+            status=suggestion.status,
+            feature=suggestion.feature,
+        )
+    )
+
+
+@router.post(
+    "/suggestions/{suggestion_id}/dismiss",
+    response_model=ResponseEnvelope[AccountCodeSuggestionResponse],
+)
+async def dismiss_suggestion(
+    suggestion_id: uuid.UUID,
+    current_user: dict[str, Any] = Depends(require_finance_ai_write),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[AccountCodeSuggestionResponse]:
+    suggestion = await svc.dismiss_suggestion(_tenant_id(current_user), suggestion_id)
+    return ResponseEnvelope(
+        data=AccountCodeSuggestionResponse(
+            description=suggestion.description,
+            suggested_code=suggestion.suggested_code,
+            suggested_name=suggestion.suggested_name,
+            confidence=suggestion.confidence,
+            id=suggestion.id,
+            status=suggestion.status,
+            feature=suggestion.feature,
+        )
+    )
+
+
+@router.get(
+    "/suggestions/quality",
+    response_model=ResponseEnvelope[SuggestionQualityResponse],
+)
+async def suggestion_quality(
+    window_days: int = Query(default=30, ge=1, le=365),
+    current_user: dict[str, Any] = Depends(require_finance_ai_read),
+    svc: FinanceAutomationService = Depends(get_finance_automation_service),
+) -> ResponseEnvelope[SuggestionQualityResponse]:
+    result = await svc.suggestion_quality(_tenant_id(current_user), window_days)
+    return ResponseEnvelope(data=result)

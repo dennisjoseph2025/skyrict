@@ -60,20 +60,22 @@ _DRAFT_SYSTEM_PROMPT = (
 
 _NARRATE_SYSTEM_PROMPT = (
     "You are a financial analyst. Explain this anomaly in plain English. "
-    "Cite the specific figures that triggered it. Reference what this type "
-    "of anomaly typically means. Suggest resolution steps. "
+    "Quote the exact figures from the description that triggered it - the "
+    "numbers must appear verbatim in your narration. Reference what this "
+    "type of anomaly typically means and suggest resolution steps. "
     "Return ONLY strict JSON with keys: "
-    '"narration" (string, 2-4 sentences), '
-    '"confidence" (number 0 to 1).'
+    '"narration" (string, 2-4 sentences, MUST include the triggering '
+    'figures verbatim), "confidence" (number 0 to 1).'
 )
 
 _REMINDER_SYSTEM_PROMPT = (
     "You are a professional accounts receivable assistant. Draft a payment "
-    "reminder email for an overdue invoice. Use the tone specified. "
+    "reminder email for an overdue invoice. Use the tone specified. The "
+    "body MUST include the exact invoice number and the exact amount due. "
     "Return ONLY strict JSON with keys: "
     '"subject" (email subject line), '
-    '"body" (the email body, plain text, 3-5 sentences), '
-    '"tone" (the tone used).'
+    '"body" (the email body, plain text, 3-5 sentences, includes the '
+    'invoice number and amount due), "tone" (the tone used).'
 )
 
 

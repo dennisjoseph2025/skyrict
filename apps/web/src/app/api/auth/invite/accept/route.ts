@@ -1,11 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import {
-  apiBase,
-  assertSameOrigin,
-  mapUser,
-} from "@/lib/server/auth";
+import { apiBase, assertSameOrigin, mapUser } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,46 +14,52 @@ export const dynamic = "force-dynamic";
  * client redirects to signin - the accept response carries no tokens.
  */
 export async function POST(request: NextRequest) {
-  if (!assertSameOrigin(request)) {
-    return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  }
+    if (!assertSameOrigin(request)) {
+        return NextResponse.json(
+            { error: "Invalid request origin." },
+            { status: 403 },
+        );
+    }
 
-  const form = await request.formData().catch(() => null);
-  if (!form) {
-    return NextResponse.json(
-      { error: "Could not read the invitation details." },
-      { status: 400 },
-    );
-  }
+    const form = await request.formData().catch(() => null);
+    if (!form) {
+        return NextResponse.json(
+            { error: "Could not read the invitation details." },
+            { status: 400 },
+        );
+    }
 
-  let response: Response;
-  try {
-    response = await fetch(`${apiBase()}/api/v1/invitations/accept`, {
-      method: "POST",
-      body: form,
-      cache: "no-store",
-    });
-  } catch {
-    return NextResponse.json(
-      { error: "Identity service is unavailable. Please try again." },
-      { status: 502 },
-    );
-  }
+    let response: Response;
+    try {
+        response = await fetch(`${apiBase()}/api/v1/invitations/accept`, {
+            method: "POST",
+            body: form,
+            cache: "no-store",
+        });
+    } catch {
+        return NextResponse.json(
+            { error: "Identity service is unavailable. Please try again." },
+            { status: 502 },
+        );
+    }
 
-  const payload = (await response.json().catch(() => ({}))) as {
-    data?: Record<string, unknown> | null;
-    detail?: string;
-    type?: string;
-  };
-  if (!response.ok) {
-    const detail =
-      typeof payload.detail === "string"
-        ? payload.detail
-        : "Could not accept the invitation. Please try again.";
+    const payload = (await response.json().catch(() => ({}))) as {
+        data?: Record<string, unknown> | null;
+        detail?: string;
+        type?: string;
+    };
+    if (!response.ok) {
+        const detail =
+            typeof payload.detail === "string"
+                ? payload.detail
+                : "Could not accept the invitation. Please try again.";
+        return NextResponse.json(
+            { error: detail, type: payload.type ?? null },
+            { status: response.status },
+        );
+    }
     return NextResponse.json(
-      { error: detail, type: payload.type ?? null },
-      { status: response.status },
+        { user: mapUser(payload.data) },
+        { status: response.status },
     );
-  }
-  return NextResponse.json({ user: mapUser(payload.data) }, { status: response.status });
 }

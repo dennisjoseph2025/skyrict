@@ -6,10 +6,10 @@
 
 <!-- Document your API endpoints here. -->
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/health` | Liveness probe |
-| GET | `/api/v1/ready` | Readiness probe |
+| Method | Path             | Description     |
+| ------ | ---------------- | --------------- |
+| GET    | `/api/v1/health` | Liveness probe  |
+| GET    | `/api/v1/ready`  | Readiness probe |
 
 ## Local Development
 

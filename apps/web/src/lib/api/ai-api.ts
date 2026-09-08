@@ -16,31 +16,35 @@ import { apiFetch, apiFetchBody, apiPost, apiPostBody } from "@/lib/api/http";
 const NARRATOR = "/api/v1/ai/narrator";
 
 export type DigestStatus = "generated" | "abstained";
-export type DigestSource = "live" | "cache" | "abstention" | "llm_disabled" | "unparseable";
+export type DigestSource =
+    "live" | "cache" | "abstention" | "llm_disabled" | "unparseable";
 
 export interface Digest {
-  status: DigestStatus;
-  source: DigestSource;
-  as_of: string;
-  title: string | null;
-  summary: string | null;
-  points: string[];
-  caveat: string | null;
-  generated_at: string | null;
-  model_used: string | null;
-  signals: Record<string, unknown> | null;
+    status: DigestStatus;
+    source: DigestSource;
+    as_of: string;
+    title: string | null;
+    summary: string | null;
+    points: string[];
+    caveat: string | null;
+    generated_at: string | null;
+    model_used: string | null;
+    signals: Record<string, unknown> | null;
 }
 
 function queryString(asOf?: string): string {
-  return asOf ? `?as_of=${encodeURIComponent(asOf)}` : "";
+    return asOf ? `?as_of=${encodeURIComponent(asOf)}` : "";
 }
 
 export function getDigest(asOf?: string): Promise<Digest> {
-  return apiFetch<Digest>(`${NARRATOR}/digest${queryString(asOf)}`);
+    return apiFetch<Digest>(`${NARRATOR}/digest${queryString(asOf)}`);
 }
 
 export function refreshDigest(asOf?: string): Promise<Digest> {
-  return apiPost<Digest>(`${NARRATOR}/digest/refresh${queryString(asOf)}`, {});
+    return apiPost<Digest>(
+        `${NARRATOR}/digest/refresh${queryString(asOf)}`,
+        {},
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -48,72 +52,72 @@ export function refreshDigest(asOf?: string): Promise<Digest> {
 // ---------------------------------------------------------------------------
 
 export interface NlQueryResponse {
-  answer: string;
-  data: Record<string, unknown> | null;
-  model_used: string | null;
-  latency_ms: number;
+    answer: string;
+    data: Record<string, unknown> | null;
+    model_used: string | null;
+    latency_ms: number;
 }
 
 export interface SuggestionItem {
-  id: string;
-  product_id: string;
-  warehouse_id: string;
-  current_stock: string;
-  reorder_point: string;
-  suggested_qty: string;
-  estimated_cost: string | null;
-  reason: string;
-  confidence: string;
-  status: "pending" | "approved" | "rejected" | "expired";
-  review_note: string | null;
-  created_at: string;
+    id: string;
+    product_id: string;
+    warehouse_id: string;
+    current_stock: string;
+    reorder_point: string;
+    suggested_qty: string;
+    estimated_cost: string | null;
+    reason: string;
+    confidence: string;
+    status: "pending" | "approved" | "rejected" | "expired";
+    review_note: string | null;
+    created_at: string;
 }
 
 export interface SuggestionListResponse {
-  data: SuggestionItem[];
-  meta: { total: number; pending: number };
+    data: SuggestionItem[];
+    meta: { total: number; pending: number };
 }
 
 export interface ScanResponse {
-  created: number;
-  skipped_pending: number;
-  considered: number;
+    created: number;
+    skipped_pending: number;
+    considered: number;
 }
 
 export interface AnomalyItem {
-  id: string;
-  anomaly_type: string;
-  severity: "low" | "medium" | "high" | "critical";
-  title: string;
-  description: string;
-  affected_product_id: string | null;
-  affected_warehouse_id: string | null;
-  related_movement_ids: string[];
-  status: "open" | "resolved" | "dismissed" | "escalated";
-  resolution_note: string | null;
-  created_at: string;
+    id: string;
+    anomaly_type: string;
+    severity: "low" | "medium" | "high" | "critical";
+    title: string;
+    description: string;
+    affected_product_id: string | null;
+    affected_warehouse_id: string | null;
+    related_movement_ids: string[];
+    status: "open" | "resolved" | "dismissed" | "escalated";
+    resolution_note: string | null;
+    created_at: string;
 }
 
 export interface AnomalyListResponse {
-  data: AnomalyItem[];
-  meta: { total: number; open: number; high_severity: number };
+    data: AnomalyItem[];
+    meta: { total: number; open: number; high_severity: number };
 }
 
 export interface ForecastItem {
-  product_id: string;
-  horizon_weeks: number;
-  avg_daily_demand: string;
-  weeks_of_supply: string | null;
-  stockout_date: string | null;
+    product_id: string;
+    horizon_weeks: number;
+    avg_daily_demand: string;
+    weeks_of_supply: string | null;
+    stockout_date: string | null;
 }
 
 export interface AbcItem {
-  product_id: string;
-  product_name: string;
-  sku: string;
-  revenue: string;
-  revenue_share: string;
-  band: "A" | "B" | "C";
+    product_id: string;
+    product_name: string;
+    sku: string;
+    revenue: string;
+    revenue_share: string;
+    band: "A" | "B" | "C";
 }
 
 export type SupplierRiskBand = "low" | "medium" | "high";
@@ -135,8 +139,12 @@ export interface SupplierRiskListResponse {
 // NL Query
 // ---------------------------------------------------------------------------
 
-export async function queryInventory(question: string): Promise<NlQueryResponse> {
-  return apiPostBody<NlQueryResponse>("/api/v1/ai/inventory/query", { query: question });
+export async function queryInventory(
+    question: string,
+): Promise<NlQueryResponse> {
+    return apiPostBody<NlQueryResponse>("/api/v1/ai/inventory/query", {
+        query: question,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -144,25 +152,29 @@ export async function queryInventory(question: string): Promise<NlQueryResponse>
 // ---------------------------------------------------------------------------
 
 export async function listSuggestions(): Promise<SuggestionListResponse> {
-  return apiFetchBody<SuggestionListResponse>("/api/v1/ai/suggestions");
+    return apiFetchBody<SuggestionListResponse>("/api/v1/ai/suggestions");
 }
 
 export async function triggerScan(): Promise<ScanResponse> {
-  return apiPostBody<ScanResponse>("/api/v1/ai/suggestions/scan", {});
+    return apiPostBody<ScanResponse>("/api/v1/ai/suggestions/scan", {});
 }
 
 export async function approveSuggestion(
-  id: string,
-  note?: string,
+    id: string,
+    note?: string,
 ): Promise<SuggestionItem> {
-  return apiPostBody<SuggestionItem>(`/api/v1/ai/suggestions/${id}/approve`, { note });
+    return apiPostBody<SuggestionItem>(`/api/v1/ai/suggestions/${id}/approve`, {
+        note,
+    });
 }
 
 export async function rejectSuggestion(
-  id: string,
-  note?: string,
+    id: string,
+    note?: string,
 ): Promise<SuggestionItem> {
-  return apiPostBody<SuggestionItem>(`/api/v1/ai/suggestions/${id}/reject`, { note });
+    return apiPostBody<SuggestionItem>(`/api/v1/ai/suggestions/${id}/reject`, {
+        note,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -170,31 +182,39 @@ export async function rejectSuggestion(
 // ---------------------------------------------------------------------------
 
 export async function listAnomalies(): Promise<AnomalyListResponse> {
-  return apiFetchBody<AnomalyListResponse>("/api/v1/ai/anomalies");
+    return apiFetchBody<AnomalyListResponse>("/api/v1/ai/anomalies");
 }
 
-export async function triggerAnomalyScan(): Promise<{ detected: number; duplicates_skipped: number }> {
-  return apiPostBody("/api/v1/ai/anomalies/scan", {});
+export async function triggerAnomalyScan(): Promise<{
+    detected: number;
+    duplicates_skipped: number;
+}> {
+    return apiPostBody("/api/v1/ai/anomalies/scan", {});
 }
 
 export async function resolveAnomaly(id: string, note?: string): Promise<void> {
-  await apiPostBody(`/api/v1/ai/anomalies/${id}/resolve`, { note });
+    await apiPostBody(`/api/v1/ai/anomalies/${id}/resolve`, { note });
 }
 
 export async function dismissAnomaly(id: string, note?: string): Promise<void> {
-  await apiPostBody(`/api/v1/ai/anomalies/${id}/dismiss`, { note });
+    await apiPostBody(`/api/v1/ai/anomalies/${id}/dismiss`, { note });
 }
 
-export async function escalateAnomaly(id: string, note?: string): Promise<void> {
-  await apiPostBody(`/api/v1/ai/anomalies/${id}/escalate`, { note });
+export async function escalateAnomaly(
+    id: string,
+    note?: string,
+): Promise<void> {
+    await apiPostBody(`/api/v1/ai/anomalies/${id}/escalate`, { note });
 }
 
 // ---------------------------------------------------------------------------
 // Forecast
 // ---------------------------------------------------------------------------
 
-export async function getForecast(productId: string): Promise<{ data: ForecastItem[] }> {
-  return apiFetchBody(`/api/v1/ai/forecast/${productId}`);
+export async function getForecast(
+    productId: string,
+): Promise<{ data: ForecastItem[] }> {
+    return apiFetchBody(`/api/v1/ai/forecast/${productId}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,11 +222,13 @@ export async function getForecast(productId: string): Promise<{ data: ForecastIt
 // ---------------------------------------------------------------------------
 
 export async function listAbcClassifications(): Promise<{ data: AbcItem[] }> {
-  return apiFetchBody("/api/v1/ai/abc");
+    return apiFetchBody("/api/v1/ai/abc");
 }
 
-export async function getAbcSummary(): Promise<{ data: Record<string, number> }> {
-  return apiFetchBody("/api/v1/ai/abc/summary");
+export async function getAbcSummary(): Promise<{
+    data: Record<string, number>;
+}> {
+    return apiFetchBody("/api/v1/ai/abc/summary");
 }
 
 // ---------------------------------------------------------------------------
@@ -222,27 +244,27 @@ export async function listSupplierRisk(): Promise<SupplierRiskListResponse> {
 // ---------------------------------------------------------------------------
 
 export interface SearchItem {
-  item_id: string;
-  sku: string;
-  name: string;
-  category: string | null;
-  unit: string | null;
-  source: "exact" | "semantic";
-  score: number;
-  matched_fields: string[] | null;
-  cost_price: string | null;
+    item_id: string;
+    sku: string;
+    name: string;
+    category: string | null;
+    unit: string | null;
+    source: "exact" | "semantic";
+    score: number;
+    matched_fields: string[] | null;
+    cost_price: string | null;
 }
 
 export interface SearchResponse {
-  data: SearchItem[];
-  cached: boolean;
-  degraded: boolean;
-  model_used: string | null;
-  latency_ms: number;
+    data: SearchItem[];
+    cached: boolean;
+    degraded: boolean;
+    model_used: string | null;
+    latency_ms: number;
 }
 
 export async function searchInventory(query: string): Promise<SearchResponse> {
-  return apiFetchBody<SearchResponse>(
-    `/api/v1/ai/inventory/search?q=${encodeURIComponent(query)}`,
-  );
+    return apiFetchBody<SearchResponse>(
+        `/api/v1/ai/inventory/search?q=${encodeURIComponent(query)}`,
+    );
 }

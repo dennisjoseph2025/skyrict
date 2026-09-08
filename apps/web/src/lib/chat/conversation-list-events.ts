@@ -13,5 +13,5 @@ export const CONVERSATION_LIST_CHANGED_EVENT = "skyrict:conversations-refresh";
 
 /** Broadcast that conversation metadata may have changed (e.g. the AI title). */
 export function notifyConversationListChanged(): void {
-  window.dispatchEvent(new CustomEvent(CONVERSATION_LIST_CHANGED_EVENT));
+    window.dispatchEvent(new CustomEvent(CONVERSATION_LIST_CHANGED_EVENT));
 }
