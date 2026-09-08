@@ -56,7 +56,9 @@ def _to_definition_read(definition: Any) -> ReportDefinitionRead:
     report builder.
     """
     read = ReportDefinitionRead.model_validate(definition, from_attributes=True)
-    sql = definition.get("sql") if isinstance(definition, dict) else getattr(definition, "sql", None)
+    sql = (
+        definition.get("sql") if isinstance(definition, dict) else getattr(definition, "sql", None)
+    )
     if sql:
         seed = find_seed_for_sql(sql)
         if seed is not None:
