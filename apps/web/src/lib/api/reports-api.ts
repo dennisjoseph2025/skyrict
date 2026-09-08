@@ -1,4 +1,11 @@
-import { ApiError, apiFetch, apiFetchRaw, apiPost, buildQueryString } from "@/lib/api/http";
+import {
+  ApiError,
+  apiFetch,
+  apiFetchRaw,
+  apiPost,
+  apiPostBody,
+  buildQueryString,
+} from "@/lib/api/http";
 
 /*
  * Typed client for the Core reporting feature through the BFF proxy at
@@ -196,14 +203,28 @@ export interface ReportBuilderSaveResponse {
 
 /** Ask the builder to turn a natural-language prompt into a report run. */
 export async function generateReport(prompt: string): Promise<ReportBuilderGenerateResponse> {
-  return apiPost<ReportBuilderGenerateResponse>(`${AI_BASE}/report-builder/generate`, { prompt });
+  // The generate endpoint is NOT an envelope: it returns the full result
+  // object {answer, data, model_used, latency_ms} at top level. apiPost
+  // would unwrap the payload's `data` key, silently dropping answer and
+  // collapsing a successful report into a messageless clarification. Use the
+  // raw-body client so the whole response surfaces to the workspace.
+  return apiPostBody<ReportBuilderGenerateResponse>(
+    `${AI_BASE}/report-builder/generate`,
+    { prompt },
+  );
 }
 
 /** Persist a generated report as a new runnable definition (Core endorses the SQL). */
 export async function saveGeneratedReport(
   body: ReportBuilderSaveRequest,
 ): Promise<ReportBuilderSaveResponse> {
-  return apiPost<ReportBuilderSaveResponse>(`${AI_BASE}/report-builder/save`, body);
+  // Like /generate, /save answers with the bare model (no {data: ...}
+  // envelope), so the raw-body client is required - apiPost would unwrap and
+  // shape-misroute the response.
+  return apiPostBody<ReportBuilderSaveResponse>(
+    `${AI_BASE}/report-builder/save`,
+    body,
+  );
 }
 
 /** A display slug for the save flow, honoring Core's [a-z0-9_-] pattern. */
