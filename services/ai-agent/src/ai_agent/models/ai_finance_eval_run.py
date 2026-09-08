@@ -38,9 +38,7 @@ class AiFinanceEvalRunModel(Base):
     )
     feature: Mapped[str] = mapped_column(String(16), nullable=False)
     prompt_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    model_used: Mapped[str] = mapped_column(
-        String(100), nullable=False, server_default=text("''")
-    )
+    model_used: Mapped[str] = mapped_column(String(100), nullable=False, server_default=text("''"))
     considered: Mapped[int] = mapped_column(Integer, nullable=False)
     abstained: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     precision: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)

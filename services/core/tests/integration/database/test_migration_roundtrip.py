@@ -150,6 +150,34 @@ async def _drop_scratch_db(maint_dsn: str, dbname: str) -> None:
         await conn.close()
 
 
+async def _insert_tenants(url: str) -> list[str]:
+    """Insert two tenants BEFORE the core chain runs (RPT-DATA-001 seeding probe).
+
+    Identity's chain creates ``tenants`` but no rows; 0036 seeds the Phase-1
+    report pack into tenants that already exist at migration time. Two rows
+    here let the round-trip assert each of them gets exactly the 12-definition
+    pack - once, idempotently, on both the first and the re-run upgrade.
+    """
+    engine = create_async_engine(url, poolclass=NullPool)
+    try:
+        tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
+        async with engine.connect() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO tenants (id, name, slug, plan_tier, is_active) "
+                    "VALUES (:id, :name, :slug, 'free', true)"
+                ),
+                [
+                    {"id": uuid.UUID(tenant_a), "name": "Tenant A", "slug": f"rt-a-{tenant_a[:8]}"},
+                    {"id": uuid.UUID(tenant_b), "name": "Tenant B", "slug": f"rt-b-{tenant_b[:8]}"},
+                ],
+            )
+            await conn.commit()
+        return [tenant_a, tenant_b]
+    finally:
+        await engine.dispose()
+
+
 def _run_alembic(ini: Path, cmd: list[str], overrides: dict[str, str], *, cwd: Path) -> None:
     """Run alembic in a fresh interpreter with env overrides (mirrors migrated_schema)."""
     env = {**os.environ, **overrides}
@@ -166,15 +194,19 @@ def _run_alembic(ini: Path, cmd: list[str], overrides: dict[str, str], *, cwd: P
     )
 
 
-async def _assert_upgraded_schema(url: str) -> None:
-    """One probe per migration artefact after ``upgrade head``."""
+async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None) -> None:
+    """One probe per migration artefact after ``upgrade head``.
+
+    ``tenant_ids`` (when given) are tenants that already existed when the core
+    chain ran - 0036 must have seeded the Phase-1 report pack into each.
+    """
     engine = create_async_engine(url, poolclass=NullPool)
     try:
         async with engine.connect() as conn:
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0035", f"head is {version}, expected 0035"
+            assert version == "0039", f"head is {version}, expected 0039"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -661,6 +693,173 @@ async def _assert_upgraded_schema(url: str) -> None:
             assert review_status_check == 1, (
                 "0035 must add the payslip review status check constraint"
             )
+
+            # 0036: reporting data layer (RPT-DATA-001).
+            for table in ("erp_report_definitions", "erp_report_snapshots"):
+                regclass = (
+                    await conn.execute(text("SELECT to_regclass(:t)"), {"t": f"public.{table}"})
+                ).scalar_one()
+                assert regclass is not None, f"0036 must create {table}"
+
+            for policy_name in (
+                "tenant_isolation_erp_report_definitions",
+                "tenant_isolation_erp_report_snapshots",
+            ):
+                policy_count = (
+                    await conn.execute(
+                        text(
+                            "SELECT count(*) FROM pg_policies "
+                            "WHERE schemaname = 'public' AND policyname = :name"
+                        ),
+                        {"name": policy_name},
+                    )
+                ).scalar_one()
+                assert policy_count == 1, f"0036 must create RLS policy {policy_name}"
+
+            reports_perm = (
+                await conn.execute(
+                    text("SELECT description FROM core_permissions WHERE key = 'erp.reports.read'")
+                )
+            ).scalar_one_or_none()
+            assert reports_perm is not None, "0036 must register erp.reports.read"
+
+            for constraint in (
+                "uq_erp_report_definitions_tenant_slug",
+                "uq_erp_report_snapshots_tenant_definition_period",
+                "fk_erp_report_snapshots_definition",
+            ):
+                snip_constraint = (
+                    await conn.execute(
+                        text("SELECT count(*) FROM pg_constraint WHERE conname = :name"),
+                        {"name": constraint},
+                    )
+                ).scalar_one()
+                assert snip_constraint == 1, f"0036 must add {constraint}"
+
+            if tenant_ids is not None:
+                # 0036 seeds the Phase-1 pack into tenants that existed at
+                # migration time - 12 definitions each, gated by erp.reports.read.
+                rows = (
+                    await conn.execute(
+                        text(
+                            "SELECT tenant_id, count(*), min(permission_key), max(permission_key) "
+                            "FROM erp_report_definitions "
+                            "GROUP BY tenant_id ORDER BY tenant_id"
+                        )
+                    )
+                ).all()
+                assert {str(r[0]) for r in rows} == set(tenant_ids)
+                for r in rows:
+                    assert r[1] == 12, f"tenant {r[0]} has {r[1]} report definitions"
+                    assert r[2] == "erp.reports.read", r
+                    assert r[3] == "erp.reports.read", r
+
+            # 0037: stock-health analytics (SKY-71) - the movement-trend index
+            # and the erp.inventory.cost permission gate. (Renumbered from
+            # 0031/0032 after merging the reporting data layer in 0036; the
+            # snapshot persistence previously shipped here was dropped because
+            # dev's 0036 owns the erp_report_snapshots table.)
+            mv_index_count = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_indexes "
+                        "WHERE schemaname = 'public' "
+                        "AND tablename = 'erp_stock_movements' "
+                        "AND indexname = 'ix_erp_stock_movements_tenant_wh_type_created'"
+                    )
+                )
+            ).scalar_one()
+            assert mv_index_count == 1, "0037 must create the movement analytics index"
+
+            cost_perm = (
+                await conn.execute(
+                    text(
+                        "SELECT description FROM core_permissions WHERE key = 'erp.inventory.cost'"
+                    )
+                )
+            ).scalar_one_or_none()
+            assert cost_perm is not None, "0037 must register erp.inventory.cost"
+
+            # 0038: suppliers (SKY-86 / INV-AI-004) - master + performance tables,
+            # RLS policies, product:supplier FK, and the two supplier permissions.
+            for table in ("erp_suppliers", "erp_supplier_performance"):
+                regclass = (
+                    await conn.execute(text("SELECT to_regclass(:t)"), {"t": f"public.{table}"})
+                ).scalar_one()
+                assert regclass is not None, f"0038 must create {table}"
+
+            for policy_name in (
+                "tenant_isolation_erp_suppliers",
+                "tenant_isolation_erp_supplier_performance",
+            ):
+                policy_count = (
+                    await conn.execute(
+                        text(
+                            "SELECT count(*) FROM pg_policies "
+                            "WHERE schemaname = 'public' AND policyname = :name"
+                        ),
+                        {"name": policy_name},
+                    )
+                ).scalar_one()
+                assert policy_count == 1, f"0038 must create RLS policy {policy_name}"
+
+            for perm_key in (
+                "erp.inventory.suppliers.read",
+                "erp.inventory.suppliers.write",
+            ):
+                perm_row = (
+                    await conn.execute(
+                        text("SELECT description FROM core_permissions WHERE key = :key"),
+                        {"key": perm_key},
+                    )
+                ).scalar_one_or_none()
+                assert perm_row is not None, f"0038 must register {perm_key}"
+
+            product_supplier_fk = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_constraint "
+                        "WHERE conrelid = 'public.erp_products'::regclass "
+                        "AND conname = 'fk_erp_products_supplier_tenant'"
+                    )
+                )
+            ).scalar_one()
+            assert product_supplier_fk == 1, "0038 must add erp_products.supplier_id FK"
+
+            # 0039: reconcile report definitions from the canonical catalog
+            # (RPT-DATA-001). 0036 stamped every seeded definition at version 1
+            # even though the catalog carried v2 for the six improved reports,
+            # so 0039 must have bumped them to the canonical version AND kept
+            # the canonical SQL (e.g. ar_aging carries the `outstanding`
+            # column the Open Receivables KPI sums).
+            drifted_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT d.tenant_id, d.slug, d.version "
+                        "FROM erp_report_definitions d "
+                        "JOIN tenants t ON t.id = d.tenant_id "
+                        "WHERE NOT ("
+                        "  (d.slug IN ('ar_aging', 'top_customers', "
+                        "   'stock_on_hand_vs_reorder', 'slow_movers', "
+                        "   'leave_usage', 'payroll_cost_by_period') AND d.version = 2)"
+                        "  OR (d.slug NOT IN ('ar_aging', 'top_customers', "
+                        "   'stock_on_hand_vs_reorder', 'slow_movers', "
+                        "   'leave_usage', 'payroll_cost_by_period') AND d.version = 1)"
+                        ")"
+                    )
+                )
+            ).all()
+            assert drifted_rows == [], f"0039 left drifted definitions: {drifted_rows}"
+
+            ar_aging_sql = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM erp_report_definitions "
+                        "WHERE slug = 'ar_aging' AND sql LIKE '%outstanding%'"
+                    )
+                )
+            ).scalar_one()
+            assert ar_aging_sql == 2, "0039 must ship the canonical ar_aging SQL per tenant"
     finally:
         await engine.dispose()
 
@@ -681,6 +880,10 @@ async def _assert_downgraded_to_base(url: str) -> None:
                 "public.erp_employees",
                 "public.core_permissions",
                 "public.erp_sequences",
+                "public.erp_report_definitions",
+                "public.erp_report_snapshots",
+                "public.erp_suppliers",
+                "public.erp_supplier_performance",
             ):
                 regclass = (await conn.execute(text(f"SELECT to_regclass('{table}')"))).scalar_one()
                 assert regclass is None, f"{table} still exists after downgrade base"
@@ -722,13 +925,17 @@ def test_core_migration_chain_round_trips_up_down_up() -> None:
             cwd=_IDENTITY_ALEMBIC_INI.parent,
         )
 
+        # Two tenants pre-date 0036, so the migration's per-tenant report
+        # seeding is exercised (RPT-DATA-001).
+        tenant_ids = asyncio.run(_insert_tenants(scratch_url))
+
         _run_alembic(
             _CORE_ALEMBIC_INI,
             ["upgrade", "head"],
             {"CORE_DATABASE_URL": scratch_url},
             cwd=_CORE_ALEMBIC_INI.parent,
         )
-        asyncio.run(_assert_upgraded_schema(scratch_url))
+        asyncio.run(_assert_upgraded_schema(scratch_url, tenant_ids))
 
         _run_alembic(
             _CORE_ALEMBIC_INI,
@@ -744,6 +951,6 @@ def test_core_migration_chain_round_trips_up_down_up() -> None:
             {"CORE_DATABASE_URL": scratch_url},
             cwd=_CORE_ALEMBIC_INI.parent,
         )
-        asyncio.run(_assert_upgraded_schema(scratch_url))
+        asyncio.run(_assert_upgraded_schema(scratch_url, tenant_ids))
     finally:
         asyncio.run(_drop_scratch_db(maint_dsn, dbname))

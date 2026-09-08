@@ -93,9 +93,7 @@ class _FakeSearchStore:
         query_vector: list[float],
         top_k: int,
     ) -> list[object]:
-        self.queries.append(
-            {"tenant_id": tenant_id, "query_vector": query_vector, "top_k": top_k}
-        )
+        self.queries.append({"tenant_id": tenant_id, "query_vector": query_vector, "top_k": top_k})
         return self.hits
 
 

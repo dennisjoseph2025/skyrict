@@ -11,7 +11,6 @@ Usage:
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -27,7 +26,7 @@ from core.features.finance.models.invoice import ErpInvoiceModel
 from core.features.finance.models.invoice_line import ErpInvoiceLineModel
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    import uuid
 
 logger = structlog.get_logger("core.seed.overdue_invoices")
 
@@ -90,9 +89,30 @@ async def seed_overdue_invoices(tenant_id: uuid.UUID) -> dict[str, int]:
         )
 
         rows: list[tuple[str, int, int, InvoiceStatus, Decimal, str]] = [
-            ("INV-OVR-001", 30, 45, InvoiceStatus.APPROVED, Decimal("12500.00"), "Azure migration retainer"),
-            ("INV-OVR-002", 12, 20, InvoiceStatus.ISSUED, Decimal("8300.00"), "Quarterly security audit"),
-            ("INV-OVR-003", 45, 60, InvoiceStatus.ISSUED, Decimal("17800.00"), "Data warehouse build"),
+            (
+                "INV-OVR-001",
+                30,
+                45,
+                InvoiceStatus.APPROVED,
+                Decimal("12500.00"),
+                "Azure migration retainer",
+            ),
+            (
+                "INV-OVR-002",
+                12,
+                20,
+                InvoiceStatus.ISSUED,
+                Decimal("8300.00"),
+                "Quarterly security audit",
+            ),
+            (
+                "INV-OVR-003",
+                45,
+                60,
+                InvoiceStatus.ISSUED,
+                Decimal("17800.00"),
+                "Data warehouse build",
+            ),
         ]
 
         invoices = 0

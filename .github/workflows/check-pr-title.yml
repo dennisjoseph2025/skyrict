@@ -1,0 +1,33 @@
+name: Validate PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, ready_for_review]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Validate PR Title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title format
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Jira-tracked PRs must carry the internal ID AND the Jira ticket key:
+          #   [RPT-DATA-001]: feat(core)/SKY-77 reporting data layer - ...
+          # Non-Jira work must still be a Conventional Commit (no ID, no key):
+          #   fix(ci): validate root CI - ...
+          pattern='^(\[[A-Z]{2,6}-[A-Z]{2,6}-[0-9]{3}\]: (feat|fix|chore|docs|test|refactor|perf|ci|build)(\([a-z0-9_-]+\))?/[A-Z]+-[0-9]+ .+|(feat|fix|chore|docs|test|refactor|perf|ci|build)(\([a-z0-9_-]+\))?!?: .+)$'
+          if ! printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "::error::PR title must match one of:"
+            echo "::error::  1. Jira work:    [INTERNAL-ID]: type(scope)/TICKET-KEY summary"
+            echo "::error::                   e.g. [RPT-DATA-001]: feat(core)/SKY-77 reporting data layer - ..."
+            echo "::error::  2. Non-Jira:     type(scope): summary   (Conventional Commits, no ID/key)"
+            echo "::error::                   e.g. fix(ci): validate root CI - ..."
+            echo "::error::Types: feat|fix|chore|docs|test|refactor|perf|ci|build -- scope optional -- breaking: type! or type(scope)!:"
+            exit 1
+          fi
+          echo "PR title matches the repo convention."

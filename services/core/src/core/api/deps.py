@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from core.features.payroll.repository import PayrollRepository
     from core.features.payroll.service import PayrollService
     from core.features.payroll_automation.service import PayrollAutomationService
-    from core.features.reporting.service import DashboardService
+    from core.features.reporting.service import DashboardService, ReportService
     from core.features.sales.service import SalesService
 
 logger = get_logger("core.deps")
@@ -191,6 +191,28 @@ def require_all_permissions(*permissions: str) -> Callable[[], Awaitable[dict[st
             if not grants_permission(granted, remaining):
                 raise PermissionDeniedError(f"Missing required permission: {remaining}")
         return current_user
+
+    return _check
+
+
+def resolve_permission(permission: str) -> Callable[[], Awaitable[bool]]:
+    """Dependency factory — returns whether the caller holds a permission.
+
+    Unlike :func:`require_permission`, this NEVER raises: it resolves the user's
+    grants and returns a boolean so a route can gate optional data (e.g.
+    ``erp.inventory.cost`` figures on the stock-health analytics, INV-ANL-001)
+    behind a permission without making it mandatory for the whole endpoint.
+    """
+
+    async def _check(
+        current_user: dict[str, Any] = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> bool:
+        granted = await RbacRepository(db).resolve_user_permissions(
+            user_id=current_user["user_id"],
+            tenant_id=current_user["tenant_id"],
+        )
+        return bool(grants_permission(granted, permission))
 
     return _check
 
@@ -667,8 +689,8 @@ def get_finance_service(
         timeline=crm_repo,
         order_lookup=sales_repo,
         default_currency=_PayrollDefaultCurrencyPort(
-        PayrollRepository(db, next_sequence=SequenceRepository(db).next_value)
-    ),
+            PayrollRepository(db, next_sequence=SequenceRepository(db).next_value)
+        ),
     )
 
 
@@ -977,3 +999,33 @@ def get_dashboard_service(db: AsyncSession = Depends(get_db)) -> DashboardServic
     from core.features.reporting.service import DashboardService
 
     return DashboardService(DashboardRepository(db))
+
+
+def make_report_service(
+    db: AsyncSession,
+    audit: CoreAuditService | None = None,
+) -> ReportService:
+    """Plain factory - build :class:`ReportService` without FastAPI resolution.
+
+    Shared by the FastAPI dependency below and the background snapshot
+    retention worker, which constructs services on its own per-tick session
+    and cannot go through ``Depends``.
+    """
+    from core.features.reporting.repository import ReportRepository
+    from core.features.reporting.service import ReportService
+
+    return ReportService(ReportRepository(db), audit=audit)
+
+
+def get_report_service(
+    db: AsyncSession = Depends(get_db),
+    audit: CoreAuditService = Depends(get_core_audit_service),
+) -> ReportService:
+    """Composition root for the reports API (RPT-BE-001).
+
+    Same session as the permission dependency, so param validation, the report
+    query, and the snapshot upsert commit atomically in the request
+    transaction. The shared audit service records ``REPORT_EXPORTED`` on the
+    export path.
+    """
+    return make_report_service(db, audit)

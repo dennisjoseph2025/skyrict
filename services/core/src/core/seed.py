@@ -8,6 +8,10 @@ decisions) live here and are applied at tenant provisioning time:
     (accrual, 8 days/yr), and unpaid (non-accrual ledger-only type);
   - the single ``erp_payroll_settings`` row per tenant (default currency from
     settings, zero PF/tax rates, nearest rounding);
+  - the Phase-1 reporting pack in ``erp_report_definitions`` (the SAME
+    ``core.features.reporting.seeds`` catalog that migrations 0036/0039 apply
+    for pre-existing tenants; provisioning reconciles, so catalog updates
+    reach existing tenants too);
   - the five system roles in ``core_roles`` (ERP grants per the HR & Payroll
     design doc section 2.4) - the role catalog ``require_permission`` resolves
     through ``core_user_roles``.
@@ -16,8 +20,9 @@ EMP-/PR- record-numbering seeds are deliberately NOT here: ``erp_sequences``
 now exists (migration 0006) but the per-tenant counter seed rows land with the
 HR service ticket, which owns the numbering scheme.
 
-Idempotent: safe to re-run - existing rows are left untouched (system-role
-permits are appended, never removed).
+Idempotent: safe to re-run - existing rows are left untouched when in sync
+(reporting definitions are reconciled only when the canonical catalog is
+newer; system-role permits are appended, never removed).
 """
 
 from __future__ import annotations
@@ -57,6 +62,9 @@ from core.db.session import async_session_factory
 from core.features.hr.models.leave_type import LeaveTypeModel
 from core.features.payroll.models.payroll_run import PayrollRounding
 from core.features.payroll.models.payroll_settings import PayrollSettingsModel
+from core.features.reporting.models.report_definition import ErpReportDefinitionModel
+from core.features.reporting.seeds import PHASE_1_REPORT_SEEDS, is_seed_stale
+from core.features.reporting.validation import require_tenant_filter, validate_read_only_sql
 from core.models.core_role import CoreRoleModel
 
 if TYPE_CHECKING:
@@ -243,6 +251,76 @@ async def seed_core_roles_for_tenant(tenant_id: uuid.UUID) -> None:
                 role.permissions = list(dict.fromkeys(role.permissions + list(permissions)))
         if created:
             logger.info("seed.core_roles.created", tenant_id=str(tenant_id), count=created)
+        await session.commit()
+
+
+async def seed_reporting_defaults(tenant_id: uuid.UUID) -> None:
+    """Reconcile the Phase-1 report definitions for one tenant.
+
+    Applies the canonical ``PHASE_1_REPORT_SEEDS`` pack - the same definitions
+    migration 0036/0039 insert for pre-existing tenants - so a newly
+    provisioned tenant is indistinguishable from one that pre-dates the
+    reporting data layer. Each definition is validated read-only before
+    insert/update.
+
+    Reconcile (not insert-only): missing slugs are inserted, and an existing
+    definition that is stale - older ``version`` than the seed, or stored SQL
+    diverging from the canonical seed after whitespace normalization - is
+    refreshed in place and its version bumped. Identical rows are left
+    untouched so re-runs are stable and never rewrite what is already in
+    sync. This is what keeps a catalog improvement (e.g. ``ar_aging`` gaining
+    ``outstanding``) from silently never reaching already-provisioned tenants.
+    """
+    async with async_session_factory() as session:
+        existing = {
+            model.slug: model
+            for model in (
+                await session.execute(
+                    select(ErpReportDefinitionModel).where(
+                        ErpReportDefinitionModel.tenant_id == tenant_id
+                    )
+                )
+            ).scalars()
+        }
+
+        inserted = 0
+        updated = 0
+        for seed in PHASE_1_REPORT_SEEDS:
+            validate_read_only_sql(seed.sql, seed.params)
+            require_tenant_filter(seed.sql)
+            model = existing.get(seed.slug)
+            if model is None:
+                session.add(
+                    ErpReportDefinitionModel(
+                        tenant_id=tenant_id,
+                        slug=seed.slug,
+                        title=seed.title,
+                        module=seed.module,
+                        description=seed.description,
+                        sql=seed.sql,
+                        params=list(seed.params),
+                        permission_key=seed.permission_key,
+                        version=seed.version,
+                    )
+                )
+                inserted += 1
+                continue
+            if is_seed_stale(seed, version=model.version, sql=model.sql):
+                model.title = seed.title
+                model.module = seed.module
+                model.description = seed.description
+                model.sql = seed.sql
+                model.params = list(seed.params)
+                model.permission_key = seed.permission_key
+                model.version = seed.version
+                updated += 1
+        if inserted or updated:
+            logger.info(
+                "seed.reporting_definitions.reconciled",
+                tenant_id=str(tenant_id),
+                inserted=inserted,
+                updated=updated,
+            )
         await session.commit()
 
 

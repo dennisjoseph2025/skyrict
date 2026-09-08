@@ -125,9 +125,7 @@ async def suggest_invoice_lines_with_ai(
     try:
         data = upstream.json()
     except ValueError:
-        raise AiServiceUnavailableError(
-            "AI line-item suggestion returned invalid JSON"
-        ) from None
+        raise AiServiceUnavailableError("AI line-item suggestion returned invalid JSON") from None
 
     items = data.get("data") if isinstance(data, dict) else None
     if not isinstance(items, list):

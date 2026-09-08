@@ -49,6 +49,7 @@ async function proxy(request: NextRequest) {
         "portal",
         "ai",
         "dashboards",
+        "reports",
     ].includes(segment)
         ? "core"
         : "identity";

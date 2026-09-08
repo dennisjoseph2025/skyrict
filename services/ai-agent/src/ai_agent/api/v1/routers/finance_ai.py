@@ -104,9 +104,7 @@ class NarrateResponse(BaseModel):
     model_used: str
 
 
-anomaly_narrate_router = APIRouter(
-    prefix="/ai/finance/anomalies/narrate", tags=["ai-finance"]
-)
+anomaly_narrate_router = APIRouter(prefix="/ai/finance/anomalies/narrate", tags=["ai-finance"])
 
 
 @anomaly_narrate_router.post("", response_model=NarrateResponse)

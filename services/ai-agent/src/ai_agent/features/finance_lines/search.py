@@ -86,9 +86,7 @@ class FinanceLineSuggestService:
         started = time.perf_counter()
         normalized = description.strip()
         if not normalized or self._embeddings is None:
-            return FinanceLineSuggestResult(
-                data=[], degraded=True, model_used=None, latency_ms=0
-            )
+            return FinanceLineSuggestResult(data=[], degraded=True, model_used=None, latency_ms=0)
 
         try:
             embedded = await self._embeddings.embed([normalized])
@@ -100,9 +98,7 @@ class FinanceLineSuggestService:
             )
         except Exception as exc:
             logger.warning("finance_lines_suggest.degraded", error=str(exc))
-            return FinanceLineSuggestResult(
-                data=[], degraded=True, model_used=None, latency_ms=0
-            )
+            return FinanceLineSuggestResult(data=[], degraded=True, model_used=None, latency_ms=0)
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         data = [
@@ -113,9 +109,7 @@ class FinanceLineSuggestService:
                 times_used=hit.times_used,
                 score=round(1.0 - hit.cosine_distance, 4),
             )
-            for hit in sorted(
-                hits, key=lambda hit: (-hit.times_used, hit.cosine_distance)
-            )
+            for hit in sorted(hits, key=lambda hit: (-hit.times_used, hit.cosine_distance))
         ]
         logger.info(
             "finance_lines_suggest.completed",

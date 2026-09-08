@@ -26,6 +26,9 @@ ERP_INVENTORY_WRITE = "erp.inventory.write"
 ERP_INVENTORY_ADJUST = "erp.inventory.adjust"
 ERP_INVENTORY_ADJUST_APPROVE = "erp.inventory.adjust.approve"
 ERP_INVENTORY_AI_APPROVE = "erp.inventory.ai.approve"
+ERP_INVENTORY_COST = "erp.inventory.cost"
+ERP_INVENTORY_SUPPLIERS_READ = "erp.inventory.suppliers.read"
+ERP_INVENTORY_SUPPLIERS_WRITE = "erp.inventory.suppliers.write"
 
 # Purchasing
 ERP_PURCHASE_READ = "erp.purchase.read"
@@ -102,6 +105,11 @@ ERP_PAYROLL_AI_RUN = "erp.payroll.ai.run"
 ERP_PAYROLL_AI_NOTIFY = "erp.payroll.ai.notify"
 ERP_PAYROLL_AI_APPROVE = "erp.payroll.ai.approve"
 
+# Reporting & analytics (RPT-DATA-001, docs/architecture/erp-phase1.md §M-RPT).
+# Read gate for every /api/v1/reporting/* endpoint and the report snapshot
+# queries; seeded into core_permissions by migration 0036.
+ERP_REPORTS_READ = "erp.reports.read"
+
 # Every catalogued permission, in catalog order.
 CATALOG: tuple[str, ...] = (
     ERP_INVENTORY_READ,
@@ -109,6 +117,9 @@ CATALOG: tuple[str, ...] = (
     ERP_INVENTORY_ADJUST,
     ERP_INVENTORY_ADJUST_APPROVE,
     ERP_INVENTORY_AI_APPROVE,
+    ERP_INVENTORY_COST,
+    ERP_INVENTORY_SUPPLIERS_READ,
+    ERP_INVENTORY_SUPPLIERS_WRITE,
     ERP_PURCHASE_READ,
     ERP_PURCHASE_WRITE,
     ERP_PURCHASE_APPROVE,
@@ -145,6 +156,7 @@ CATALOG: tuple[str, ...] = (
     ERP_PAYROLL_AI_RUN,
     ERP_PAYROLL_AI_NOTIFY,
     ERP_PAYROLL_AI_APPROVE,
+    ERP_REPORTS_READ,
 )
 # Permission module groupings.
 # Each entry: (module_key, module_label, (permission_keys, ...))
@@ -158,6 +170,9 @@ PERMISSION_MODULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             ERP_INVENTORY_ADJUST,
             ERP_INVENTORY_ADJUST_APPROVE,
             ERP_INVENTORY_AI_APPROVE,
+            ERP_INVENTORY_COST,
+            ERP_INVENTORY_SUPPLIERS_READ,
+            ERP_INVENTORY_SUPPLIERS_WRITE,
         ),
     ),
     ("purchase", "Purchasing", (ERP_PURCHASE_READ, ERP_PURCHASE_WRITE, ERP_PURCHASE_APPROVE)),
@@ -195,6 +210,11 @@ PERMISSION_MODULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             ERP_PAYROLL_AI_NOTIFY,
             ERP_PAYROLL_AI_APPROVE,
         ),
+    ),
+    (
+        "reporting",
+        "Reporting & analytics",
+        (ERP_REPORTS_READ,),
     ),
 )
 
@@ -240,7 +260,10 @@ __all__ = [
     "ERP_INVENTORY_ADJUST",
     "ERP_INVENTORY_ADJUST_APPROVE",
     "ERP_INVENTORY_AI_APPROVE",
+    "ERP_INVENTORY_COST",
     "ERP_INVENTORY_READ",
+    "ERP_INVENTORY_SUPPLIERS_READ",
+    "ERP_INVENTORY_SUPPLIERS_WRITE",
     "ERP_INVENTORY_WRITE",
     "ERP_INVOICE_APPROVE",
     "ERP_INVOICE_READ",
@@ -256,6 +279,7 @@ __all__ = [
     "ERP_PURCHASE_APPROVE",
     "ERP_PURCHASE_READ",
     "ERP_PURCHASE_WRITE",
+    "ERP_REPORTS_READ",
     "ERP_SALES_APPROVE",
     "ERP_SALES_READ",
     "ERP_SALES_WRITE",

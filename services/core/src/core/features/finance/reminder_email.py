@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import smtplib
-import structlog
 from email.message import EmailMessage
+
+import structlog
 
 from core.core.config import settings
 from core.domain.entities import ReminderDraft

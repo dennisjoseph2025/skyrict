@@ -25,6 +25,7 @@ from ai_agent.models.ai_query_log import AiQueryLogModel
 from ai_agent.models.ai_restock_demand_stats import AiRestockDemandStatsModel
 from ai_agent.models.ai_restock_settings import AiRestockSettingsModel
 from ai_agent.models.ai_suggestion import AiSuggestionModel
+from ai_agent.models.ai_supplier_risk import AiSupplierRiskModel
 from ai_agent.models.base import Base
 
 
@@ -47,6 +48,8 @@ class TestRegistry:
             "ai_restock_settings",
             "ai_restock_demand_stats",
             "ai_anomaly_rule_stats",
+            # SKY-86 (INV-AI-004) supplier risk grades
+            "ai_supplier_risk",
             # RAG tables (SKY-58)
             "ai_rag_parents",
             "ai_rag_chunks",
@@ -307,6 +310,38 @@ class TestAiAnomalyRuleStats:
             if constraint.name is not None and str(constraint.name).startswith("ck_")
         }
         assert "ck_ai_anomaly_rule_stats_counts_non_negative" in names
+
+
+class TestAiSupplierRisk:
+    def test_composite_pk(self) -> None:
+        pk = list(AiSupplierRiskModel.__table__.primary_key.columns.keys())
+        assert pk == ["tenant_id", "supplier_id"]
+
+    def test_score_band_and_confidence_checks_present(self) -> None:
+        names = _check_names(AiSupplierRiskModel.__table__)
+        assert "ck_ai_supplier_risk_score_range" in names
+        assert "ck_ai_supplier_risk_band" in names
+        assert "ck_ai_supplier_risk_confidence_range" in names
+
+    def test_supplier_cross_service_fk_is_composite(self) -> None:
+        fks = list(AiSupplierRiskModel.__table__.foreign_key_constraints)
+        assert len(fks) == 1
+        fk = fks[0]
+        assert fk.name == "fk_ai_supplier_risk_supplier_tenant"
+        assert [str(c.name) for c in fk.columns] == ["tenant_id", "supplier_id"]
+        assert [str(c.target_fullname) for c in fk.elements] == [
+            "erp_suppliers.tenant_id",
+            "erp_suppliers.id",
+        ]
+
+    def test_band_lookup_index_exists(self) -> None:
+        index = next(
+            index
+            for index in AiSupplierRiskModel.__table__.indexes
+            if index.name == "idx_ai_supplier_risk_tenant_band"
+        )
+        assert not index.unique
+        assert [str(c.name) for c in index.expressions] == ["tenant_id", "risk_band"]
 
 
 def _check_names(table: object) -> set[str]:

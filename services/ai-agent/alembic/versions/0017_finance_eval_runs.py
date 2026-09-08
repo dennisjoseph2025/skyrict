@@ -42,7 +42,9 @@ def upgrade() -> None:
         sa.Column("abstained", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("precision", sa.Numeric(5, 4), nullable=True),
         sa.Column("passed", sa.Boolean(), nullable=False, server_default=sa.text("false")),
-        sa.Column("details", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column(
+            "details", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")
+        ),
     )
     op.create_index(
         "idx_finance_eval_runs_run_at",

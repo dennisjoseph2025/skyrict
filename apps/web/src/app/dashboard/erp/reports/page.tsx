@@ -1,7 +1,8 @@
 import { BarChart3 } from "lucide-react";
 
-import { ErpReportsKpis } from "@/components/dashboard/erp/erp-reports-kpis";
 import { PageHeader } from "@/components/dashboard/shared/page-header";
+import { ReportKpis } from "@/features/reports/components/report-kpis";
+import { ReportsWorkspace } from "@/features/reports/reports-workspace";
 
 export default function ErpReportsPage() {
     return (
@@ -11,7 +12,8 @@ export default function ErpReportsPage() {
                 description="Cross-department dashboards and exports for your business."
                 icon={BarChart3}
             />
-            <ErpReportsKpis />
+            <ReportKpis />
+            <ReportsWorkspace />
         </div>
     );
 }

@@ -102,19 +102,17 @@ class FinanceLineLoader:
         }
         try:
             async with self._create_client() as client:
-                response = await client.get(
-                    f"{self._base_url}{_ACCOUNTS_PATH}", headers=headers
-                )
+                response = await client.get(f"{self._base_url}{_ACCOUNTS_PATH}", headers=headers)
                 response.raise_for_status()
         except httpx.HTTPError as exc:
             logger.warning("finance_lines_loader.accounts_error")
-            raise AiUnavailableError("Core service is unreachable for the chart of accounts") from exc
+            raise AiUnavailableError(
+                "Core service is unreachable for the chart of accounts"
+            ) from exc
         try:
             data = response.json().get("data")
         except ValueError as exc:
-            raise AiUnavailableError(
-                "Core service returned an unusable chart of accounts"
-            ) from exc
+            raise AiUnavailableError("Core service returned an unusable chart of accounts") from exc
         accounts: dict[uuid.UUID, tuple[str, str]] = {}
         for row in data or []:
             if not isinstance(row, dict):
@@ -126,7 +124,9 @@ class FinanceLineLoader:
             accounts[account_id] = (str(row.get("code") or ""), str(row.get("name") or ""))
         return accounts
 
-    async def _fetch_invoice_page(self, client: httpx.AsyncClient, offset: int) -> list[dict[str, Any]]:
+    async def _fetch_invoice_page(
+        self, client: httpx.AsyncClient, offset: int
+    ) -> list[dict[str, Any]]:
         """Fetch one ListResponse page of invoices; transport failures are 503s."""
         headers = {
             "Authorization": f"Bearer {self._bearer_token}",

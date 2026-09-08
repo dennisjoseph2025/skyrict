@@ -147,6 +147,30 @@ tests/
 4. **Respond to review feedback within 48 hours.** Even if just acknowledging.
 5. **Squash on merge.** Keep `main` history clean.
 
+### PR Title
+
+The `Validate PR Title` workflow enforces the title on open/edit. It must match
+one of two forms; types are `feat|fix|chore|docs|test|refactor|perf|ci|build`,
+scope is optional, and a `!` marks a breaking change.
+
+1. **Jira-tracked work** — `[INTERNAL-ID]: type(scope)/TICKET-KEY summary`
+
+   ```
+   [RPT-DATA-001]: feat(core)/SKY-77 reporting data layer - parametrized runs + snapshots
+   ```
+
+   Both the internal-ID prefix (`[DOMAIN-LAYER-000]`) and the Jira key are
+   mandatory for Jira-tracked PRs.
+
+2. **Non-Jira work** — Conventional Commits, no ID/key prefix
+
+   ```
+   fix(ci): validate root CI - explicit per-package test jobs + remove dead cd-production stub
+   ```
+
+Open `scripts/new-pr.ps1` from the branch to pre-fill the title (it derives the
+type, Jira key, and summary from the branch name and opens the compare page).
+
 ### PR Review Criteria
 
 Reviewers will check:

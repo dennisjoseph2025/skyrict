@@ -28,9 +28,7 @@ class ErpExchangeRateModel(Base):
     base_currency: Mapped[str] = mapped_column(String(3), primary_key=True, nullable=False)
     quote_currency: Mapped[str] = mapped_column(String(3), primary_key=True, nullable=False)
     effective_date: Mapped[date] = mapped_column(Date, primary_key=True, nullable=False)
-    rate: Mapped[Decimal] = mapped_column(
-        Numeric(18, 6), nullable=False, server_default=text("1")
-    )
+    rate: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

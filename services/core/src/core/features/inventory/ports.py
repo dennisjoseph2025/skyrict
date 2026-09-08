@@ -16,7 +16,18 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Protocol
 
-from core.domain.entities import Product, StockLevel, StockMovement, Warehouse
+from core.domain.entities import (
+    DeadStockItem,
+    MovementTrendPoint,
+    Product,
+    SlowMoverItem,
+    StockHealthSummary,
+    StockLevel,
+    StockMovement,
+    Supplier,
+    SupplierPerformance,
+    Warehouse,
+)
 from core.domain.value_objects import Money, StockMovementType
 
 
@@ -42,6 +53,7 @@ class InventoryRepositoryPort(Protocol):
         cost_price: Money | object = ...,
         sell_price: Money | object = ...,
         reorder_point: Decimal | object = ...,
+        supplier_id: uuid.UUID | object | None = ...,
     ) -> Product | None: ...
 
     async def deactivate_product(
@@ -68,6 +80,62 @@ class InventoryRepositoryPort(Protocol):
         *,
         include_inactive: bool = False,
         category: str | None = None,
+    ) -> int: ...
+
+    # --- Suppliers (soft-delete via is_active = false) ---
+    async def create_supplier(self, supplier: Supplier) -> Supplier: ...
+
+    async def get_supplier(
+        self, supplier_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> Supplier | None: ...
+
+    async def get_supplier_by_name(self, name: str, tenant_id: uuid.UUID) -> Supplier | None: ...
+
+    async def update_supplier(
+        self,
+        supplier_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        *,
+        name: str | object = ...,
+        contact_name: str | object | None = ...,
+        contact_email: str | object | None = ...,
+        lead_time_days: int | object = ...,
+        is_active: bool | object = ...,
+    ) -> Supplier | None: ...
+
+    async def deactivate_supplier(
+        self, supplier_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> Supplier | None: ...
+
+    async def list_suppliers(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        include_inactive: bool = False,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[Supplier]: ...
+
+    async def count_suppliers(
+        self, tenant_id: uuid.UUID, *, include_inactive: bool = False
+    ) -> int: ...
+
+    # --- Supplier performance facts (grading periods) ---
+    async def add_supplier_performance(
+        self, performance: SupplierPerformance
+    ) -> SupplierPerformance: ...
+
+    async def list_supplier_performance(
+        self,
+        supplier_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        *,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[SupplierPerformance]: ...
+
+    async def count_supplier_performance(
+        self, supplier_id: uuid.UUID, tenant_id: uuid.UUID
     ) -> int: ...
 
     # --- Warehouses (soft-delete via is_active = false) ---
@@ -196,6 +264,41 @@ class InventoryRepositoryPort(Protocol):
         movement_type: StockMovementType | None = None,
     ) -> int: ...
 
+    # --- Stock-health analytics (INV-ANL-001) ---
+    async def dead_stock(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        days: int = 90,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[DeadStockItem]: ...
+
+    async def count_dead_stock(self, tenant_id: uuid.UUID, *, days: int = 90) -> int: ...
+
+    async def slow_movers(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        window_days: int = 180,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[SlowMoverItem]: ...
+
+    async def count_slow_movers(self, tenant_id: uuid.UUID, *, window_days: int = 180) -> int: ...
+
+    async def movement_trends(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        warehouse_id: uuid.UUID | None = None,
+        weeks: int = 13,
+    ) -> Sequence[MovementTrendPoint]: ...
+
+    async def health_summary(
+        self, tenant_id: uuid.UUID, *, days: int = 90
+    ) -> StockHealthSummary: ...
+
     async def commit(self) -> None: ...
 
 
@@ -277,3 +380,38 @@ class InventoryServicePort(Protocol):
         qty: Decimal,
         ref_id: str,
     ) -> tuple[StockMovement, StockMovement]: ...
+
+    # --- Stock-health analytics (INV-ANL-001) ---
+    async def dead_stock(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        days: int = 90,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[DeadStockItem]: ...
+
+    async def count_dead_stock(self, tenant_id: uuid.UUID, *, days: int = 90) -> int: ...
+
+    async def slow_movers(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        window_days: int = 180,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> Sequence[SlowMoverItem]: ...
+
+    async def count_slow_movers(self, tenant_id: uuid.UUID, *, window_days: int = 180) -> int: ...
+
+    async def movement_trends(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        warehouse_id: uuid.UUID | None = None,
+        weeks: int = 13,
+    ) -> Sequence[MovementTrendPoint]: ...
+
+    async def health_summary(
+        self, tenant_id: uuid.UUID, *, days: int = 90
+    ) -> StockHealthSummary: ...

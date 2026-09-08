@@ -18,6 +18,7 @@ pip-delete-this-directory.txt
 
 # Virtual environments
 .venv/
+.venv-old/
 venv/
 env/
 ENV/
@@ -46,6 +47,13 @@ coverage.xml
 .hypothesis/
 .tox/
 .nox/
+
+# ---------- Playwright (apps/web) ----------
+apps/web/e2e/.auth/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+apps/web/playwright/.cache/
 
 # ---------- Linting / Formatting ----------
 .ruff_cache/

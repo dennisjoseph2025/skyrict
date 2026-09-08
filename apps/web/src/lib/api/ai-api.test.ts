@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getDigest, refreshDigest } from "@/lib/api/ai-api";
+import { getDigest, refreshDigest, listSupplierRisk } from "@/lib/api/ai-api";
 import type { apiFetchEnvelope } from "@/lib/api/http";
 
 const httpMock = vi.fn<typeof apiFetchEnvelope>();
@@ -8,14 +8,18 @@ const httpMock = vi.fn<typeof apiFetchEnvelope>();
 type Envelope = { data?: unknown; meta?: unknown };
 
 /**
- * Simulate the real http helpers: `apiFetchEnvelope` returns the whole
- * envelope, while `apiFetch`/`apiPost`/... unwrap `payload.data`. This mirrors
+ * Simulate the real http helpers: `apiFetch`/`apiFetchBody` return the whole
+ * body, while `apiFetchEnvelope` returns the whole envelope. This mirrors
  * lib/api/http.ts.
  */
 vi.mock("@/lib/api/http", () => ({
     apiFetch: async (_path: string, _options: RequestInit = {}) => {
         const result = await httpMock(_path, _options);
         return (result as Envelope).data;
+    },
+    apiFetchBody: async (_path: string, _options: RequestInit = {}) => {
+        const result = await httpMock(_path, _options);
+        return result;
     },
     apiFetchEnvelope: (_path: string, _options?: RequestInit) =>
         httpMock(_path, _options),
@@ -86,5 +90,32 @@ describe("ai narrator digest endpoints", () => {
             "/api/v1/ai/narrator/digest/refresh?as_of=2026-08-25",
             { method: "POST" },
         );
+    });
+});
+
+describe("supplier risk endpoints", () => {
+    beforeEach(() => {
+        httpMock.mockReset();
+    });
+
+    it("fetches supplier risk grades from the proxy", async () => {
+        const payload = {
+            data: [
+                {
+                    supplier_id: "11111111-1111-4111-8111-111111111111",
+                    score: "0.6900",
+                    risk_band: "high",
+                    confidence: "0.4000",
+                    reason: "high risk, on-time delivery 51.0%",
+                },
+            ],
+            meta: null,
+        };
+        httpMock.mockResolvedValue(payload);
+
+        const result = await listSupplierRisk();
+
+        expect(httpMock).toHaveBeenCalledWith("/api/v1/ai/supplier-risk", {});
+        expect(result).toEqual(payload);
     });
 });

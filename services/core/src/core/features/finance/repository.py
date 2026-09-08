@@ -619,12 +619,12 @@ class FinanceRepository:
             customer_id=invoice.customer_id,
             invoice_date=invoice.invoice_date,
             due_date=invoice.due_date,
-status=invoice.status,
-        total=invoice.total,
-        currency=invoice.currency,
-        exchange_rate=invoice.exchange_rate,
-        source=invoice.source,
-        source_ref=invoice.source_ref,
+            status=invoice.status,
+            total=invoice.total,
+            currency=invoice.currency,
+            exchange_rate=invoice.exchange_rate,
+            source=invoice.source,
+            source_ref=invoice.source_ref,
         )
         self.session.add(model)
         try:
@@ -847,9 +847,7 @@ status=invoice.status,
         seq = int((await self.session.execute(stmt)).scalar_one())
         return _document_number(INVOICE_PREFIX, year, seq)
 
-    async def count_invoices_since(
-        self, tenant_id: uuid.UUID, since: datetime
-    ) -> int:
+    async def count_invoices_since(self, tenant_id: uuid.UUID, since: datetime) -> int:
         stmt = select(func.count(ErpInvoiceModel.id)).where(
             ErpInvoiceModel.tenant_id == tenant_id,
             ErpInvoiceModel.invoice_date >= since.date(),

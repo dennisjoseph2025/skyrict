@@ -110,9 +110,7 @@ def _user_id(current_user: dict[str, Any]) -> uuid.UUID:
 AiSuggester = Callable[[str, Sequence[ChartOfAccount]], Awaitable[AccountCodeSuggestion | None]]
 AiDrafter = Callable[[str, Sequence[ChartOfAccount]], Awaitable[DraftEntry | None]]
 AiNarrater = Callable[[str, str, str], Awaitable[AnomalyNarration | None]]
-AiReminder = Callable[
-    [str | None, str, Decimal, int, str], Awaitable[ReminderDraft | None]
-]
+AiReminder = Callable[[str | None, str, Decimal, int, str], Awaitable[ReminderDraft | None]]
 AiLineSuggester = Callable[[str], Awaitable[list[InvoiceLineSuggestion] | None]]
 
 
@@ -204,21 +202,23 @@ class FinanceAutomationService:
             return suggestions or []
         return []
 
-    async def accept_suggestion(self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID) -> AiFinanceSuggestion:
+    async def accept_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion:
         result = await self.repo.review_ai_suggestion(tenant_id, suggestion_id, accepted=True)
         if result is None:
             raise NotFoundError("Suggestion not found")
         return result
 
-    async def dismiss_suggestion(self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID) -> AiFinanceSuggestion:
+    async def dismiss_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion:
         result = await self.repo.review_ai_suggestion(tenant_id, suggestion_id, accepted=False)
         if result is None:
             raise NotFoundError("Suggestion not found")
         return result
 
-    async def suggestion_quality(
-        self, tenant_id: uuid.UUID, window_days: int = 30
-    ) -> Any:
+    async def suggestion_quality(self, tenant_id: uuid.UUID, window_days: int = 30) -> Any:
         counts = await self.repo.suggestion_acceptance_counts(tenant_id, window_days)
         from decimal import Decimal
 
@@ -228,7 +228,11 @@ class FinanceAutomationService:
         for feature, accepted, dismissed in counts:
             total_accepted += accepted
             total_decisions += accepted + dismissed
-            rate = Decimal(accepted) / Decimal(accepted + dismissed) if accepted + dismissed > 0 else None
+            rate = (
+                Decimal(accepted) / Decimal(accepted + dismissed)
+                if accepted + dismissed > 0
+                else None
+            )
             below = rate is not None and rate < Decimal("0.30")
             score = AiFinanceQualityScore(
                 tenant_id=tenant_id,
@@ -240,7 +244,9 @@ class FinanceAutomationService:
             )
             persisted_score = await self.repo.upsert_ai_quality_score(tenant_id, score)
             feature_scores.append(persisted_score)
-        overall_rate = Decimal(total_accepted) / Decimal(total_decisions) if total_decisions > 0 else None
+        overall_rate = (
+            Decimal(total_accepted) / Decimal(total_decisions) if total_decisions > 0 else None
+        )
         from core.features.finance.schemas import (
             SuggestionQualityResponse,
             SuggestionQualityScoreResponse,

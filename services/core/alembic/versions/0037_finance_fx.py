@@ -67,9 +67,7 @@ def upgrade() -> None:
             ["erp_currencies.code"],
             name="fk_erp_exchange_rates_quote",
         ),
-        sa.PrimaryKeyConstraint(
-            "tenant_id", "base_currency", "quote_currency", "effective_date"
-        ),
+        sa.PrimaryKeyConstraint("tenant_id", "base_currency", "quote_currency", "effective_date"),
     )
     op.execute("ALTER TABLE public.erp_exchange_rates ENABLE ROW LEVEL SECURITY")
     op.execute(
@@ -120,16 +118,13 @@ def downgrade() -> None:
     for key, _description in _FX_PERMISSIONS:
         op.execute(f"DELETE FROM core_permissions WHERE key = '{key}'")  # nosec B608
 
-    op.drop_constraint(
-        "ck_erp_invoices_exchange_rate_positive", "erp_invoices", type_="check"
-    )
+    op.drop_constraint("ck_erp_invoices_exchange_rate_positive", "erp_invoices", type_="check")
     op.drop_constraint("fk_erp_invoices_currency", "erp_invoices", type_="foreignkey")
     op.drop_column("erp_invoices", "exchange_rate")
     op.drop_column("erp_invoices", "currency")
 
     op.execute(
-        "DROP POLICY IF EXISTS tenant_isolation_erp_exchange_rates "
-        "ON public.erp_exchange_rates"
+        "DROP POLICY IF EXISTS tenant_isolation_erp_exchange_rates ON public.erp_exchange_rates"
     )
     op.execute("ALTER TABLE public.erp_exchange_rates DISABLE ROW LEVEL SECURITY")
     op.drop_table("erp_exchange_rates")

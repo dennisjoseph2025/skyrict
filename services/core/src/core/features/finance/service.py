@@ -1024,9 +1024,7 @@ class FinanceService:
         quote_currency: str,
         on_date: date,
     ) -> ExchangeRate:
-        rate = await self._repo.get_exchange_rate(
-            tenant_id, base_currency, quote_currency, on_date
-        )
+        rate = await self._repo.get_exchange_rate(tenant_id, base_currency, quote_currency, on_date)
         if rate is None:
             raise NotFoundError(
                 f"No exchange rate for {base_currency}/{quote_currency} on {on_date}"
@@ -1093,9 +1091,7 @@ class FinanceService:
                 return configured.strip().upper()
         return settings.DEFAULT_CURRENCY.strip().upper()
 
-    async def _resolve_invoice_currency(
-        self, tenant_id: uuid.UUID, currency: str | None
-    ) -> str:
+    async def _resolve_invoice_currency(self, tenant_id: uuid.UUID, currency: str | None) -> str:
         code = (currency or await self._default_currency_code(tenant_id)).strip().upper()
         if code not in SUPPORTED_CURRENCIES:
             raise ValidationError(f"Unsupported currency '{code}'")

@@ -10,13 +10,24 @@ because ``Money`` is not pydantic-serializable.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
 from core.core.config import settings
-from core.domain.entities import Product, StockLevel, StockMovement, Warehouse
+from core.domain.entities import (
+    DeadStockItem,
+    MovementTrendPoint,
+    Product,
+    SlowMoverItem,
+    StockHealthSummary,
+    StockLevel,
+    StockMovement,
+    Supplier,
+    SupplierPerformance,
+    Warehouse,
+)
 from core.domain.value_objects import Money, StockMovementType
 
 # Request money shape: (amount, currency) e.g. ``[12.50, "USD"]``.
@@ -74,6 +85,7 @@ class ProductUpdate(BaseModel):
     cost_price: MoneyInput | None = None
     sell_price: MoneyInput | None = None
     reorder_point: Decimal | None = Field(default=None, ge=0)
+    supplier_id: uuid.UUID | None = Field(default=None)
 
 
 class ProductResponse(BaseModel):
@@ -88,6 +100,7 @@ class ProductResponse(BaseModel):
     sell_price: MoneyOutput
     reorder_point: str
     is_active: bool
+    supplier_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -105,6 +118,7 @@ class ProductResponse(BaseModel):
             sell_price=money_output(product.sell_price),
             reorder_point=str(product.reorder_point),
             is_active=product.is_active,
+            supplier_id=product.supplier_id,
             created_at=product.created_at,
             updated_at=product.updated_at,
         )
@@ -150,6 +164,104 @@ class WarehouseResponse(BaseModel):
             is_active=warehouse.is_active,
             created_at=warehouse.created_at,
             updated_at=warehouse.updated_at,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Suppliers (SKY-86 / INV-AI-004)
+# ---------------------------------------------------------------------------
+
+
+class SupplierCreate(BaseModel):
+    """POST /inventory/suppliers - create a supplier.
+
+    ``name`` must be unique within the tenant; ``lead_time_days`` is the
+    supplier's quoted replenishment lead time.
+    """
+
+    name: str = Field(..., min_length=1, max_length=255)
+    lead_time_days: int = Field(default=7, ge=0)
+    contact_name: str | None = Field(default=None, max_length=255)
+    contact_email: str | None = Field(default=None, max_length=255)
+
+
+class SupplierUpdate(BaseModel):
+    """PATCH /inventory/suppliers/{id} - partial update of a supplier."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    lead_time_days: int | None = Field(default=None, ge=0)
+    contact_name: str | None = Field(default=None, max_length=255)
+    contact_email: str | None = Field(default=None, max_length=255)
+
+
+class SupplierResponse(BaseModel):
+    """Supplier data returned in API responses."""
+
+    id: uuid.UUID
+    name: str
+    lead_time_days: int
+    contact_name: str | None
+    contact_email: str | None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_entity(cls, supplier: Supplier) -> SupplierResponse:
+        assert supplier.id is not None and supplier.created_at is not None
+        assert supplier.updated_at is not None
+        return cls(
+            id=supplier.id,
+            name=supplier.name,
+            lead_time_days=supplier.lead_time_days,
+            contact_name=supplier.contact_name,
+            contact_email=supplier.contact_email,
+            is_active=supplier.is_active,
+            created_at=supplier.created_at,
+            updated_at=supplier.updated_at,
+        )
+
+
+class SupplierPerformanceCreate(BaseModel):
+    """POST /inventory/suppliers/{id}/performance - one grading period.
+
+    Every dimension is bounded by DB CHECK constraints plus service validation.
+    """
+
+    period_start: date
+    period_end: date
+    on_time_delivery_pct: Decimal = Field(..., ge=0, le=100)
+    defect_rate_pct: Decimal = Field(..., ge=0, le=100)
+    price_stability_index: Decimal = Field(..., ge=0, le=100)
+    responsiveness_days: Decimal = Field(..., ge=0)
+
+
+class SupplierPerformanceResponse(BaseModel):
+    """One supplier grading-period fact set (raw score inputs)."""
+
+    id: uuid.UUID
+    supplier_id: uuid.UUID
+    period_start: date
+    period_end: date
+    on_time_delivery_pct: str
+    defect_rate_pct: str
+    price_stability_index: str
+    responsiveness_days: str
+    created_at: datetime
+
+    @classmethod
+    def from_entity(cls, performance: SupplierPerformance) -> SupplierPerformanceResponse:
+        assert performance.id is not None and performance.created_at is not None
+        return cls(
+            id=performance.id,
+            supplier_id=performance.supplier_id,
+            period_start=performance.period_start,
+            period_end=performance.period_end,
+            on_time_delivery_pct=str(performance.on_time_delivery_pct),
+            defect_rate_pct=str(performance.defect_rate_pct),
+            price_stability_index=str(performance.price_stability_index),
+            responsiveness_days=str(performance.responsiveness_days),
+            created_at=performance.created_at,
         )
 
 
@@ -297,4 +409,111 @@ class AlertResponse(BaseModel):
             name=product.name,
             qty_on_hand=str(level.qty_on_hand),
             reorder_point=str(product.reorder_point),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stock-health analytics (INV-ANL-001)
+# ---------------------------------------------------------------------------
+
+
+class DeadStockItemResponse(BaseModel):
+    """A product with on-hand stock but no outbound movement in the window.
+
+    Cost fields are only populated when the caller holds ``erp.inventory.cost``
+    (the router blanks them otherwise) — valuations are server-side only.
+    """
+
+    product_id: uuid.UUID
+    sku: str
+    name: str
+    qty_on_hand: str
+    warehouse_id: uuid.UUID | None = None
+    cost_price: MoneyOutput | None = None
+    tied_up_value: MoneyOutput | None = None
+    last_outbound_at: datetime | None = None
+
+    @classmethod
+    def from_entity(cls, item: DeadStockItem, *, include_cost: bool) -> DeadStockItemResponse:
+        return cls(
+            product_id=item.product_id,
+            sku=item.sku,
+            name=item.name,
+            qty_on_hand=str(item.qty_on_hand),
+            warehouse_id=item.warehouse_id,
+            cost_price=money_output(item.cost_price) if include_cost else None,
+            tied_up_value=money_output(item.tied_up_value) if include_cost else None,
+            last_outbound_at=item.last_outbound_at,
+        )
+
+
+class SlowMoverItemResponse(BaseModel):
+    """A bottom-quartile turnover item with a suggested-markdown advice flag."""
+
+    product_id: uuid.UUID
+    sku: str
+    name: str
+    qty_on_hand: str
+    turnover_ratio: str
+    warehouse_id: uuid.UUID | None = None
+    cost_price: MoneyOutput | None = None
+    carrying_cost: MoneyOutput | None = None
+    last_outbound_at: datetime | None = None
+    suggest_markdown: bool = False
+
+    @classmethod
+    def from_entity(cls, item: SlowMoverItem, *, include_cost: bool) -> SlowMoverItemResponse:
+        return cls(
+            product_id=item.product_id,
+            sku=item.sku,
+            name=item.name,
+            qty_on_hand=str(item.qty_on_hand),
+            turnover_ratio=str(item.turnover_ratio),
+            warehouse_id=item.warehouse_id,
+            cost_price=money_output(item.cost_price) if include_cost else None,
+            carrying_cost=money_output(item.carrying_cost) if include_cost else None,
+            last_outbound_at=item.last_outbound_at,
+            suggest_markdown=item.suggest_markdown,
+        )
+
+
+class MovementTrendPointResponse(BaseModel):
+    """One week's stacked receipts/issues/adjustments per warehouse."""
+
+    period_start: datetime
+    warehouse_id: uuid.UUID | None = None
+    receipts: str
+    issues: str
+    adjustments: str
+
+    @classmethod
+    def from_entity(cls, point: MovementTrendPoint) -> MovementTrendPointResponse:
+        return cls(
+            period_start=point.period_start,
+            warehouse_id=point.warehouse_id,
+            receipts=str(point.receipts),
+            issues=str(point.issues),
+            adjustments=str(point.adjustments),
+        )
+
+
+class StockHealthSummaryResponse(BaseModel):
+    """Aggregate stock-health metrics fed to the SKY-63 narrator digest."""
+
+    total_sku_count: int
+    low_stock_count: int
+    dead_stock_count: int
+    slow_mover_count: int
+    tied_up_capital: MoneyOutput | None = None
+
+    @classmethod
+    def from_entity(
+        cls, summary: StockHealthSummary, *, include_cost: bool
+    ) -> StockHealthSummaryResponse:
+        return cls(
+            total_sku_count=summary.total_sku_count,
+            low_stock_count=summary.low_stock_count,
+            dead_stock_count=summary.dead_stock_count,
+            slow_mover_count=summary.slow_mover_count,
+            tied_up_capital=money_output(summary.tied_up_capital) if include_cost else None,
         )

@@ -327,6 +327,20 @@ async def proxy_get_abc_summary(
     return await _proxy(request, client, "/api/v1/ai/abc/summary")
 
 
+# --- Supplier risk (SKY-86) --------------------------------------------------
+
+
+@router.get("/supplier-risk")
+async def proxy_list_supplier_risk(
+    request: Request,
+    _invoke: _InvokeDep,
+    _read: _ReadDep,
+    client: _ClientDep,
+) -> Response:
+    """Supplier risk grades -> ai-agent /api/v1/ai/supplier-risk."""
+    return await _proxy(request, client, "/api/v1/ai/supplier-risk")
+
+
 # --- CRM AI (SKY-61) -------------------------------------------------------
 
 CRM_READ_DEPS = (_require_ai_invoke, _require_crm_read)

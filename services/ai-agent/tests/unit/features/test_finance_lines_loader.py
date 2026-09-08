@@ -32,9 +32,21 @@ def _invoice_row() -> dict[str, object]:
         "customer_name": "Acme Corp",
         "total": "1000.00",
         "lines": [
-            {"id": str(uuid.uuid4()), "description": "Professional services", "account_id": str(ACCOUNT_ID)},
-            {"id": str(uuid.uuid4()), "description": "Professional services", "account_id": str(ACCOUNT_ID)},
-            {"id": str(uuid.uuid4()), "description": "Travel reimbursement", "account_id": str(uuid.uuid4())},
+            {
+                "id": str(uuid.uuid4()),
+                "description": "Professional services",
+                "account_id": str(ACCOUNT_ID),
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "description": "Professional services",
+                "account_id": str(ACCOUNT_ID),
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "description": "Travel reimbursement",
+                "account_id": str(uuid.uuid4()),
+            },
             {"id": str(uuid.uuid4()), "description": "  ", "account_id": str(ACCOUNT_ID)},
         ],
     }
@@ -83,16 +95,12 @@ class TestFinanceLineLoader:
             "Professional services",
             "Travel reimbursement",
         }
-        services = next(
-            row for row in snapshots if row.description == "Professional services"
-        )
+        services = next(row for row in snapshots if row.description == "Professional services")
         assert services.account_id == ACCOUNT_ID
         assert services.account_code == "4000"
         assert services.account_name == "Service Revenue"
         assert services.times_used == 2
-        travel = next(
-            row for row in snapshots if row.description == "Travel reimbursement"
-        )
+        travel = next(row for row in snapshots if row.description == "Travel reimbursement")
         assert travel.times_used == 1
 
     @pytest.mark.anyio
@@ -104,9 +112,7 @@ class TestFinanceLineLoader:
 
     @pytest.mark.anyio
     async def test_no_lines_is_empty(self) -> None:
-        PAGES[1] = [
-            {"id": str(uuid.uuid4()), "invoice_number": "INV-9", "lines": []}
-        ]
+        PAGES[1] = [{"id": str(uuid.uuid4()), "invoice_number": "INV-9", "lines": []}]
 
         assert await _loader().load_all() == []
 
