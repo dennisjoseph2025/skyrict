@@ -1,11 +1,15 @@
 """Revenue forecasting (SKY-82 A4) - pure forecasting math.
 
 The method is deliberately simple: a trailing 6-month simple moving average,
-flat for the whole horizon, with a confidence band of ±1.5 sigma of the
-walk-forward historical error distribution (per the approved plan - the CRM
-influencer pipeline weighting was deferred, add it back only if the backtest
-MAPE warrants it). All arithmetic is :class:`decimal.Decimal` so figures
-round-trip exactly through the SQL ``Numeric`` columns and the web UI.
+flat across a 12-month horizon, with a confidence band of ±1.5 sigma of the
+walk-forward historical error distribution. The forecast abstains (empty
+point set) when there is fewer than 6 months of recognized revenue, per the
+FIN-AI-003 guardrail. Ticket scope also calls for CRM pipeline conversion
+weighting from deal health; that feed lives in the CRM module (not finance),
+so it is documented as a cross-module dependency rather than implemented
+here - add it back when a finance-ownable ``pipeline_contribution`` source
+exists. All arithmetic is :class:`decimal.Decimal` so figures round-trip
+exactly through the SQL ``Numeric`` columns and the web UI.
 """
 
 from __future__ import annotations
@@ -17,7 +21,8 @@ from decimal import ROUND_HALF_UP, Decimal
 MODEL_VERSION = "sma-6"
 SMA_WINDOW = 6
 BACKTEST_MIN_POINTS = 3
-HORIZON_MONTHS = 3
+MIN_HISTORY_MONTHS = 6
+HORIZON_MONTHS = 12
 BAND_SIGMA_MULTIPLIER = Decimal("1.5")
 
 
@@ -96,12 +101,13 @@ def compute_forecast(
     """Forecast ``horizon`` months ahead using SMA-6 over ``monthly`` history.
 
     History is expected to be a contiguous, ascending monthly series. With
-    fewer than :data:`BACKTEST_MIN_POINTS` months there is no validation, so
-    points carry no band and ``backtest`` is None. When there is at least one
-    window, the band is ``predicted ± 1.5 sigma`` of the signed historical errors
-    (floored at zero).
+    fewer than :data:`MIN_HISTORY_MONTHS` months the model abstains and returns
+    an empty point set (per the FIN-AI-003 guardrail). With at least one
+    backtest point but no validation gap, points carry no band and ``backtest``
+    is None. With a full window, the band is ``predicted ± 1.5 sigma`` of the
+    signed historical errors (floored at zero).
     """
-    if not monthly:
+    if len(monthly) < MIN_HISTORY_MONTHS:
         return Forecast(points=(), backtest=None)
 
     errors = backtest_errors(monthly)

@@ -75,24 +75,24 @@ def _stored_row(month: date, predicted: str) -> ErpRevenueForecastModel:
     return row
 
 
-async def test_refresh_persists_three_month_horizon() -> None:
+async def test_refresh_persists_twelve_month_horizon() -> None:
     repo = FakeRepository(_flat_monthly(9))
     svc = RevenueForecastService(repo)
     response = await svc.refresh(TENANT)
 
     assert response.model_version == "sma-6"
-    assert len(response.points) == 3
+    assert len(response.points) == 12
     assert {point.month for point in response.points} == {
-        date(2026, 10, 1),
-        date(2026, 11, 1),
-        date(2026, 12, 1),
-    }
+        date(2026, m, 1) for m in range(10, 13)
+    } | {date(2027, m, 1) for m in range(1, 10)}
     assert response.backtest_mape == Decimal("0.0000")
 
     assert len(repo.replace_calls) == 1
     call = repo.replace_calls[0]
-    assert call["months"] == [date(2026, 10, 1), date(2026, 11, 1), date(2026, 12, 1)]
-    assert call["predicted"] == [Decimal("10000")] * 3
+    assert call["months"] == [date(2026, m, 1) for m in range(10, 13)] + [
+        date(2027, m, 1) for m in range(1, 10)
+    ]
+    assert call["predicted"] == [Decimal("10000")] * 12
 
 
 async def test_refresh_with_no_history_persists_nothing() -> None:
@@ -106,17 +106,25 @@ async def test_refresh_with_no_history_persists_nothing() -> None:
     assert repo.replace_calls[0]["months"] == []
 
 
-async def test_refresh_horizon_filters_to_three() -> None:
+async def test_refresh_abstains_below_six_months_history() -> None:
+    repo = FakeRepository(_flat_monthly(5))
+    svc = RevenueForecastService(repo)
+    response = await svc.refresh(TENANT)
+
+    assert response.points == []
+    assert response.backtest_mape is None
+    assert repo.replace_calls[0]["months"] == []
+
+
+async def test_refresh_horizon_spans_twelve_months() -> None:
     repo = FakeRepository(_flat_monthly(13))
     svc = RevenueForecastService(repo)
     response = await svc.refresh(TENANT)
 
-    assert len(response.points) == 3
+    assert len(response.points) == 12
     assert {point.month for point in response.points} == {
-        date(2027, 2, 1),
-        date(2027, 3, 1),
-        date(2027, 4, 1),
-    }
+        date(2027, m, 1) for m in range(2, 13)
+    } | {date(2028, 1, 1)}
 
 
 async def test_read_returns_stored_rows_in_order() -> None:

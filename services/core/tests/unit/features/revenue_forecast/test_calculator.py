@@ -46,7 +46,7 @@ def test_empty_history_has_no_points_and_no_backtest() -> None:
 def test_six_months_flat_has_points_without_band() -> None:
     monthly = _flat_series(6)
     forecast = compute_forecast(monthly)
-    assert len(forecast.points) == 3
+    assert len(forecast.points) == 12
     assert forecast.backtest is None
     for point in forecast.points:
         assert point.predicted == Decimal("10000")
@@ -100,8 +100,8 @@ def test_perfect_walk_forward_forecast_yields_zero_mape() -> None:
     assert forecast.backtest.mape == Decimal("0.0000")
 
 
-@pytest.mark.parametrize("months", [0, 1, 2])
-def test_too_little_history_has_no_backtest(months: int) -> None:
+@pytest.mark.parametrize("months", [0, 1, 2, 3, 4, 5])
+def test_under_six_months_history_abstains(months: int) -> None:
     forecast = compute_forecast(_flat_series(months))
     assert forecast.backtest is None
-    assert len(forecast.points) == (0 if months == 0 else 3)
+    assert forecast.points == ()

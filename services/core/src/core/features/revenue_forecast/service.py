@@ -1,9 +1,11 @@
 """Revenue-forecast service (SKY-82 A4).
 
-``refresh`` computes and persists a 3-month SMA-6 forecast from the last 24
-months of recognized revenue; ``read`` returns whatever is currently stored
-(weekly recompute and manual refresh keep it fresh). Reflects the approved
-plan: CRM-influencer weighting deferred, ±1.5 sigma band from walk-forward error.
+``refresh`` computes and persists a 12-month SMA-6 forecast from the last 24
+months of recognized revenue (abstaining - persisting nothing - when there
+is under 6 months of history); ``read`` returns whatever is currently stored
+(weekly recompute and manual refresh keep it fresh). CRM pipeline conversion
+weighting from deal health is a cross-module (CRM) dependency, documented in
+the eval note rather than implemented here.
 """
 
 from __future__ import annotations
