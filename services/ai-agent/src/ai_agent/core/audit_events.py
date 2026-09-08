@@ -71,6 +71,12 @@ AI_FOLLOW_UP_APPLIED = "ai.crm.follow_up.applied"
 AI_FOLLOW_UP_DISMISSED = "ai.crm.follow_up.dismissed"
 """A human dismissed a follow-up suggestion (SKY-61)."""
 
+AI_REPORT_GENERATED = "ai.report.generated"
+"""The NL report builder generated (and ran) a report from free text (SKY-80)."""
+
+AI_REPORT_SAVED = "ai.report.saved"
+"""The NL report builder persisted a generated report as a saved definition (SKY-80)."""
+
 ALL_AI_AUDIT_EVENTS = frozenset(
     {
         AI_QUERY_EXECUTED,
@@ -92,6 +98,8 @@ ALL_AI_AUDIT_EVENTS = frozenset(
         AI_FOLLOW_UP_GENERATED,
         AI_FOLLOW_UP_APPLIED,
         AI_FOLLOW_UP_DISMISSED,
+        AI_REPORT_GENERATED,
+        AI_REPORT_SAVED,
     }
 )
 """The complete, closed vocabulary accepted by the AuditService."""
