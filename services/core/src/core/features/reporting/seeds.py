@@ -359,12 +359,32 @@ def is_seed_stale(seed: ReportDefinitionSeed, *, version: int, sql: str) -> bool
     """
     if version < seed.version:
         return True
-    return _normalize_sql(sql) != _normalize_sql(seed.sql)
+    return normalize_sql(sql) != normalize_sql(seed.sql)
 
 
-def _normalize_sql(sql: str) -> str:
+def normalize_sql(sql: str) -> str:
     """Collapse whitespace for content comparison (whitespace != drift)."""
     return " ".join(sql.split())
 
 
-__all__ = ["PHASE_1_REPORT_SEEDS", "ReportDefinitionSeed", "is_seed_stale"]
+def find_seed_by_slug(slug: str) -> ReportDefinitionSeed | None:
+    """Return the canonical seed for a slug, or None when not a whitelisted report.
+
+    The NL report builder (RPT-AI-001, SKY-80) only ever persists a new
+    definition whose SQL is EXACTLY one of these whitelisted templates - the
+    create path resolves the template by this lookup so no arbitrary or
+    AI-generated SQL can reach the database.
+    """
+    for seed in PHASE_1_REPORT_SEEDS:
+        if seed.slug == slug:
+            return seed
+    return None
+
+
+__all__ = [
+    "PHASE_1_REPORT_SEEDS",
+    "ReportDefinitionSeed",
+    "find_seed_by_slug",
+    "is_seed_stale",
+    "normalize_sql",
+]

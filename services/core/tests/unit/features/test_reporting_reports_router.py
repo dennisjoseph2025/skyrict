@@ -17,6 +17,7 @@ from core.core.exceptions import (
 )
 from core.features.reporting import reports_router
 from skyrict_common.exceptions import (
+    ConflictError,
     NotFoundError,
     PermissionDeniedError,
     SkyrictError,
@@ -205,6 +206,107 @@ def test_router_requires_permission() -> None:
 
     client = TestClient(app)
     response = client.get("/api/v1/reports")
+
+    assert response.status_code == 403, response.text
+    assert response.json()["type"].endswith("/permission-denied")
+
+
+def _app_with_create_mocks() -> tuple[TestClient, AsyncMock]:
+    app = FastAPI()
+    app.include_router(reports_router.router, prefix="/api/v1")
+    app.add_exception_handler(SkyrictError, skyrict_error_handler)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
+
+    mock_service = AsyncMock()
+    tenant_id = uuid.uuid4()
+
+    app.dependency_overrides[reports_router._get_service] = lambda: mock_service
+    app.dependency_overrides[reports_router._require_reports_create] = lambda: {
+        "user_id": uuid.uuid4(),
+        "tenant_id": tenant_id,
+    }
+
+    return TestClient(app), mock_service
+
+
+def _create_payload() -> dict[str, Any]:
+    return {
+        "slug": "ar_aging_90plus",
+        "title": "AR aging 90+ focus",
+        "module": "finance",
+        "description": "Generated from the canonical AR aging template.",
+        "sql": "SELECT 1",
+        "source_slug": "ar_aging",
+        "params": ["tenant_id", "as_of_date"],
+        "default_params": {"as_of_date": "2026-09-30"},
+    }
+
+
+def test_create_report_route_201() -> None:
+    client, service = _app_with_create_mocks()
+    service.create_definition.return_value = {
+        "definition": _definition("ar_aging_90plus"),
+        "default_params": {"as_of_date": "2026-09-30"},
+    }
+
+    response = client.post("/api/v1/reports", json=_create_payload())
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["success"] is True
+    assert body["data"]["definition"]["slug"] == "ar_aging_90plus"
+    assert body["data"]["default_params"] == {"as_of_date": "2026-09-30"}
+    service.create_definition.assert_awaited_once()
+    assert service.create_definition.await_args.kwargs["source_slug"] == "ar_aging"
+    assert service.create_definition.await_args.kwargs["slug"] == "ar_aging_90plus"
+    assert service.create_definition.await_args.kwargs["actor_ip"] is not None
+
+
+def test_create_report_route_422_on_custom_sql() -> None:
+    client, service = _app_with_create_mocks()
+    service.create_definition.side_effect = ValidationError(
+        "Report SQL must exactly match the whitelisted template 'ar_aging'; custom SQL is not allowed"
+    )
+
+    response = client.post("/api/v1/reports", json=_create_payload())
+
+    assert response.status_code == 422, response.text
+    assert response.json()["type"].endswith("/validation-error")
+
+
+def test_create_report_route_409_on_existing_slug() -> None:
+    client, service = _app_with_create_mocks()
+    service.create_definition.side_effect = ConflictError("Report 'ar_aging_90plus' already exists")
+
+    response = client.post("/api/v1/reports", json=_create_payload())
+
+    assert response.status_code == 409, response.text
+    assert response.json()["type"].endswith("/conflict")
+
+
+def test_create_report_route_422_on_invalid_slug() -> None:
+    client, service = _app_with_create_mocks()
+    payload = _create_payload()
+    payload["slug"] = "AR AGING 90+"  # uppercase + spaces violate the slug pattern
+
+    response = client.post("/api/v1/reports", json=payload)
+
+    assert response.status_code == 422, response.text
+    service.create_definition.assert_not_awaited()
+
+
+def test_create_route_requires_create_permission() -> None:
+    app = FastAPI()
+    app.include_router(reports_router.router, prefix="/api/v1")
+    app.add_exception_handler(SkyrictError, skyrict_error_handler)  # type: ignore[arg-type]
+
+    async def deny() -> None:
+        raise PermissionDeniedError("Missing required permission: erp.reports.create")
+
+    app.dependency_overrides[reports_router._require_reports_create] = deny
+
+    client = TestClient(app)
+    response = client.post("/api/v1/reports", json=_create_payload())
 
     assert response.status_code == 403, response.text
     assert response.json()["type"].endswith("/permission-denied")

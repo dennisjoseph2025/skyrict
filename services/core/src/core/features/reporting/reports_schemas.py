@@ -32,6 +32,38 @@ class ReportRunRequest(BaseModel):
     )
 
 
+class ReportCreateRequest(BaseModel):
+    """Payload for POST /api/v1/reports (RPT-AI-001, SKY-80).
+
+    Carries everything needed to persist a generated report spec as a new
+    definition. ``source_slug`` names the canonical whitelisted template the
+    builder matched - the create path only ever accepts SQL that is
+    byte-for-byte one of those templates (no arbitrary or AI-generated SQL).
+    ``params`` must equal the template's declared params; ``default_params``
+    are never persisted here (no schema column by design) and travel back to
+    the client only so the run form can be pre-filled.
+    """
+
+    slug: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:[_-][a-z0-9]+)*$")
+    title: str = Field(min_length=1, max_length=255)
+    module: str = Field(min_length=1, max_length=32)
+    description: str | None = Field(default=None, max_length=2000)
+    sql: str = Field(min_length=1, description="Must exactly match the whitelisted template SQL")
+    source_slug: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Slug of the canonical whitelisted template this spec resolved to",
+    )
+    params: list[str] = Field(
+        default_factory=list,
+        description="Declared bind parameters (must equal the template's declared params)",
+    )
+    default_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Resolved param values for the UI to pre-fill the run form; not persisted",
+    )
+
+
 class ReportRunResult(BaseModel):
     """Result of one parametrized report run."""
 
@@ -53,3 +85,15 @@ class ReportSnapshotRead(BaseModel):
     definition_id: uuid.UUID
     period: date
     generated_at: datetime
+
+
+class ReportCreateResult(BaseModel):
+    """Result of POST /api/v1/reports (RPT-AI-001, SKY-80).
+
+    Returns the persisted definition (runnable via the existing
+    ``/{slug}/run`` path) plus the resolved default params so the client can
+    pre-fill the run form immediately.
+    """
+
+    definition: ReportDefinitionRead
+    default_params: dict[str, Any] = Field(default_factory=dict)
