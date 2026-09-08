@@ -266,6 +266,15 @@ AI_MODEL=meta-llama/llama-3-8b-instruct
 AI_API_KEY=sk-or-...
 # AI_FALLBACK_PROVIDER / AI_FALLBACK_MODEL / AI_FALLBACK_API_KEY for failover
 
+# Docker compose dev (infra/docker/docker-compose.dev.yml) keeps the provider
+# config from services/ai-agent/.env (env_file) but applies two container-only
+# corrections: the primary's AI_BASE_URL is redirected to host.docker.internal
+# (a host-local gateway like omniroute@localhost:20128 is unreachable as
+# localhost from inside the container) and the groq fallback is pinned to a
+# current groq model (qwen/qwen3.8-27b - llama-3.1-8b-instant no longer
+# exists). Values above apply to host-run `uv run ai-agent`; the container
+# inherits the same .env.
+
 # Run + migrate
 uv run ai-agent serve                                 # from services/ai-agent (typer CLI)
 uv run ai-agent migrate
