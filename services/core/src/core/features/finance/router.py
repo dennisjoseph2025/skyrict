@@ -95,7 +95,7 @@ async def create_account(
 @router.get("/accounts", response_model=ResponseEnvelope[list[AccountResponse]])
 async def list_accounts(
     include_inactive: bool = False,
-    current_user: dict[str, Any] = Depends(require_finance_read),
+    current_user: dict[str, Any] = Depends(require_invoice_read_m2m),
     svc: FinanceService = Depends(get_finance_service),
 ) -> ResponseEnvelope[list[AccountResponse]]:
     accounts = await svc.list_accounts(_tenant_id(current_user), include_inactive=include_inactive)
