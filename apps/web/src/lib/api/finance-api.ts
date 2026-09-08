@@ -796,3 +796,29 @@ export function searchAuditLog(
         })}`,
     );
 }
+
+// ---------------------------------------------------------------------------
+// SKY-82 A4: revenue forecasting
+// ---------------------------------------------------------------------------
+
+export interface RevenueForecastPoint {
+    month: string;
+    predicted: number;
+    lower_bound: number | null;
+    upper_bound: number | null;
+}
+
+export interface RevenueForecast {
+    model_version: string;
+    backtest_mape: number | null;
+    sigma: number | null;
+    points: RevenueForecastPoint[];
+}
+
+export function getRevenueForecast(): Promise<RevenueForecast> {
+    return apiFetch<RevenueForecast>(`${FINANCE}/forecast/revenue`);
+}
+
+export function refreshRevenueForecast(): Promise<RevenueForecast> {
+    return apiPost<RevenueForecast>(`${FINANCE}/forecast/revenue/refresh`, {});
+}

@@ -56,6 +56,7 @@ import {
     InvoiceStatusBadge,
 } from "@/features/finance/components/status-badge";
 import { KpiCard } from "@/features/finance/components/kpi-card";
+import { RevenueForecastCard } from "@/features/finance/components/forecast-card";
 import { FinanceErrorState } from "@/features/finance/components/state-cards";
 import {
     WorkingCapitalCard,
@@ -367,6 +368,10 @@ export function FinanceOverview() {
                     value={formatMoney(outstanding)}
                     hint={`${unpaidInvoices.length} unpaid`}
                 />
+            </section>
+
+            <section>
+                <RevenueForecastCard canRefresh={canWrite} />
             </section>
 
             <section className="grid gap-4 lg:grid-cols-3">
