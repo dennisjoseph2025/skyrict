@@ -148,3 +148,8 @@ The Finance Assistant is temporarily unavailable. Please try again shortly.
 FINANCE_NO_ANSWER = """
 I couldn't find an answer to that finance question. Try asking about invoices, revenue, expenses, profit & loss, or overdue receivables.
 """.strip()
+
+
+FINANCE_HISTORY_ABSTENTION = """
+I don't have enough finance history to answer that reliably yet. This workspace needs at least 6 months of invoicing history before I can report figures like profit, receivables, or cash flow. Check back once more history has accrued.
+""".strip()

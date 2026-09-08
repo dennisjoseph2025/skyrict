@@ -32,10 +32,13 @@ import structlog
 
 from ai_agent.core.exceptions import AiUnavailableError
 from ai_agent.core.providers import LlmRequest
+from ai_agent.features.finance_intents import match_finance_intent, run_finance_intent
+from ai_agent.features.finance_intents.schemas import INTENT_META
 from ai_agent.features.supervisor.prompts import (
     CRM_NO_ANSWER,
     CRM_SYSTEM_PROMPT,
     CRM_UNAVAILABLE,
+    FINANCE_HISTORY_ABSTENTION,
     FINANCE_NO_ANSWER,
     FINANCE_SYSTEM_PROMPT,
     FINANCE_UNAVAILABLE,
@@ -586,11 +589,17 @@ class CrmAssistantDelegator:
 
 
 class FinanceDelegator:
-    """Finance answers through deterministic summaries + LLM fallback.
+    """Finance answers through whitelisted intents + deterministic + LLM fallback.
 
-    Every read forwards the caller's JWT + tenant slug, so core enforces
-    ``erp.finance.read`` + tenant isolation. The context handed to the LLM is
-    therefore exactly what the acting user may view in the finance UI.
+    Guardrails (FIN-AI-003 A3):
+      * Ask the intent engine FIRST: a question inside the whitelist is answered
+        by the exact gateway call that backs the matching dashboard report, with
+        a citation to that report (``citations`` out-param).
+      * Abstract when the tenant's invoicing history is under 6 months (distinct
+        calendar months across invoices) - before any report figure is produced.
+      * Every read forwards the caller's JWT + tenant slug, so core enforces
+        ``erp.finance.read`` + tenant isolation. The context handed to the LLM
+        is therefore exactly what the acting user may view in the finance UI.
     """
 
     key = AGENT_FINANCE
@@ -613,11 +622,48 @@ class FinanceDelegator:
         user_id: uuid.UUID,
         citations: list[Citation],
     ) -> AsyncIterator[str]:
-        del tenant_id, user_id, citations
-        # Try a deterministic finance summary first (no LLM cost). If finance
-        # is unreachable we do NOT fall back to an ungrounded LLM answer - a
-        # finance-only delegate must never invent figures, so stream the
-        # clean unavailable message instead.
+        del tenant_id, user_id
+        # A finance-only delegate must never invent figures: if finance is
+        # unreachable at ANY point we stream the clean unavailable message, we
+        # do not fall back to an ungrounded LLM answer.
+        try:
+            gateway = await self._finance_gateway_factory()
+        except AiUnavailableError:
+            logger.warning("supervisor.finance_unavailable")
+            for delta in _iter_text_deltas(FINANCE_UNAVAILABLE):
+                yield delta
+            return
+
+        # Intent path (A3): whitelisted question -> exact report-backed answer.
+        intent = match_finance_intent(query)
+        if intent is not None:
+            try:
+                if INTENT_META[intent].requires_history and not await self._has_sufficient_history(
+                    gateway
+                ):
+                    for delta in _iter_text_deltas(FINANCE_HISTORY_ABSTENTION):
+                        yield delta
+                    return
+                result = await run_finance_intent(gateway=gateway, query=query)
+            except AiUnavailableError:
+                logger.warning("supervisor.finance_unavailable", query=query)
+                for delta in _iter_text_deltas(FINANCE_UNAVAILABLE):
+                    yield delta
+                return
+            if result is not None:
+                citations.append(
+                    Citation(
+                        source_ref=result.endpoint,
+                        module="finance",
+                        title=result.title,
+                        url=None,
+                    )
+                )
+                for delta in _iter_text_deltas(result.answer):
+                    yield delta
+                return
+
+        # Deterministic finance summary first (no LLM cost).
         try:
             deterministic = await self._try_deterministic(query)
         except AiUnavailableError:
@@ -735,11 +781,31 @@ class FinanceDelegator:
             return f"There are {len(invoices)} invoices: {summary}."
         return None
 
+    async def _has_sufficient_history(self, gateway: FinanceGatewayPort) -> bool:
+        """A3 guardrail: abstain from report figures under 6 months of history.
+
+        History depth = distinct calendar months across invoices. Using
+        invoicing activity (instead of closed fiscal periods) keeps the read
+        on one already-fetched-and-permissioned endpoint and stays lenient for
+        tenants that leave fiscal periods unclosed.
+        """
+        invoices = await gateway.list_invoices()
+        if not invoices:
+            return False
+        months = {
+            (invoice.invoice_date.year, invoice.invoice_date.month) for invoice in invoices
+        }
+        return len(months) >= _MIN_HISTORY_MONTHS
+
 
 # Invoices that still represent an outstanding receivable (unpaid, not
 # voided). Mirrors core's InvoiceStatus values: draft, issued, approved, paid,
 # voided - we count everything except the settled/voided terminals.
 _OPEN_STATUSES = frozenset({"draft", "issued", "approved"})
+
+# A3 guardrail: minimum distinct invoice months before any report figure may
+# be surfaced to the chat. Below this the delegator streams the abstention.
+_MIN_HISTORY_MONTHS = 6
 
 
 def _count_by_status(invoices: Sequence[object]) -> dict[str, int]:
