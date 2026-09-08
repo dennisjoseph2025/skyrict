@@ -111,6 +111,10 @@ class OpenAiCompatibleProvider:
             ],
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
+            # Explicit, not implicit: OpenAI defaults to non-stream, but some
+            # OpenAI-compatible gateways (e.g. self-hosted omniroute) stream
+            # SSE by default and only return a JSON completion when asked.
+            "stream": False,
         }
         if request.think is not None:
             payload["think"] = request.think

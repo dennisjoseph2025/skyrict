@@ -90,9 +90,33 @@ class TestOpenAiCompatibleProvider:
         assert captured["auth"] == "Bearer sk-secret-key"
         body = captured["body"]
         assert body["model"] == "test-model-1"
+        assert body["stream"] is False
         assert body["messages"][0]["role"] == "system"
         assert body["messages"][0]["content"] == "be terse"
         assert body["messages"][1]["content"] == "say hi"
+
+    async def test_non_stream_retry_when_gateway_streams_by_default(self) -> None:
+        """A gateway that streams unless told not to must get a clean 200.
+
+        Some OpenAI-compatible gateways (self-hosted omniroute) answer SSE
+        frames even for a non-stream request unless ``stream: false`` is
+        explicit. The adapter must send it so a JSON completion (184) is not
+        misparsed as a schema failure (502).
+        """
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "ok"}}], "model": "m"},
+            )
+
+        provider, _ = _make_provider(handler)
+        completion = await provider.complete(_REQUEST)
+
+        assert captured["body"]["stream"] is False
+        assert completion.text == "ok"
 
     async def test_http_error_maps_to_unavailable(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -259,3 +283,39 @@ class TestRegistryFactory:
 
         assert [p.name for p in providers] == ["openrouter", "omniroute"]
         assert providers[0].local_only is False
+
+    def test_compose_llm_chain_contract(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """docker-compose.dev.yml keeps env_file providers, corrects two ends.
+
+        Value of this test is the CONTRACT, not the providers: the container
+        must pair the env_file's omniroute primary with a reachable base URL
+        (host.docker.internal, since localhost inside a container is the
+        container itself) and keep the groq fallback coherent (a current
+        model on groq's own endpoint - the old llama-3.1-8b-instant no longer
+        exists, and an openrouter model on groq's URL is a 400).
+        """
+        monkeypatch.setenv("AI_PROVIDER", "omniroute")
+        monkeypatch.setenv("AI_MODEL", "openlad")
+        monkeypatch.setenv("AI_BASE_URL", "http://host.docker.internal:20128/v1")
+        monkeypatch.setenv("AI_FALLBACK_PROVIDER", "groq")
+        monkeypatch.setenv("AI_FALLBACK_MODEL", "qwen/qwen3.8-27b")
+        monkeypatch.setenv("AI_FALLBACK_BASE_URL", "https://api.groq.com/openai/v1")
+        monkeypatch.setenv("AI_FALLBACK_LOCAL_ONLY", "false")
+        from ai_agent.core.config import Settings
+
+        config = Settings(_env_file=None)  # type: ignore[call-arg]
+        providers = build_providers_from_settings(config)
+
+        assert [p.name for p in providers] == ["omniroute", "groq"]
+        assert providers[0].model == "openlad"
+        # Omniroute has no preset - the bare override IS the effective URL.
+        assert resolve_base_url("omniroute", "http://host.docker.internal:20128/v1") == (
+            "http://host.docker.internal:20128/v1"
+        )
+        assert providers[1].model == "qwen/qwen3.8-27b"
+        assert providers[1].local_only is False
+        assert resolve_base_url("groq", "https://api.groq.com/openai/v1") == (
+            "https://api.groq.com/openai/v1"
+        )
