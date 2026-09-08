@@ -53,6 +53,7 @@ from core.domain.entities import (
     RevenueConcentrationEntry,
 )
 from core.features.finance.ports import AuditSink, CustomerPort, FinanceRepositoryPort
+from core.features.finance.reminder_email import send_reminder_email
 from core.features.finance.schemas import (
     AccountCodeSuggestionResponse,
     AnomalyNarrationResponse,
@@ -545,6 +546,7 @@ class FinanceAutomationService:
             if ai is not None and ai.subject and ai.body:
                 reminder = ai
                 model_used = ai.model_used
+        await send_reminder_email(reminder=reminder)
         await self.audit.log(
             tenant_id=tenant_id,
             user_id=None,
@@ -592,6 +594,8 @@ class FinanceAutomationService:
                     details={"invoice": inv.invoice_number, "tone": tone, "model_used": model_used},
                 )
             reminders.append(reminder)
+        for reminder in reminders:
+            await send_reminder_email(reminder=reminder)
         return reminders
 
 

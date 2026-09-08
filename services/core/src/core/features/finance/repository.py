@@ -685,7 +685,7 @@ status=invoice.status,
         offset: int = 0,
         limit: int = 50,
     ) -> Sequence[Invoice]:
-        """List invoice HEADERS (lines are loaded by ``get_invoice``)."""
+        """List invoice headers with their line items, in one page."""
         stmt = select(ErpInvoiceModel).where(ErpInvoiceModel.tenant_id == tenant_id)
         if status is not None:
             stmt = stmt.where(ErpInvoiceModel.status == status)
@@ -694,8 +694,22 @@ status=invoice.status,
             .offset(offset)
             .limit(limit)
         )
-        result = await self.session.execute(stmt)
-        return [_invoice_from_orm(model, ()) for model in result.scalars().all()]
+        models = list((await self.session.execute(stmt)).scalars().all())
+        lines_by_invoice: dict[uuid.UUID, list[InvoiceLine]] = {}
+        if models:
+            line_stmt = (
+                select(ErpInvoiceLineModel)
+                .where(
+                    ErpInvoiceLineModel.tenant_id == tenant_id,
+                    ErpInvoiceLineModel.invoice_id.in_([m.id for m in models]),
+                )
+                .order_by(ErpInvoiceLineModel.line_no)
+            )
+            for line_model in (await self.session.execute(line_stmt)).scalars().all():
+                lines_by_invoice.setdefault(line_model.invoice_id, []).append(
+                    _invoice_line_from_orm(line_model)
+                )
+        return [_invoice_from_orm(model, lines_by_invoice.get(model.id, ())) for model in models]
 
     async def issue_invoice(
         self, invoice_id: uuid.UUID, tenant_id: uuid.UUID, *, issued_at: datetime
