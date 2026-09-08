@@ -23,6 +23,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import date
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, func, select, update
@@ -38,6 +39,7 @@ from core.core.constants import (
 from core.core.exceptions import PayrollEntryImmutableError
 from core.domain import entities as ent
 from core.domain.value_objects import Money
+from core.features.hr.models.department import DepartmentModel
 from core.features.hr.models.employee import (
     EmployeeModel,
 )
@@ -124,6 +126,7 @@ def _settings_from_orm(model: PayrollSettingsModel) -> ent.PayrollSettings:
         rounding=PayrollRounding(model.rounding.value),
         ai_automation_enabled=model.ai_automation_enabled,
         je_bridge_enabled=model.je_bridge_enabled,
+        prediction_drift_threshold_pct=model.prediction_drift_threshold_pct,
         created_at=model.created_at,
         updated_at=model.updated_at,
     )
@@ -260,6 +263,7 @@ class PayrollRepository:
                 rounding=PayrollRoundingModel(settings.rounding.value),
                 ai_automation_enabled=settings.ai_automation_enabled,
                 je_bridge_enabled=settings.je_bridge_enabled,
+                prediction_drift_threshold_pct=settings.prediction_drift_threshold_pct,
             )
             .on_conflict_do_update(
                 index_elements=[PayrollSettingsModel.tenant_id],
@@ -270,6 +274,7 @@ class PayrollRepository:
                     "rounding": PayrollRoundingModel(settings.rounding.value),
                     "ai_automation_enabled": settings.ai_automation_enabled,
                     "je_bridge_enabled": settings.je_bridge_enabled,
+                    "prediction_drift_threshold_pct": settings.prediction_drift_threshold_pct,
                     "updated_at": func.now(),
                 },
             )
@@ -318,6 +323,27 @@ class PayrollRepository:
         currency = await self._currency_for(tenant_id)
         return [self._run_from_orm(model, currency) for model in result.scalars().all()]
 
+    async def list_voided_runs(
+        self, tenant_id: uuid.UUID, *, since_start: date
+    ) -> Sequence[ent.PayrollRun]:
+        """Voided runs with a period starting at/after ``since_start``.
+
+        Feed for the monthly void-pattern report (HR-AUT-002 §5.8.3): the
+        run's ``period_start`` doubles as the report's month bucket.
+        """
+        stmt = (
+            select(PayrollRunModel)
+            .where(
+                PayrollRunModel.tenant_id == tenant_id,
+                PayrollRunModel.status == PayrollRunStatusModel.VOID,
+                PayrollRunModel.period_start >= since_start,
+            )
+            .order_by(PayrollRunModel.period_start.desc())
+        )
+        result = await self.session.execute(stmt)
+        currency = await self._currency_for(tenant_id)
+        return [self._run_from_orm(model, currency) for model in result.scalars().all()]
+
     async def find_overlapping_run(
         self,
         tenant_id: uuid.UUID,
@@ -338,6 +364,30 @@ class PayrollRepository:
             PayrollRunModel.period_end >= period_start,
         )
         stmt = stmt.order_by(PayrollRunModel.period_start.asc()).limit(1)
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            return None
+        currency = await self._currency_for(tenant_id)
+        return self._run_from_orm(model, currency)
+
+    async def previous_run(
+        self, tenant_id: uuid.UUID, *, before_start: date
+    ) -> ent.PayrollRun | None:
+        """Newest non-void run whose period ends strictly before ``before_start``.
+
+        The prediction's "previous period" actual: last period fully closed
+        (computed/approved/paid) before the run being predicted.
+        """
+        stmt = (
+            select(PayrollRunModel)
+            .where(
+                PayrollRunModel.tenant_id == tenant_id,
+                PayrollRunModel.status != PayrollRunStatusModel.VOID,
+                PayrollRunModel.period_end < before_start,
+            )
+            .order_by(PayrollRunModel.period_end.desc())
+            .limit(1)
+        )
         model = (await self.session.execute(stmt)).scalar_one_or_none()
         if model is None:
             return None
@@ -722,6 +772,61 @@ class PayrollRepository:
         )
         model = (await self.session.execute(stmt)).scalar_one_or_none()
         return _employee_from_orm(model) if model is not None else None
+
+    async def list_departments(self, tenant_id: uuid.UUID) -> Sequence[tuple[uuid.UUID, str]]:
+        """Active department (id, name) pairs - prediction display names."""
+        stmt = (
+            select(DepartmentModel.id, DepartmentModel.name)
+            .where(
+                DepartmentModel.tenant_id == tenant_id,
+                DepartmentModel.is_active.is_(True),
+            )
+            .order_by(DepartmentModel.name.asc())
+        )
+        result = await self.session.execute(stmt)
+        return [(row[0], row[1]) for row in result.all()]
+
+    async def department_net_summary(
+        self, run_id: uuid.UUID, *, tenant_id: uuid.UUID
+    ) -> Sequence[tuple[uuid.UUID | None, str, Decimal]]:
+        """Run totals grouped by the employee's department, ``(dept_id, name, net)``.
+
+        Joins the frozen snapshot through ``erp_employees`` to
+        ``erp_departments``; employees without a department bucket under
+        ``(None, "Unassigned")``. Used for previous-period actuals in the
+        prediction service.
+        """
+        stmt = (
+            select(
+                EmployeeModel.department_id,
+                func.coalesce(DepartmentModel.name, "Unassigned"),
+                func.sum(PayrollEntryModel.net),
+            )
+            .select_from(PayrollEntryModel)
+            .join(
+                EmployeeModel,
+                (EmployeeModel.tenant_id == PayrollEntryModel.tenant_id)
+                & (EmployeeModel.id == PayrollEntryModel.employee_id),
+            )
+            .outerjoin(
+                DepartmentModel,
+                (DepartmentModel.tenant_id == EmployeeModel.tenant_id)
+                & (DepartmentModel.id == EmployeeModel.department_id),
+            )
+            .where(
+                PayrollEntryModel.tenant_id == tenant_id,
+                PayrollEntryModel.run_id == run_id,
+            )
+            .group_by(EmployeeModel.department_id, DepartmentModel.name)
+            .order_by(DepartmentModel.name.asc())
+        )
+        result = await self.session.execute(stmt)
+        return [
+            (row[0], row[1], Decimal(row[2]))
+            if row[2] is not None
+            else (row[0], row[1], Decimal("0"))
+            for row in result.all()
+        ]
 
     # ------------------------------------------------------------------
     # Benefits (read-only, pre-flight input)

@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowLeft,
   BadgeCheck,
   Calculator,
+  Check,
   CircleX,
   LoaderCircle,
   Receipt,
@@ -34,6 +36,7 @@ import {
   approvePayrollRun,
   computePayrollRun,
   getPayrollRun,
+  getRunPrediction,
   getRunPayslips,
   listRunEntries,
   markPayrollRunPaid,
@@ -41,7 +44,9 @@ import {
   voidPayrollRun,
   type PayrollEntry,
   type PayrollRun,
+  type PayrollRunStatus,
   type Payslip,
+  type RunPrediction,
   type SkippedEmployee,
 } from "@/lib/api/payroll-api";
 import {
@@ -61,6 +66,22 @@ type PageStatus =
 type Notice = { tone: "success" | "error"; text: string };
 
 type ConfirmAction = "approve" | "pay" | "void" | null;
+
+type SkipMeta = {
+  label: string;
+  tone: "skip" | "risk";
+  fix?: "employee";
+};
+
+const SKIP_REASON_META: Record<string, SkipMeta> = {
+  no_compensation: { label: "No effective compensation", tone: "skip", fix: "employee" },
+  unpaid_leave: { label: "On unpaid leave", tone: "skip", fix: "employee" },
+  terminated_mid_period: { label: "Terminated mid-period", tone: "skip" },
+  not_on_roster: { label: "Not on active roster", tone: "skip" },
+  no_payable_days: { label: "No payable days", tone: "skip" },
+  missing_bank_details: { label: "Missing bank details", tone: "risk", fix: "employee" },
+  unclassified: { label: "Unclassified - review", tone: "risk" },
+};
 
 function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -137,6 +158,82 @@ function StatusPip({ status }: { status: string }) {
   );
 }
 
+const RUN_STEPS = ["draft", "computed", "approved", "paid"] as const;
+
+const RUN_STEP_LABEL: Record<(typeof RUN_STEPS)[number], string> = {
+  draft: "Draft",
+  computed: "Computed",
+  approved: "Approved",
+  paid: "Paid",
+};
+
+/** The pay-period lifecycle this run travels: draft → computed → approved → paid. */
+function RunLifecycle({ status }: { status: PayrollRunStatus }) {
+  if (status === "void") {
+    return (
+      <div className="mt-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+        <CircleX aria-hidden="true" className="size-4 shrink-0 text-destructive" />
+        <p className="text-xs font-medium text-destructive">
+          Voided — the run was cancelled before reaching payment.
+        </p>
+      </div>
+    );
+  }
+  const currentIndex = RUN_STEPS.indexOf(status as (typeof RUN_STEPS)[number]);
+  return (
+    <div className="mt-4" aria-label="Run lifecycle">
+      <div className="flex items-center">
+        {RUN_STEPS.map((step, index) => {
+          const reached = index <= currentIndex;
+          const isCurrent = index === currentIndex;
+          const last = index === RUN_STEPS.length - 1;
+          return (
+            <Fragment key={step}>
+              <span className={cn("flex items-center", !last && "flex-1")}>
+                <span
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                    reached
+                      ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                      : "bg-muted text-muted-foreground",
+                    isCurrent && "ring-2 ring-emerald-500",
+                  )}
+                >
+                  {reached ? (
+                    <Check aria-hidden="true" className="size-3.5" />
+                  ) : (
+                    index + 1
+                  )}
+                </span>
+                {!last ? (
+                  <span
+                    aria-hidden="true"
+                    className={cn("h-px flex-1", index < currentIndex ? "bg-emerald-500/60" : "bg-border")}
+                  />
+                ) : null}
+              </span>
+            </Fragment>
+          );
+        })}
+      </div>
+      <div className="mt-1.5 flex">
+        {RUN_STEPS.map((step, index) => (
+          <span
+            key={step}
+            className={cn(
+              "text-[11px] font-medium",
+              index === RUN_STEPS.length - 1 && "flex-none",
+              index === currentIndex ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {RUN_STEP_LABEL[step]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function RunDetailClient({ runId }: { runId: string }) {
   const { permissions } = useModuleAccess();
   const canWrite =
@@ -147,6 +244,8 @@ export function RunDetailClient({ runId }: { runId: string }) {
   const [status, setStatus] = useState<PageStatus>({ state: "loading" });
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payslips, setPayslips] = useState<Payslip[]>([]);
+  const [prediction, setPrediction] = useState<RunPrediction | null>(null);
+  const [driftAcknowledged, setDriftAcknowledged] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
@@ -162,15 +261,18 @@ export function RunDetailClient({ runId }: { runId: string }) {
 
   const load = useCallback(async () => {
     setStatus({ state: "loading" });
+    setDriftAcknowledged(false);
     try {
-      const [run, entries, employeeList, payslipList] = await Promise.all([
+      const [run, entries, employeeList, payslipList, runPrediction] = await Promise.all([
         getPayrollRun(runId),
         listRunEntries(runId),
         listEmployees({ pageSize: 100 }),
         getRunPayslips(runId).catch(() => [] as Payslip[]),
+        getRunPrediction(runId).catch(() => null),
       ]);
       setEmployees(employeeList.items);
       setPayslips(payslipList);
+      setPrediction(runPrediction);
       setStatus({ state: "ready", run, entries });
     } catch (error) {
       const message =
@@ -200,7 +302,7 @@ export function RunDetailClient({ runId }: { runId: string }) {
       let updated: PayrollRun;
       if (action === "approve") updated = await approvePayrollRun(runId);
       else if (action === "pay") updated = await markPayrollRunPaid(runId);
-      else updated = await voidPayrollRun(runId);
+      else updated = await voidPayrollRun(runId, voidReason.trim());
       setStatus((current) =>
         current.state === "ready" ? { ...current, run: updated } : current,
       );
@@ -218,11 +320,13 @@ export function RunDetailClient({ runId }: { runId: string }) {
   }
 
   async function onCompute() {
-    if (!status.state || busy) return;
+    if (!status.state || busy || driftBlocksCompute) return;
     setBusy(true);
     setNotice(null);
     try {
       const result = await computePayrollRun(runId);
+      setDriftAcknowledged(false);
+      setPrediction(null);
       setPayslips(await getRunPayslips(runId).catch(() => []));
       setStatus({
         state: "ready",
@@ -322,6 +426,10 @@ export function RunDetailClient({ runId }: { runId: string }) {
   const { run, entries } = status;
 
   const canCompute = canWrite && run.status === "draft";
+  const driftedDepartments = prediction
+    ? prediction.departments.filter((department) => department.drifted)
+    : [];
+  const driftBlocksCompute = driftedDepartments.length > 0 && !driftAcknowledged;
   const canApproveRun = canApprove && run.status === "computed";
   const canPay = canApprove && run.status === "approved";
   const canVoid = canApprove && (run.status === "computed" || run.status === "approved");
@@ -472,21 +580,26 @@ export function RunDetailClient({ runId }: { runId: string }) {
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-card p-5">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">
-              {run.runCode}
-            </h1>
-            <StatusBadge status={run.status} />
+      <div className="rounded-xl border border-border bg-card p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">
+                {run.runCode}
+              </h1>
+              <StatusBadge status={run.status} />
+            </div>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {formatDate(run.periodStart)} → {formatDate(run.periodEnd)}
+            </p>
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            {formatDate(run.periodStart)} → {formatDate(run.periodEnd)}
-          </p>
-        </div>
         <div className="flex flex-wrap items-center gap-2">
           {canCompute ? (
-            <Button type="button" disabled={busy} onClick={() => void onCompute()}>
+            <Button
+              type="button"
+              disabled={busy || driftBlocksCompute}
+              onClick={() => void onCompute()}
+            >
               {busy ? (
                 <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
               ) : (
@@ -543,6 +656,8 @@ export function RunDetailClient({ runId }: { runId: string }) {
             </Button>
           ) : null}
         </div>
+        </div>
+        <RunLifecycle status={run.status} />
       </div>
 
       {notice ? (
@@ -606,6 +721,133 @@ export function RunDetailClient({ runId }: { runId: string }) {
           ) : null}
         </div>
       </section>
+
+      {run.status === "draft" && prediction ? (
+        <section className="rounded-xl border border-border bg-card p-5">
+          <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-foreground">
+            <Calculator aria-hidden="true" className="size-4 text-primary" />
+            Run prediction
+            {driftedDepartments.length > 0 ? (
+              <Badge
+                variant="secondary"
+                className="bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              >
+                <AlertTriangle aria-hidden="true" className="mr-1 size-3" />
+                {driftedDepartments.length} dept(s) drifted
+              </Badge>
+            ) : null}
+            <span className="ml-auto text-xs font-normal text-muted-foreground">
+              Read-only estimate vs previous period — nothing persisted
+            </span>
+          </h2>
+          {prediction.previousRun ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Compared against {prediction.previousRun.runCode} ·{" "}
+              {formatDate(prediction.previousRun.periodStart)} →{" "}
+              {formatDate(prediction.previousRun.periodEnd)}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-muted-foreground">
+              No previous run — no drift comparison available.
+            </p>
+          )}
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase text-muted-foreground">
+                  <th className="pb-2 font-medium">Department</th>
+                  <th className="pb-2 text-right font-medium">Employees</th>
+                  <th className="pb-2 text-right font-medium">Previous net</th>
+                  <th className="pb-2 text-right font-medium">Predicted net</th>
+                  <th className="pb-2 text-right font-medium">Delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {prediction.departments.map((department) => {
+                  const delta = department.deltaPct != null ? `${department.deltaPct}%` : "—";
+                  return (
+                    <tr key={department.departmentId ?? "unassigned"} className="border-b border-border last:border-0">
+                      <td className="py-2 font-medium text-foreground">
+                        {department.departmentName}
+                        {department.drifted ? (
+                          <Badge
+                            variant="secondary"
+                            className="ml-2 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                          >
+                            <AlertTriangle aria-hidden="true" className="mr-1 size-3" />
+                            Drift
+                          </Badge>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-muted-foreground">
+                        {department.employeeCount}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-muted-foreground">
+                        {department.previousNet
+                          ? formatMoney(department.previousNet.amount, department.previousNet.currency)
+                          : "—"}
+                      </td>
+                      <td className="py-2 text-right tabular-nums font-medium text-foreground">
+                        {formatMoney(department.predictedNet.amount, department.predictedNet.currency)}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-2 text-right tabular-nums",
+                          department.drifted
+                            ? "font-medium text-amber-700 dark:text-amber-400"
+                            : "text-muted-foreground",
+                        )}
+                      >
+                        {delta}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-border">
+                  <td className="py-2 font-medium text-foreground">Total</td>
+                  <td />
+                  <td />
+                  <td className="py-2 text-right tabular-nums font-semibold text-foreground">
+                    {formatMoney(
+                      prediction.predictedTotalNet.amount,
+                      prediction.predictedTotalNet.currency,
+                    )}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            Drift threshold: {(Number(prediction.driftThresholdPct) * 100).toFixed(0)}%
+          </div>
+          {prediction.predictedSkipped.length > 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Would skip {prediction.predictedSkipped.length} employee(s):{" "}
+              {prediction.predictedSkipped
+                .map((skipped) => employeeName(skipped.employeeId) ?? skipped.employeeId)
+                .join(", ")}
+            </p>
+          ) : null}
+          {driftedDepartments.length > 0 ? (
+            <label className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-foreground">
+              <Checkbox
+                checked={driftAcknowledged}
+                onCheckedChange={(value) => setDriftAcknowledged(value === true)}
+                className="mt-0.5"
+              />
+              <span>
+                {driftedDepartments.length} department(s) moved more than{" "}
+                {(Number(prediction.driftThresholdPct) * 100).toFixed(0)}% vs the previous run
+                ({driftedDepartments.map((d) => d.departmentName).join(", ")}). I acknowledge this
+                is expected before computing.
+              </span>
+            </label>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-border bg-card p-5">
         <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-foreground">
@@ -702,19 +944,73 @@ export function RunDetailClient({ runId }: { runId: string }) {
           <h2 className="flex items-center gap-2 font-display text-sm font-semibold tracking-tight text-foreground">
             <CircleX aria-hidden="true" className="size-4 text-primary" />
             Skipped employees
+            <span className="ml-auto text-xs font-normal text-muted-foreground">
+              Every reason classified - risks surfaced for review
+            </span>
           </h2>
-          <div className="mt-3 divide-y divide-border">
-            {run.skippedEmployees.map((skipped: SkippedEmployee) => (
-              <div
-                key={skipped.employeeId}
-                className="flex items-center justify-between gap-4 py-2"
-              >
-                <span className="text-sm font-medium text-foreground">
-                  {employeeName(skipped.employeeId) ?? skipped.employeeId}
-                </span>
-                <span className="text-sm text-muted-foreground">{skipped.reason}</span>
-              </div>
-            ))}
+          <div className="mt-3 space-y-4">
+            {(() => {
+              const groups = new Map<string, SkippedEmployee[]>();
+              for (const skipped of run.skippedEmployees) {
+                const key = `${skipped.category}:${skipped.reasonCode}`;
+                groups.set(key, [...(groups.get(key) ?? []), skipped]);
+              }
+              return [...groups.entries()].map(([key, rows]) => {
+                const first = rows[0];
+                const meta =
+                  SKIP_REASON_META[first.reasonCode] ??
+                  (first.category === "risk"
+                    ? { label: "Needs attention", tone: "risk" as const }
+                    : { label: "Unclassified", tone: "skip" as const });
+                const risk = meta.tone === "risk";
+                return (
+                  <div key={key} className="rounded-lg border border-border p-3">
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="secondary"
+                        className={
+                          risk
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                            : "bg-muted text-foreground"
+                        }
+                      >
+                        {risk ? (
+                          <AlertTriangle aria-hidden="true" className="mr-1 size-3" />
+                        ) : null}
+                        {meta.label}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">{rows.length}</span>
+                    </div>
+                    <ul className="mt-2 divide-y divide-border">
+                      {rows.map((skipped) => (
+                        <li
+                          key={`${skipped.reasonCode}-${skipped.employeeId}`}
+                          className="flex items-center justify-between gap-3 py-2"
+                        >
+                          <span className="min-w-0 truncate text-sm font-medium text-foreground">
+                            {employeeName(skipped.employeeId) ?? skipped.employeeId}
+                          </span>
+                          {meta.fix === "employee" ? (
+                            <Button asChild variant="outline" size="sm" className="shrink-0">
+                              <Link
+                                href={`/dashboard/erp/hr/employees/${skipped.employeeId}`}
+                              >
+                                <UserRound aria-hidden="true" className="size-3.5" />
+                                Edit
+                              </Link>
+                            </Button>
+                          ) : (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {skipped.reason}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </section>
       ) : null}
@@ -740,6 +1036,22 @@ export function RunDetailClient({ runId }: { runId: string }) {
                 placeholder="e.g. Wrong pay period"
                 required
               />
+              <div className="flex flex-wrap gap-2 pt-1.5">
+                {[
+                  ["Duplicate", "created twice by mistake"],
+                  ["Wrong period", "wrong pay period - should be another month"],
+                  ["Correction needed", "correction required before paying"],
+                ].map(([label, phrase]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setVoidReason(phrase)}
+                    className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
           <DialogFooter>

@@ -556,6 +556,10 @@ class PayrollSettings:
     # HR-AUT-001 (0029): whether marking a run paid also books the accrual JE
     # into the Finance inbox (off = fully manual flow).
     je_bridge_enabled: bool = True
+    # HR-AUT-002 (0040): drift threshold for run predictions - the projected
+    # net vs previous-period change (percentage point) that flags a department
+    # as drifting. Advisory only: it never blocks a compute at the backend.
+    prediction_drift_threshold_pct: Decimal = Decimal("0.10")
     id: uuid.UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

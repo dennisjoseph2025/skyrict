@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -24,6 +24,14 @@ from core.domain.entities import (
     PayslipReview,
 )
 from core.domain.value_objects import Money
+from core.features.payroll.skip_reasons import SkipCategory, SkipReasonCode
+from core.features.payroll.void_reasons import (
+    VoidReasonCategory,
+    classify_void_reason,
+)
+
+if TYPE_CHECKING:
+    from core.features.payroll.service import DepartmentProjection, RunPrediction
 
 
 class MoneyOut(BaseModel):
@@ -60,6 +68,9 @@ class PayrollSettingsIn(BaseModel):
     rounding: Literal["nearest", "up", "down"] | None = None
     ai_automation_enabled: bool | None = None
     je_bridge_enabled: bool | None = None
+    prediction_drift_threshold_pct: Decimal | None = Field(
+        default=None, gt=0, le=1, description="Drift flag threshold, decimal fraction (0.10 = 10%)"
+    )
 
 
 class PayrollSettingsOut(BaseModel):
@@ -70,6 +81,7 @@ class PayrollSettingsOut(BaseModel):
     rounding: str
     ai_automation_enabled: bool
     je_bridge_enabled: bool
+    prediction_drift_threshold_pct: Decimal
 
     @field_validator("pf_rate", "tax_rate", mode="after")
     @classmethod
@@ -89,6 +101,7 @@ class PayrollSettingsOut(BaseModel):
             rounding=settings.rounding.value,
             ai_automation_enabled=settings.ai_automation_enabled,
             je_bridge_enabled=settings.je_bridge_enabled,
+            prediction_drift_threshold_pct=settings.prediction_drift_threshold_pct,
         )
 
 
@@ -142,7 +155,14 @@ class PayrollRunOut(BaseModel):
             skipped_employees=(
                 [
                     SkippedEmployeeOut(
-                        employee_id=uuid.UUID(item["employee_id"]), reason=item["reason"]
+                        employee_id=uuid.UUID(item["employee_id"]),
+                        reason=item["reason"],
+                        reason_code=SkipReasonCode(item["reason_code"])
+                        if "reason_code" in item
+                        else SkipReasonCode.UNCLASSIFIED,
+                        category=SkipCategory(item["category"])
+                        if "category" in item
+                        else SkipCategory.SKIP,
                     )
                     for item in run.skipped_employees
                 ]
@@ -195,8 +215,17 @@ class EntryAdjustmentIn(BaseModel):
 
 
 class SkippedEmployeeOut(BaseModel):
+    """One skip or risk row in a run's post-run analysis (HR-AUT-002 §5.3.5).
+
+    ``reason_code`` is the taxonomy code powering the drawer's reason badge
+    and one-click fix; ``category`` separates hard skips from non-blocking
+    risk rows (e.g. missing bank details - paid, but needs attention).
+    """
+
     employee_id: uuid.UUID
     reason: str
+    reason_code: SkipReasonCode = SkipReasonCode.UNCLASSIFIED
+    category: SkipCategory = SkipCategory.SKIP
 
 
 class PayslipOut(BaseModel):
@@ -229,6 +258,86 @@ class RunComputeOut(BaseModel):
     run: PayrollRunOut
     entries: list[PayrollEntryOut] = Field(default_factory=list)
     skipped: list[SkippedEmployeeOut] = Field(default_factory=list)
+
+
+class DepartmentProjectionOut(BaseModel):
+    """One department's predicted totals vs its previous-period actual."""
+
+    department_id: uuid.UUID | None
+    department_name: str
+    predicted_gross: MoneyOut
+    predicted_net: MoneyOut
+    employee_count: int
+    previous_net: MoneyOut | None = None
+    delta_pct: Decimal | None = None
+    drifted: bool = False
+
+    @classmethod
+    def from_projection(cls, projection: DepartmentProjection) -> DepartmentProjectionOut:
+        return cls(
+            department_id=projection.department_id,
+            department_name=projection.department_name,
+            predicted_gross=MoneyOut(
+                amount=projection.predicted_gross.amount,
+                currency=projection.predicted_gross.currency,
+            ),
+            predicted_net=MoneyOut(
+                amount=projection.predicted_net.amount,
+                currency=projection.predicted_net.currency,
+            ),
+            employee_count=projection.employee_count,
+            previous_net=MoneyOut.from_money(projection.previous_net),
+            delta_pct=projection.delta_pct,
+            drifted=projection.drifted,
+        )
+
+
+class RunPredictionOut(BaseModel):
+    """Read-only run prediction (HR-AUT-002) - never persisted as actuals.
+
+    ``predicted_skipped`` previews the employees the estimate would skip, so
+    the same payload the commit path will report is visible before committing.
+    """
+
+    run_id: uuid.UUID
+    predicted_total_gross: MoneyOut
+    predicted_total_net: MoneyOut
+    drift_threshold_pct: Decimal
+    departments: list[DepartmentProjectionOut] = Field(default_factory=list)
+    previous_run: PayrollRunOut | None = None
+    predicted_skipped: list[SkippedEmployeeOut] = Field(default_factory=list)
+
+    @classmethod
+    def from_prediction(cls, prediction: RunPrediction) -> RunPredictionOut:
+        return cls(
+            run_id=prediction.run_id,
+            predicted_total_gross=MoneyOut(
+                amount=prediction.predicted_total_gross.amount,
+                currency=prediction.predicted_total_gross.currency,
+            ),
+            predicted_total_net=MoneyOut(
+                amount=prediction.predicted_total_net.amount,
+                currency=prediction.predicted_total_net.currency,
+            ),
+            drift_threshold_pct=prediction.drift_threshold_pct,
+            departments=[
+                DepartmentProjectionOut.from_projection(d) for d in prediction.departments
+            ],
+            previous_run=(
+                PayrollRunOut.from_entity(prediction.previous_run)
+                if prediction.previous_run is not None
+                else None
+            ),
+            predicted_skipped=[
+                SkippedEmployeeOut(
+                    employee_id=record.employee_id,
+                    reason=record.reason,
+                    reason_code=record.code,
+                    category=record.category,
+                )
+                for record in prediction.predicted_skipped
+            ],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -323,9 +432,73 @@ class CompensationOut(BaseModel):
         )
 
 
+# ---------------------------------------------------------------------------
+# Void reason intelligence (HR-AUT-002 §5.8.3)
+# ---------------------------------------------------------------------------
+
+
+class VoidRunIn(BaseModel):
+    """Operator-supplied reason for voiding a run.
+
+    Stored verbatim on the run; the taxonomy classifier buckets it for the
+    monthly pattern report. Single word -> weak confidence -> unclassified.
+    """
+
+    reason: str = Field(default="", max_length=255)
+
+
+class VoidClassificationOut(BaseModel):
+    category: VoidReasonCategory
+    label: str
+    confidence: Decimal
+    text: str
+
+    @classmethod
+    def from_text(cls, text: str) -> VoidClassificationOut:
+        classification = classify_void_reason(text)
+        return cls(
+            category=classification.category,
+            label=classification.category.label,
+            confidence=classification.confidence,
+            text=text,
+        )
+
+
+class VoidMonthCountsOut(BaseModel):
+    month: date
+    duplicate: int
+    wrong_period: int
+    correction_needed: int
+    unclassified: int
+
+    @classmethod
+    def from_month(cls, month: date, counts: dict[VoidReasonCategory, int]) -> VoidMonthCountsOut:
+        return cls(
+            month=month,
+            duplicate=counts[VoidReasonCategory.DUPLICATE],
+            wrong_period=counts[VoidReasonCategory.WRONG_PERIOD],
+            correction_needed=counts[VoidReasonCategory.CORRECTION_NEEDED],
+            unclassified=counts[VoidReasonCategory.UNCLASSIFIED],
+        )
+
+
+class VoidRunRefOut(BaseModel):
+    run_id: uuid.UUID
+    run_code: str
+    period_start: date
+    reason: str
+
+
+class VoidPatternReportOut(BaseModel):
+    months: list[VoidMonthCountsOut]
+    totals: dict[VoidReasonCategory, int]
+    unclassified_recent: list[VoidRunRefOut]
+
+
 __all__ = [
     "CompensationCreate",
     "CompensationOut",
+    "DepartmentProjectionOut",
     "EntryAdjustmentIn",
     "MoneyOut",
     "PayrollEntryOut",
@@ -334,5 +507,11 @@ __all__ = [
     "PayrollSettingsIn",
     "PayrollSettingsOut",
     "RunComputeOut",
+    "RunPredictionOut",
     "SkippedEmployeeOut",
+    "VoidClassificationOut",
+    "VoidMonthCountsOut",
+    "VoidPatternReportOut",
+    "VoidRunIn",
+    "VoidRunRefOut",
 ]

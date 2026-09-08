@@ -24,6 +24,7 @@ from core.api.v1.schemas.hr import (
 from core.api.v1.schemas.payroll import (
     CompensationCreate,
     CompensationOut,
+    DepartmentProjectionOut,
     EntryAdjustmentIn,
     MoneyOut,
     PayrollEntryOut,
@@ -35,7 +36,12 @@ from core.api.v1.schemas.payroll import (
     PayslipReviewActionIn,
     PayslipReviewOut,
     RunComputeOut,
+    RunPredictionOut,
     SkippedEmployeeOut,
+    VoidMonthCountsOut,
+    VoidPatternReportOut,
+    VoidRunIn,
+    VoidRunRefOut,
 )
 from core.api.v1.schemas.payroll_automation import (
     PayrollBatchEnqueueRequest,
@@ -56,6 +62,7 @@ __all__ = [
     "CompensationOut",
     "DepartmentCreate",
     "DepartmentOut",
+    "DepartmentProjectionOut",
     "DepartmentUpdate",
     "EmployeeCreate",
     "EmployeeOut",
@@ -90,6 +97,11 @@ __all__ = [
     "PayslipReviewActionIn",
     "PayslipReviewOut",
     "RunComputeOut",
+    "RunPredictionOut",
     "SkippedEmployeeOut",
     "TerminateRequest",
+    "VoidMonthCountsOut",
+    "VoidPatternReportOut",
+    "VoidRunIn",
+    "VoidRunRefOut",
 ]

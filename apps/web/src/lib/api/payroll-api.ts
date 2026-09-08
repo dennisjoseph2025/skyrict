@@ -48,9 +48,13 @@ export interface PayrollRun {
   createdAt: string;
 }
 
+export type SkippedCategory = "skip" | "risk";
+
 export interface SkippedEmployee {
   employeeId: string;
   reason: string;
+  reasonCode: string;
+  category: SkippedCategory;
 }
 
 export interface PayrollEntry {
@@ -69,6 +73,27 @@ export interface RunComputeResult {
   run: PayrollRun;
   entries: PayrollEntry[];
   skipped: SkippedEmployee[];
+}
+
+export interface DepartmentProjection {
+  departmentId: string | null;
+  departmentName: string;
+  predictedGross: Money;
+  predictedNet: Money;
+  employeeCount: number;
+  previousNet: Money | null;
+  deltaPct: string | null;
+  drifted: boolean;
+}
+
+export interface RunPrediction {
+  runId: string;
+  predictedTotalGross: Money;
+  predictedTotalNet: Money;
+  driftThresholdPct: string;
+  departments: DepartmentProjection[];
+  previousRun: PayrollRun | null;
+  predictedSkipped: SkippedEmployee[];
 }
 
 export interface Compensation {
@@ -194,6 +219,27 @@ interface PayslipReviewPayload {
   created_at?: unknown;
 }
 
+interface DepartmentProjectionPayload {
+  department_id?: unknown;
+  department_name?: unknown;
+  predicted_gross?: MoneyPayload | null;
+  predicted_net?: MoneyPayload | null;
+  employee_count?: unknown;
+  previous_net?: MoneyPayload | null;
+  delta_pct?: unknown;
+  drifted?: unknown;
+}
+
+interface RunPredictionPayload {
+  run_id?: unknown;
+  predicted_total_gross?: MoneyPayload | null;
+  predicted_total_net?: MoneyPayload | null;
+  drift_threshold_pct?: unknown;
+  departments?: unknown;
+  previous_run?: PayrollRunPayload | null;
+  predicted_skipped?: unknown;
+}
+
 function mapMoney(payload: MoneyPayload | null | undefined): Money | null {
   if (!payload) return null;
   return {
@@ -217,10 +263,15 @@ function mapPayrollSettings(payload: PayrollSettingsPayload | null): PayrollSett
 
 function mapSkippedEmployees(value: unknown): SkippedEmployee[] {
   if (!Array.isArray(value)) return [];
-  return value.map((item) => ({
-    employeeId: String((item as { employee_id?: unknown })?.employee_id ?? ""),
-    reason: String((item as { reason?: unknown })?.reason ?? ""),
-  }));
+  return value.map((item) => {
+    const row = item as { employee_id?: unknown; reason?: unknown; reason_code?: unknown; category?: unknown };
+    return {
+      employeeId: String(row.employee_id ?? ""),
+      reason: String(row.reason ?? ""),
+      reasonCode: String(row.reason_code ?? ""),
+      category: row.category === "risk" ? "risk" : "skip",
+    };
+  });
 }
 
 function mapPayrollRun(payload: PayrollRunPayload): PayrollRun {
@@ -305,6 +356,34 @@ function mapPayslipReview(payload: PayslipReviewPayload): PayslipReview {
   };
 }
 
+function mapRunPrediction(payload: RunPredictionPayload | null): RunPrediction | null {
+  if (!payload) return null;
+  const departments = Array.isArray(payload.departments)
+    ? payload.departments.map((item) => {
+        const row = item as DepartmentProjectionPayload;
+        return {
+          departmentId: typeof row.department_id === "string" ? row.department_id : null,
+          departmentName: String(row.department_name ?? "Unassigned"),
+          predictedGross: mapMoney(row.predicted_gross) ?? { amount: "0", currency: "USD" },
+          predictedNet: mapMoney(row.predicted_net) ?? { amount: "0", currency: "USD" },
+          employeeCount: typeof row.employee_count === "number" ? row.employee_count : 0,
+          previousNet: mapMoney(row.previous_net),
+          deltaPct: typeof row.delta_pct === "string" ? row.delta_pct : null,
+          drifted: row.drifted === true,
+        };
+      })
+    : [];
+  return {
+    runId: String(payload.run_id ?? ""),
+    predictedTotalGross: mapMoney(payload.predicted_total_gross) ?? { amount: "0", currency: "USD" },
+    predictedTotalNet: mapMoney(payload.predicted_total_net) ?? { amount: "0", currency: "USD" },
+    driftThresholdPct: String(payload.drift_threshold_pct ?? "0.1"),
+    departments,
+    previousRun: payload.previous_run ? mapPayrollRun(payload.previous_run) : null,
+    predictedSkipped: mapSkippedEmployees(payload.predicted_skipped),
+  };
+}
+
 export async function getPayrollSettings(): Promise<PayrollSettings | null> {
   const raw = await apiFetch<PayrollSettingsPayload | null>("/api/v1/payroll/settings");
   return mapPayrollSettings(raw ?? null);
@@ -363,6 +442,13 @@ export async function getPayrollRun(runId: string): Promise<PayrollRun> {
   return mapPayrollRun(raw ?? {});
 }
 
+export async function getRunPrediction(runId: string): Promise<RunPrediction | null> {
+  const raw = await apiFetch<RunPredictionPayload | null>(
+    `/api/v1/payroll/runs/${runId}/prediction`,
+  );
+  return mapRunPrediction(raw ?? null);
+}
+
 export async function computePayrollRun(runId: string): Promise<RunComputeResult> {
   const raw = await apiPost<{
     run?: PayrollRunPayload;
@@ -389,9 +475,91 @@ export async function markPayrollRunPaid(runId: string): Promise<PayrollRun> {
   return mapPayrollRun(raw ?? {});
 }
 
-export async function voidPayrollRun(runId: string): Promise<PayrollRun> {
-  const raw = await apiPost<PayrollRunPayload>(`/api/v1/payroll/runs/${runId}/void`, {});
+export async function voidPayrollRun(runId: string, reason: string): Promise<PayrollRun> {
+  const raw = await apiPost<PayrollRunPayload>(`/api/v1/payroll/runs/${runId}/void`, {
+    reason,
+  });
   return mapPayrollRun(raw ?? {});
+}
+
+export type VoidReasonCategory =
+  | "duplicate"
+  | "wrong_period"
+  | "correction_needed"
+  | "unclassified";
+
+export interface VoidMonthCounts {
+  month: string;
+  duplicate: number;
+  wrong_period: number;
+  correction_needed: number;
+  unclassified: number;
+}
+
+export interface VoidRunRef {
+  runId: string;
+  runCode: string;
+  periodStart: string;
+  reason: string;
+}
+
+export interface VoidPatternReport {
+  months: VoidMonthCounts[];
+  totals: Record<VoidReasonCategory, number>;
+  unclassifiedRecent: VoidRunRef[];
+}
+
+const VOID_CATEGORY_LABELS: Record<VoidReasonCategory, string> = {
+  duplicate: "Duplicate",
+  wrong_period: "Wrong period",
+  correction_needed: "Correction needed",
+  unclassified: "Unclassified",
+};
+
+export const voidCategoryLabel = (category: VoidReasonCategory): string =>
+  VOID_CATEGORY_LABELS[category];
+
+export async function getVoidReasonReport(
+  months = 6,
+): Promise<VoidPatternReport | null> {
+  const raw = await apiFetch<{
+    months?: Array<{
+      month: string;
+      duplicate: number;
+      wrong_period: number;
+      correction_needed: number;
+      unclassified: number;
+    }>;
+    totals?: Record<VoidReasonCategory, number>;
+    unclassified_recent?: Array<{
+      run_id: string;
+      run_code: string;
+      period_start: string;
+      reason: string;
+    }>;
+  } | null>(`/api/v1/payroll/void-reasons/report?months=${months}`);
+  if (!raw) return null;
+  return {
+    months: (raw.months ?? []).map((row) => ({
+      month: row.month,
+      duplicate: row.duplicate,
+      wrong_period: row.wrong_period,
+      correction_needed: row.correction_needed,
+      unclassified: row.unclassified,
+    })),
+    totals: raw.totals ?? {
+      duplicate: 0,
+      wrong_period: 0,
+      correction_needed: 0,
+      unclassified: 0,
+    },
+    unclassifiedRecent: (raw.unclassified_recent ?? []).map((row) => ({
+      runId: row.run_id,
+      runCode: row.run_code,
+      periodStart: row.period_start,
+      reason: row.reason,
+    })),
+  };
 }
 
 export async function listRunEntries(

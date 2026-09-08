@@ -1,18 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { CheckCircle2, Search, ShieldCheck } from "lucide-react";
 
 import { PageHeader } from "@/components/dashboard/shared/page-header";
+import { FilterChipGroup } from "@/components/dashboard/shared/filter-chip-group";
+import { SearchableSelect, type SearchableSelectOption } from "@/components/dashboard/shared/searchable-select";
+import { StatCard } from "@/components/dashboard/shared/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   getComplianceSummary,
   getEmployeeComplianceFindings,
@@ -33,6 +31,13 @@ const SEVERITY_STYLES: Record<string, string> = {
   low: "bg-sky-500/15 text-sky-700 ring-1 ring-sky-500/30 dark:text-sky-400",
 };
 
+const SEVERITY_BAR: Record<string, string> = {
+  critical: "bg-destructive",
+  high: "bg-orange-500",
+  medium: "bg-amber-500",
+  low: "bg-sky-500",
+};
+
 const SEVERITY_LABEL: Record<string, string> = {
   critical: "Critical",
   high: "High",
@@ -40,11 +45,22 @@ const SEVERITY_LABEL: Record<string, string> = {
   low: "Low",
 };
 
+const SEVERITY_TONE: Record<string, "destructive" | "warning" | "info"> = {
+  critical: "destructive",
+  high: "destructive",
+  medium: "warning",
+  low: "info",
+};
+
+const SEVERITY_ORDER = ["critical", "high", "medium", "low"] as const;
+
 const TYPE_LABEL: Record<string, string> = {
   document_expiry: "Document expiry",
   training_overdue: "Overdue training",
   contract_missing_field: "Missing record field",
 };
+
+type SeverityFilter = "all" | (typeof SEVERITY_ORDER)[number];
 
 function SeverityBadge({ severity }: { severity: string }) {
   return (
@@ -57,8 +73,39 @@ function SeverityBadge({ severity }: { severity: string }) {
   );
 }
 
+function CountBar({
+  label,
+  count,
+  max,
+  barClass,
+}: {
+  label: string;
+  count: number;
+  max: number;
+  barClass: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="w-32 shrink-0 truncate text-muted-foreground">{label}</span>
+      <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <span
+          className={cn("absolute inset-y-0 left-0 rounded-full", barClass)}
+          style={{ width: `${max > 0 ? (count / max) * 100 : 0}%` }}
+        />
+      </span>
+      <span className="w-6 shrink-0 text-right font-medium tabular-nums text-foreground">
+        {count}
+      </span>
+    </div>
+  );
+}
+
 function SummaryCards({ summary }: { summary: HrComplianceSummary }) {
-  const severities = ["critical", "high", "medium", "low"] as const;
+  const severityEntries = SEVERITY_ORDER.map(
+    (severity) => [severity, summary.bySeverity[severity] ?? 0] as const,
+  );
+  const typeEntries = Object.entries(summary.byType).sort((a, b) => b[1] - a[1]);
+  const typeMax = Math.max(1, ...typeEntries.map(([, count]) => count));
   return (
     <section aria-label="Compliance summary" className="space-y-4">
       <div className="flex items-center gap-2">
@@ -71,37 +118,42 @@ function SummaryCards({ summary }: { summary: HrComplianceSummary }) {
         <p className="text-xs text-muted-foreground">Counts only — no per-person data.</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {severities.map((severity) => {
-          const label = SEVERITY_LABEL[severity];
+        {severityEntries.map(([severity]) => {
+          const count = summary.bySeverity[severity] ?? 0;
           return (
-            <div key={severity} className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs font-medium text-muted-foreground">{label}</p>
-              <p className="mt-2 text-2xl font-semibold tabular-nums text-foreground">
-                {summary.bySeverity[severity] ?? 0}
-              </p>
-            </div>
+            <StatCard
+              key={severity}
+              icon={ShieldCheck}
+              label={SEVERITY_LABEL[severity]}
+              value={String(count)}
+              hint={`${SEVERITY_LABEL[severity]} findings`}
+              tone={SEVERITY_TONE[severity] ?? "default"}
+            />
           );
         })}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">Open findings</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-foreground">
-            {summary.openFindings}
-            <span className="ml-2 text-sm font-normal text-muted-foreground">
-              of {summary.totalFindings} total
-            </span>
+        <StatCard
+          icon={CheckCircle2}
+          label="Open findings"
+          value={`${summary.openFindings} of ${summary.totalFindings}`}
+          hint="Still to acknowledge or resolve"
+          tone={summary.openFindings > 0 ? "warning" : "success"}
+        />
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            By check type
           </p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">By check type</p>
-          <div className="mt-2 space-y-1.5">
-            {Object.entries(summary.byType).length > 0 ? (
-              Object.entries(summary.byType).map(([type, count]) => (
-                <div key={type} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-muted-foreground">{TYPE_LABEL[type] ?? type}</span>
-                  <span className="font-medium tabular-nums text-foreground">{count}</span>
-                </div>
+          <div className="mt-3 space-y-2">
+            {typeEntries.length > 0 ? (
+              typeEntries.map(([type, count]) => (
+                <CountBar
+                  key={type}
+                  label={TYPE_LABEL[type] ?? type}
+                  count={count}
+                  max={typeMax}
+                  barClass="bg-primary/70"
+                />
               ))
             ) : (
               <p className="text-xs text-muted-foreground">No compliance findings.</p>
@@ -110,7 +162,7 @@ function SummaryCards({ summary }: { summary: HrComplianceSummary }) {
         </div>
       </div>
       {summary.narrative || summary.generatedAt ? (
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-5">
           {summary.narrative ? <p className="text-sm text-muted-foreground">{summary.narrative}</p> : null}
           {summary.generatedAt ? (
             <p className="mt-2 text-xs text-muted-foreground">As of {formatDateTime(summary.generatedAt)}</p>
@@ -155,8 +207,16 @@ function FindingRow({
         <p className="text-sm text-muted-foreground">{finding.description}</p>
         {finding.employeeNumber ? (
           <p className="text-xs text-muted-foreground">
-            {finding.employeeNumber}
-            {finding.name ? ` — ${finding.name}` : ""}
+            {finding.name && finding.employeeId ? (
+              <Link
+                href={`/dashboard/erp/hr/employees/${finding.employeeId}`}
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {finding.name}
+              </Link>
+            ) : (
+              finding.name
+            )}
             {finding.departmentName ? ` (${finding.departmentName})` : ""}
           </p>
         ) : null}
@@ -206,7 +266,9 @@ export function ComplianceClient() {
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeesError, setEmployeesError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [selectedId, setSelectedId] = useState("");
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
+  const [query, setQuery] = useState("");
 
   const [detail, setDetail] = useState<DetailState>({ state: "idle" });
   const [statusState, setStatusState] = useState<Record<string, { busy?: boolean; error?: string }>>({});
@@ -278,7 +340,6 @@ export function ComplianceClient() {
           );
           setStatusState((current) => ({ ...current, [checkId]: { busy: false } }));
 
-          // Keep L1 counts in sync with the L2 action.
           getComplianceSummary()
             .then((summary) => {
               setView((current) =>
@@ -305,8 +366,53 @@ export function ComplianceClient() {
     [],
   );
 
+  const employeeOptions = useMemo<SearchableSelectOption[]>(
+    () =>
+      employees.map((employee) => ({
+        value: employee.id,
+        label: `${employee.firstName} ${employee.lastName}`,
+        keywords: employee.employeeNumber ?? undefined,
+      })),
+    [employees],
+  );
+
+  const severityOptions = useMemo<{ value: string; label: string }[]>(
+    () => [
+      { value: "all", label: "All" },
+      ...SEVERITY_ORDER.map((severity) => ({ value: severity, label: SEVERITY_LABEL[severity] })),
+    ],
+    [],
+  );
+
+  const visibleFindings = useMemo(() => {
+    if (detail.state !== "ready") return [];
+    const needle = query.trim().toLowerCase();
+    return detail.findings.filter((finding) => {
+      if (severityFilter !== "all" && finding.severity !== severityFilter) return false;
+      if (!needle) return true;
+      const haystack = [
+        finding.title,
+        finding.description,
+        finding.name ?? "",
+        finding.employeeNumber ?? "",
+        TYPE_LABEL[finding.checkType] ?? finding.checkType,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [detail, severityFilter, query]);
+
   const maxEmployees = employees.length;
   const empty = view.state === "summary" && view.summary.totalFindings === 0;
+
+  const severityTotal =
+    view.state === "summary"
+      ? SEVERITY_ORDER.reduce(
+          (sum, severity) => sum + (view.summary.bySeverity[severity] ?? 0),
+          0,
+        )
+      : 0;
 
   return (
     <div className="space-y-6">
@@ -353,94 +459,165 @@ export function ComplianceClient() {
               </div>
             </section>
           ) : (
-            <section aria-label="Per-employee findings" className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <h2 className="font-display text-sm font-semibold tracking-tight text-foreground">
-                    Per-employee findings
-                  </h2>
-                  <Badge
-                    variant="outline"
-                    className="border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
-                  >
-                    L2 individual
-                  </Badge>
-                </div>
-                <Select
-                  value={selectedId || "none"}
-                  onValueChange={(value) => {
-                    setSelectedId(value);
-                    if (value !== "none") loadDetail(value);
-                  }}
-                >
-                  <SelectTrigger className="w-[280px]" aria-label="Employee">
-                    <SelectValue placeholder={`Select an employee (${maxEmployees} available)`} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none" disabled>
-                      Select an employee
-                    </SelectItem>
-                    {employees.map((employee) => (
-                      <SelectItem key={employee.id} value={employee.id}>
-                        {employee.firstName} {employee.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {employeesError ? (
-                <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs font-medium text-destructive">
-                  {employeesError}
-                </p>
-              ) : null}
-
-              {detail.state === "blocked" ? (
-                <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                  {detail.message}
-                </p>
-              ) : null}
-              {detail.state === "error" ? (
-                <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs font-medium text-destructive">
-                  {detail.message}
-                </p>
-              ) : null}
-
-              {selectedId && detail.state !== "idle" ? (
-                <div className="overflow-hidden rounded-xl border border-border bg-card">
-                  {detail.state === "loading" ? (
-                    <div className="space-y-2 p-4">
-                      <div className="h-20 animate-pulse rounded-lg bg-muted" />
-                      <div className="h-20 animate-pulse rounded-lg bg-muted" />
-                    </div>
-                  ) : null}
-                  {detail.state === "ready" && detail.findings.length === 0 ? (
-                    <p className="p-4 text-sm text-muted-foreground">
-                      No compliance findings for this employee.
+            <>
+              {severityTotal > 0 ? (
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="font-display text-sm font-semibold tracking-tight text-foreground">
+                      Findings by severity
+                    </h2>
+                    <p className="text-xs text-muted-foreground">
+                      Tap a segment to filter a selected employee&apos;s findings
                     </p>
-                  ) : null}
-                  {detail.state === "ready" && detail.findings.length > 0 ? (
-                    <ul className="divide-y divide-border">
-                      {detail.findings.map((finding) => (
-                        <li key={finding.checkId}>
-                          <FindingRow
-                            finding={finding}
-                            onStatusChange={handleStatusChange}
-                            statusState={statusState}
-                          />
+                  </div>
+                  <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-muted" role="img" aria-label="Findings by severity">
+                    {SEVERITY_ORDER.map((severity) => {
+                      const count = view.summary.bySeverity[severity] ?? 0;
+                      if (count === 0) return null;
+                      const active = severityFilter === severity;
+                      return (
+                        <button
+                          key={severity}
+                          type="button"
+                          onClick={() => setSeverityFilter(active ? "all" : severity)}
+                          aria-label={`Filter to ${SEVERITY_LABEL[severity]}`}
+                          className={cn(
+                            SEVERITY_BAR[severity],
+                            "h-full transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            severityFilter !== "all" && !active && "opacity-30",
+                          )}
+                          style={{ width: `${(count / severityTotal) * 100}%` }}
+                        />
+                      );
+                    })}
+                  </div>
+                  <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+                    {SEVERITY_ORDER.map((severity) => {
+                      const count = view.summary.bySeverity[severity] ?? 0;
+                      const active = severityFilter === severity;
+                      return (
+                        <li key={severity}>
+                          <button
+                            type="button"
+                            onClick={() => setSeverityFilter(active ? "all" : severity)}
+                            className={cn(
+                              "flex items-center gap-1.5 rounded-full px-1.5 py-0.5 text-xs transition-colors hover:bg-muted",
+                              active ? "font-semibold text-foreground" : "text-muted-foreground",
+                            )}
+                          >
+                            <span className={cn("size-2 rounded-full", SEVERITY_BAR[severity])} aria-hidden="true" />
+                            {SEVERITY_LABEL[severity]} · {count}
+                          </button>
                         </li>
-                      ))}
-                    </ul>
-                  ) : null}
+                      );
+                    })}
+                  </ul>
                 </div>
-              ) : (
-                detail.state === "idle" && (
-                  <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                    Pick an employee to view their per-person compliance findings.
+              ) : null}
+
+              <section aria-label="Per-employee findings" className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-display text-sm font-semibold tracking-tight text-foreground">
+                      Per-employee findings
+                    </h2>
+                    <Badge
+                      variant="outline"
+                      className="border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
+                    >
+                      L2 individual
+                    </Badge>
+                  </div>
+                  <SearchableSelect
+                    className="w-full sm:w-64"
+                    options={employeeOptions}
+                    value={selectedId || null}
+                    onValueChange={(value) => {
+                      setSelectedId(value);
+                      if (value) loadDetail(value);
+                    }}
+                    placeholder={`Select an employee (${maxEmployees} available)`}
+                  />
+                </div>
+
+                {employeesError ? (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs font-medium text-destructive">
+                    {employeesError}
                   </p>
-                )
-              )}
-            </section>
+                ) : null}
+
+                {detail.state === "blocked" ? (
+                  <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    {detail.message}
+                  </p>
+                ) : null}
+                {detail.state === "error" ? (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs font-medium text-destructive">
+                    {detail.message}
+                  </p>
+                ) : null}
+
+                {selectedId && detail.state !== "idle" ? (
+                  <>
+                    {detail.state === "ready" && detail.findings.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative w-full sm:w-64">
+                          <Search
+                            aria-hidden="true"
+                            className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+                          />
+                          <Input
+                            value={query}
+                            onChange={(event) => setQuery(event.target.value)}
+                            className="pl-8"
+                            placeholder="Search findings…"
+                            aria-label="Search findings"
+                          />
+                        </div>
+                        <FilterChipGroup
+                          options={severityOptions}
+                          value={severityFilter}
+                          onChange={(value) => setSeverityFilter(value as SeverityFilter)}
+                          ariaLabel="Filter by severity"
+                        />
+                      </div>
+                    ) : null}
+                    <div className="overflow-hidden rounded-xl border border-border bg-card">
+                      {detail.state === "loading" ? (
+                        <div className="space-y-2 p-4">
+                          <div className="h-20 animate-pulse rounded-lg bg-muted" />
+                          <div className="h-20 animate-pulse rounded-lg bg-muted" />
+                        </div>
+                      ) : null}
+                      {detail.state === "ready" && visibleFindings.length === 0 ? (
+                        <p className="p-4 text-sm text-muted-foreground">
+                          {detail.findings.length === 0
+                            ? "No compliance findings for this employee."
+                            : "No findings match the current filter."}
+                        </p>
+                      ) : null}
+                      {visibleFindings.length > 0 ? (
+                        <ul className="divide-y divide-border">
+                          {visibleFindings.map((finding) => (
+                            <li key={finding.checkId}>
+                              <FindingRow
+                                finding={finding}
+                                onStatusChange={handleStatusChange}
+                                statusState={statusState}
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  </>
+                ) : detail.state === "idle" ? (
+                  <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    Pick an employee to see which compliance findings apply to them.
+                  </p>
+                ) : null}
+              </section>
+            </>
           )}
         </>
       ) : null}

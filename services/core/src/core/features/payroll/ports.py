@@ -13,6 +13,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import date
+from decimal import Decimal
 from typing import Protocol
 
 from core.core.constants import PayrollJeBridgeStatus
@@ -88,6 +89,12 @@ class PayrollRepositoryPort(Protocol):
         offset: int = 0,
     ) -> Sequence[ent.PayrollRun]: ...
 
+    async def list_voided_runs(
+        self, tenant_id: uuid.UUID, *, since_start: date
+    ) -> Sequence[ent.PayrollRun]:
+        """Voided runs period-bucketed for the void-pattern monthly report."""
+        ...
+
     async def find_overlapping_run(
         self,
         tenant_id: uuid.UUID,
@@ -95,6 +102,16 @@ class PayrollRepositoryPort(Protocol):
         period_start: date,
         period_end: date,
     ) -> ent.PayrollRun | None: ...
+
+    async def previous_run(
+        self, tenant_id: uuid.UUID, *, before_start: date
+    ) -> ent.PayrollRun | None:
+        """Newest non-void run whose period ends strictly before ``before_start``.
+
+        Read seam for run predictions - the last period's actuals to diff
+        against the current projection.
+        """
+        ...
 
     async def transition_run_status(
         self,
@@ -173,6 +190,17 @@ class PayrollRepositoryPort(Protocol):
         self, tenant_id: uuid.UUID, employee_id: uuid.UUID
     ) -> ent.Employee | None:
         """One roster employee for the payslip view (terminal employees included)."""
+        ...
+
+    # --- Predictions (HR-AUT-002: read-only department projections) ---
+    async def list_departments(self, tenant_id: uuid.UUID) -> Sequence[tuple[uuid.UUID, str]]:
+        """Active department (id, name) pairs for prediction display names."""
+        ...
+
+    async def department_net_summary(
+        self, run_id: uuid.UUID, *, tenant_id: uuid.UUID
+    ) -> Sequence[tuple[uuid.UUID | None, str, Decimal]]:
+        """Run net totals grouped by department, ``(dept_id, name, net)``."""
         ...
 
     # --- Benefits (read-only, pre-flight input) ---

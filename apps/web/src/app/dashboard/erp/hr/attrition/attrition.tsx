@@ -1,14 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, TrendingDown } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Search, TrendingDown } from "lucide-react";
 
 import { PageHeader } from "@/components/dashboard/shared/page-header";
+import { FilterChipGroup } from "@/components/dashboard/shared/filter-chip-group";
+import { RiskMeter } from "@/components/dashboard/shared/risk-meter";
+import { StatCard } from "@/components/dashboard/shared/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   acknowledgeAttrition,
   getAttrition,
+  type HrAttritionFactor,
   type HrAttritionSummary,
   type HrAttritionView,
   type HrDepartmentRisk,
@@ -29,6 +34,8 @@ const BAND_LABEL: Record<string, string> = {
   medium: "Medium",
   low: "Low",
 };
+
+type BandFilter = "all" | "high" | "medium" | "low";
 
 function BandBadge({ band }: { band: string }) {
   return (
@@ -92,6 +99,37 @@ function departmentRisk(employees: HrEmployeeRisk[]): HrDepartmentRisk[] {
     );
 }
 
+/** A signed contribution bar: pushes risk up (right, red) or down (left, green). */
+function FactorBar({ factor, maxAbs }: { factor: HrAttritionFactor; maxAbs: number }) {
+  const positive = factor.contribution > 0;
+  const width = maxAbs > 0 ? Math.min(Math.abs(factor.contribution) / maxAbs, 1) * 50 : 0;
+  return (
+    <li className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span className="w-32 shrink-0 truncate">{factor.feature.replaceAll("_", " ")}</span>
+      <span className="relative h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <span className="absolute top-0 bottom-0 left-1/2 w-px bg-border" />
+        {width > 0 ? (
+          <span
+            className={cn(
+              "absolute top-0 bottom-0 rounded-full",
+              positive ? "right-1/2 bg-destructive/70" : "left-1/2 bg-emerald-500",
+            )}
+            style={{ width: `${width}%` }}
+          />
+        ) : null}
+      </span>
+      <span
+        className={cn(
+          "w-11 shrink-0 text-right font-medium tabular-nums",
+          positive ? "text-destructive" : "text-emerald-600 dark:text-emerald-400",
+        )}
+      >
+        {signed(factor.contribution)}
+      </span>
+    </li>
+  );
+}
+
 function SummaryCards({
   summary,
   narrative,
@@ -99,6 +137,7 @@ function SummaryCards({
   summary: HrAttritionSummary;
   narrative?: string;
 }) {
+  const maxHigh = Math.max(1, ...summary.topRiskDepartments.map((dept) => dept.highRiskCount));
   return (
     <section aria-label="Attrition summary" className="space-y-4">
       <div className="flex items-center gap-2">
@@ -106,42 +145,56 @@ function SummaryCards({
         <p className="text-xs text-muted-foreground">Aggregated counts only — no per-person data.</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">High risk</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-destructive">
-            {summary.highRiskCount}
-          </p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">Medium risk</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">
-            {summary.mediumRiskCount}
-          </p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">Low risk</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-sky-600 dark:text-sky-400">
-            {summary.lowRiskCount}
-          </p>
-        </div>
+        <StatCard
+          icon={TrendingDown}
+          label="High risk"
+          value={String(summary.highRiskCount)}
+          hint="Likely to leave"
+          tone="destructive"
+        />
+        <StatCard
+          icon={TrendingDown}
+          label="Medium risk"
+          value={String(summary.mediumRiskCount)}
+          hint="Worth watching"
+          tone="warning"
+        />
+        <StatCard
+          icon={TrendingDown}
+          label="Low risk"
+          value={String(summary.lowRiskCount)}
+          hint="Stable"
+          tone="info"
+        />
       </div>
       {summary.topRiskDepartments.length > 0 ? (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-medium text-muted-foreground">Top-risk departments</p>
-          <div className="mt-2 space-y-1.5">
+        <div className="rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            Top-risk departments
+          </p>
+          <ul className="mt-3 space-y-2">
             {summary.topRiskDepartments.map((dept) => (
-              <div key={dept.departmentName} className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-muted-foreground">{dept.departmentName}</span>
-                <span className="font-medium tabular-nums text-foreground">
-                  {dept.highRiskCount}/{dept.totalScores} high · avg {percent(dept.averageRisk)}
+              <li key={dept.departmentName} className="flex items-center gap-2 text-sm">
+                <span className="w-40 shrink-0 truncate text-muted-foreground">
+                  {dept.departmentName}
                 </span>
-              </div>
+                <span className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                  <span
+                    className="absolute inset-y-0 left-0 rounded-full bg-destructive/70"
+                    style={{ width: `${(dept.highRiskCount / maxHigh) * 100}%` }}
+                  />
+                </span>
+                <span className="w-24 shrink-0 text-right tabular-nums text-muted-foreground">
+                  {dept.highRiskCount}/{dept.totalScores} high · avg{" "}
+                  <span className="font-medium text-foreground">{percent(dept.averageRisk)}</span>
+                </span>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       ) : null}
       {narrative || summary.generatedAt ? (
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-xl border border-border bg-card p-5">
           {narrative ? <p className="text-sm text-muted-foreground">{narrative}</p> : null}
           {summary.generatedAt ? (
             <p className="mt-2 text-xs text-muted-foreground">As of {formatDateTime(summary.generatedAt)}</p>
@@ -189,6 +242,10 @@ function EmployeeTable({
         <tbody className="divide-y divide-border">
           {employees.map((employee) => {
             const state = ackState[employee.employeeId];
+            const maxAbs = Math.max(
+              1,
+              ...employee.factors.map((factor) => Math.abs(factor.contribution)),
+            );
             return (
               <tr key={employee.employeeId}>
                 <td className="px-4 py-3">
@@ -203,19 +260,16 @@ function EmployeeTable({
                   <BandBadge band={employee.riskBand} />
                 </td>
                 <td className="px-4 py-3">
-                  <p className="font-semibold tabular-nums text-foreground">{percent(employee.score)}</p>
-                  <p className="text-xs text-muted-foreground">confidence {percent(employee.confidence)}</p>
+                  <RiskMeter value={employee.score} className="max-w-36" />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    confidence {percent(employee.confidence)}
+                  </p>
                 </td>
                 <td className="px-4 py-3">
                   {employee.factors.length > 0 ? (
-                    <ul className="space-y-0.5">
+                    <ul className="space-y-1">
                       {employee.factors.map((factor) => (
-                        <li key={factor.feature} className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{factor.feature.replaceAll("_", " ")}</span>
-                          <span className="font-medium tabular-nums text-foreground">
-                            {signed(factor.contribution)}
-                          </span>
-                        </li>
+                        <FactorBar key={factor.feature} factor={factor} maxAbs={maxAbs} />
                       ))}
                     </ul>
                   ) : (
@@ -264,6 +318,8 @@ export function AttritionClient() {
     | { state: "detail"; generatedAt: string; modelVersion: string; employees: HrEmployeeRisk[] }
   >({ state: "loading" });
   const [ackState, setAckState] = useState<Record<string, { busy?: boolean; error?: string }>>({});
+  const [bandFilter, setBandFilter] = useState<BandFilter>("all");
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     setView({ state: "loading" });
@@ -338,10 +394,30 @@ export function AttritionClient() {
         }
       : null;
 
-  const sortedEmployees =
-    view.state === "detail"
-      ? [...view.employees].sort((a, b) => b.score - a.score)
-      : [];
+  const visibleEmployees = useMemo(() => {
+    if (view.state !== "detail") return [];
+    const needle = query.trim().toLowerCase();
+    return [...view.employees]
+      .filter((employee) => {
+        if (bandFilter !== "all" && employee.riskBand !== bandFilter) return false;
+        if (!needle) return true;
+        const haystack = `${employee.name ?? ""} ${employee.employeeNumber ?? ""} ${employee.departmentName ?? ""}`.toLowerCase();
+        return haystack.includes(needle);
+      })
+      .sort((a, b) => b.score - a.score);
+  }, [view, bandFilter, query]);
+
+  const bandOptions = useMemo(() => {
+    if (view.state !== "detail") return [{ value: "all", label: "All bands" }];
+    const count = (band: "high" | "medium" | "low") =>
+      view.employees.filter((employee) => employee.riskBand === band).length;
+    return [
+      { value: "all", label: `All · ${view.employees.length}` },
+      { value: "high", label: `High · ${count("high")}` },
+      { value: "medium", label: `Medium · ${count("medium")}` },
+      { value: "low", label: `Low · ${count("low")}` },
+    ];
+  }, [view]);
 
   return (
     <div className="space-y-6">
@@ -393,17 +469,40 @@ export function AttritionClient() {
             narrative={detailSummary?.narrative}
           />
           <section aria-label="Per-employee attrition risk" className="space-y-3">
-            <div className="flex items-center gap-2">
-              <h2 className="font-display text-sm font-semibold tracking-tight text-foreground">
-                Per-employee risk
-              </h2>
-              <L2Badge />
-              <p className="ml-auto hidden text-xs text-muted-foreground sm:block">
-                {view.employees.length} scored employee(s)
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="font-display text-sm font-semibold tracking-tight text-foreground">
+                  Per-employee risk
+                </h2>
+                <L2Badge />
+                <p className="ml-auto hidden text-xs text-muted-foreground sm:block">
+                  {view.employees.length} scored employee(s)
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-full sm:w-64">
+                <Search
+                  aria-hidden="true"
+                  className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="pl-8"
+                  placeholder="Search by name or department…"
+                  aria-label="Search employees"
+                />
+              </div>
+              <FilterChipGroup
+                options={bandOptions}
+                value={bandFilter}
+                onChange={(value) => setBandFilter(value as BandFilter)}
+                ariaLabel="Filter by risk band"
+              />
             </div>
             <EmployeeTable
-              employees={sortedEmployees}
+              employees={visibleEmployees}
               onAcknowledge={handleAcknowledge}
               ackState={ackState}
             />

@@ -1,16 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Receipt } from "lucide-react";
+import Link from "next/link";
+import { Plus, Receipt, ShieldAlert } from "lucide-react";
 
 import { NewRunDialog } from "@/components/dashboard/erp/payroll/run-dialog";
 import { ErpDataTable, ErpDataTableSkeleton, type ErpColumn } from "@/components/dashboard/shared/erp-data-table";
+import { FilterChipGroup } from "@/components/dashboard/shared/filter-chip-group";
 import { PageHeader } from "@/components/dashboard/shared/page-header";
-import {
-  SearchableSelect,
-  type SearchableSelectOption,
-} from "@/components/dashboard/shared/searchable-select";
 import { StatusBadge } from "@/components/dashboard/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { useModuleAccess } from "@/lib/access/modules";
@@ -53,15 +51,6 @@ export function RunsClient({ initialStatus }: { initialStatus?: PayrollRunStatus
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
-
-  const statusOptions = useMemo<SearchableSelectOption[]>(
-    () =>
-      STATUS_OPTIONS.map((option) => ({
-        value: option.value,
-        label: option.label,
-      })),
-    [],
-  );
 
   const load = useCallback(async () => {
     setStatus({ state: "loading" });
@@ -154,19 +143,25 @@ export function RunsClient({ initialStatus }: { initialStatus?: PayrollRunStatus
           </Button>
         ) : null}
       </div>
-
       <div className="flex flex-wrap items-center gap-3">
-        <SearchableSelect
-          className="w-40"
-          options={statusOptions}
-          value={statusFilter}
-          onValueChange={(value) => {
-            setStatusFilter(value as "all" | PayrollRunStatus);
-            setPage(1);
-          }}
-          placeholder="Status"
-        />
+        <Link
+          href="/dashboard/erp/payroll/void-reasons"
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ShieldAlert aria-hidden="true" className="size-4" />
+          Void reasons
+        </Link>
       </div>
+
+      <FilterChipGroup
+        options={STATUS_OPTIONS}
+        value={statusFilter}
+        onChange={(value) => {
+          setStatusFilter(value as "all" | PayrollRunStatus);
+          setPage(1);
+        }}
+        ariaLabel="Filter runs by status"
+      />
 
       {notice ? (
         <div
