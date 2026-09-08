@@ -43,7 +43,7 @@ class UserCreatedConsumer(BaseConsumer):
 
 ## Modules
 
-| Module | Purpose |
-|--------|---------|
-| `base` | `BaseEvent` Pydantic model, `BaseProducer` ABC, `BaseConsumer` ABC |
-| `schemas/` | Add domain-specific event Pydantic models here |
+| Module     | Purpose                                                            |
+| ---------- | ------------------------------------------------------------------ |
+| `base`     | `BaseEvent` Pydantic model, `BaseProducer` ABC, `BaseConsumer` ABC |
+| `schemas/` | Add domain-specific event Pydantic models here                     |

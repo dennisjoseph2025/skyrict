@@ -13,25 +13,25 @@ import { ListPageSkeleton } from "@/components/ui/page-skeletons";
  * overview so a restricted route is never revealed.
  */
 export function RequirePermission({
-  permission,
-  children,
+    permission,
+    children,
 }: {
-  permission: string;
-  children: React.ReactNode;
+    permission: string;
+    children: React.ReactNode;
 }) {
-  const { status, permissions } = useModuleAccess();
-  const router = useRouter();
+    const { status, permissions } = useModuleAccess();
+    const router = useRouter();
 
-  const allowed =
-    status === "ready" &&
-    (permissions.includes("*") || permissions.includes(permission));
+    const allowed =
+        status === "ready" &&
+        (permissions.includes("*") || permissions.includes(permission));
 
-  useEffect(() => {
-    if (status === "loading") return;
-    if (!allowed) router.replace("/dashboard");
-  }, [status, allowed, router]);
+    useEffect(() => {
+        if (status === "loading") return;
+        if (!allowed) router.replace("/dashboard");
+    }, [status, allowed, router]);
 
-  if (status === "loading") return <ListPageSkeleton />;
-  if (!allowed) return null;
-  return <>{children}</>;
+    if (status === "loading") return <ListPageSkeleton />;
+    if (!allowed) return null;
+    return <>{children}</>;
 }

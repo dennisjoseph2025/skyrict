@@ -160,12 +160,9 @@ function CollapsibleNavItem({
     const parentActive = isActive(pathname, item);
     const hasActiveChild = children.some((child) => isActive(pathname, child));
 
-    const handleParentClick = useCallback(
-        () => {
-            onCloseMobile();
-        },
-        [onCloseMobile],
-    );
+    const handleParentClick = useCallback(() => {
+        onCloseMobile();
+    }, [onCloseMobile]);
 
     if (collapsed) {
         return (

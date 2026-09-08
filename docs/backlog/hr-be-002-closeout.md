@@ -15,34 +15,34 @@ after the `nkswalih/dev` merge (see
 
 ## The 14 canonical items
 
-| # | Item | Status | Evidence |
-|---|------|--------|----------|
-| 1 | Pending cancellation emits `hr.leave.cancelled` and removes the request from the pending queue | Done | `test_cancel_from_pending_cancels_without_movement` (`tests/unit/features/test_leave_service.py`); `test_pending_cancel_emits_leave_cancelled` (`tests/unit/features/test_feature_events.py`); `cancel_leave_request` pending branch (`services/core/src/core/features/hr/service.py`) |
-| 2 | Repository-level payroll-entry immutability (four scenarios) | Done | `TestRepositoryLevelEntryImmutability` (`tests/integration/api/test_payroll_api.py:319`) - see [Item 2 detail](#item-2---repository-level-entry-immutability-four-cases) |
-| 3 | Accrual runs at compute time (per-period, for the whole roster) | Done | `test_concurrent_compute_idempotent` and `test_concurrent_compute_with_approval_no_deadlock` (`tests/integration/api/test_concurrency_atomicity.py`); accrual loop in `compute_run` (`services/core/src/core/features/payroll/service.py:308`) |
-| 4 | Adjustments apply as net adjustments to the computed entry | Done | `test_adjustment_is_flat_amount` (`tests/unit/features/test_payroll_compute.py`); adjustment wiring in compute entry assembly |
-| 5 | Roster scope: everyone hired by period end, minus terminations (earn through termination date) | Done | `TestRosterScope::test_terminated_mid_period_included_and_others_excluded` (`tests/integration/api/test_payroll_api.py:271`); `list_active_employees` (`services/core/src/core/features/payroll/repository.py:647`) |
-| 6 | `skipped_employees` surfaced on the run result (e.g. no active compensation) | Done | `test_employee_without_compensation_is_skipped` (`tests/integration/api/test_payroll_api.py:159`) |
-| 7 | Compensation recorded → audit + `hr.compensation.recorded` event | Done | `test_record_compensation_emits_compensation_recorded` (`tests/unit/features/test_feature_events.py`); `test_history_and_active_compensation` (`tests/integration/api/test_payroll_api.py:76`) |
-| 8 | Events emitted only after commit; a failed transaction emits nothing | Done | `test_buffered_event_discarded_when_commit_fails` (`tests/integration/api/test_concurrency_atomicity.py`); `test_buffered_events_are_not_published_until_flush` (`tests/unit/features/test_feature_events.py`); drained via true session listeners, `092b55a` |
-| 9 | Concurrency guards on run-status transitions and entry writes | Done | `test_recompute_loses_cas_race_raises` (`tests/unit/features/test_payroll_service.py:452`); `test_compute_pay_days_and_amounts` / `test_recompute_is_idempotent` (`tests/integration/api/test_payroll_api.py:130`, `:176`); atomic run-status CAS `dc77e45`, atomic entry-update guard `9cb80d5` |
-| 10 | Stale payroll entries cleaned before recompute, only while the run is mutable | Done | guarded `delete_entries_for_run` (`services/core/src/core/features/payroll/repository.py`), `9071545`; `test_direct_delete_allowed_on_computed_run` / `test_direct_delete_blocked_on_approved_run` (`tests/integration/api/test_payroll_api.py:446`, `:467`) |
-| 11 | DB-level leave-ledger hardening: append-only movements + non-negative balance | Done | Migration `0009_payroll_movements_triggers.py` (`1345071`); `TestLeaveLedgerTriggers` (`tests/integration/database/test_leave_movement_triggers.py`): negative insert rejected/rolled back, zero allowed, direct update rejected, direct delete rejected (`4cdf622`) |
-| 12 | Approval emits the real entry count | Done | `test_approve_emits_real_entry_count` asserting `entry_count == 1` (`tests/unit/features/test_payroll_service.py:479`), `233bda7` |
-| 13 | Employee state machine tightened: termination only from `active` | Done | `test_status_transitions_and_termination` (`tests/integration/api/test_hr_api.py:117`); `test_approve_rejected_for_terminated_employee` (`tests/unit/features/test_leave_service.py`), `0757814` |
-| 14 | Department update emits changed fields | Done | `test_department_update_emits_changed_fields` (`tests/unit/features/test_feature_events.py`) |
+| #   | Item                                                                                           | Status | Evidence                                                                                                                                                                                                                                                                                         |
+| --- | ---------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Pending cancellation emits `hr.leave.cancelled` and removes the request from the pending queue | Done   | `test_cancel_from_pending_cancels_without_movement` (`tests/unit/features/test_leave_service.py`); `test_pending_cancel_emits_leave_cancelled` (`tests/unit/features/test_feature_events.py`); `cancel_leave_request` pending branch (`services/core/src/core/features/hr/service.py`)           |
+| 2   | Repository-level payroll-entry immutability (four scenarios)                                   | Done   | `TestRepositoryLevelEntryImmutability` (`tests/integration/api/test_payroll_api.py:319`) - see [Item 2 detail](#item-2---repository-level-entry-immutability-four-cases)                                                                                                                         |
+| 3   | Accrual runs at compute time (per-period, for the whole roster)                                | Done   | `test_concurrent_compute_idempotent` and `test_concurrent_compute_with_approval_no_deadlock` (`tests/integration/api/test_concurrency_atomicity.py`); accrual loop in `compute_run` (`services/core/src/core/features/payroll/service.py:308`)                                                   |
+| 4   | Adjustments apply as net adjustments to the computed entry                                     | Done   | `test_adjustment_is_flat_amount` (`tests/unit/features/test_payroll_compute.py`); adjustment wiring in compute entry assembly                                                                                                                                                                    |
+| 5   | Roster scope: everyone hired by period end, minus terminations (earn through termination date) | Done   | `TestRosterScope::test_terminated_mid_period_included_and_others_excluded` (`tests/integration/api/test_payroll_api.py:271`); `list_active_employees` (`services/core/src/core/features/payroll/repository.py:647`)                                                                              |
+| 6   | `skipped_employees` surfaced on the run result (e.g. no active compensation)                   | Done   | `test_employee_without_compensation_is_skipped` (`tests/integration/api/test_payroll_api.py:159`)                                                                                                                                                                                                |
+| 7   | Compensation recorded → audit + `hr.compensation.recorded` event                               | Done   | `test_record_compensation_emits_compensation_recorded` (`tests/unit/features/test_feature_events.py`); `test_history_and_active_compensation` (`tests/integration/api/test_payroll_api.py:76`)                                                                                                   |
+| 8   | Events emitted only after commit; a failed transaction emits nothing                           | Done   | `test_buffered_event_discarded_when_commit_fails` (`tests/integration/api/test_concurrency_atomicity.py`); `test_buffered_events_are_not_published_until_flush` (`tests/unit/features/test_feature_events.py`); drained via true session listeners, `092b55a`                                    |
+| 9   | Concurrency guards on run-status transitions and entry writes                                  | Done   | `test_recompute_loses_cas_race_raises` (`tests/unit/features/test_payroll_service.py:452`); `test_compute_pay_days_and_amounts` / `test_recompute_is_idempotent` (`tests/integration/api/test_payroll_api.py:130`, `:176`); atomic run-status CAS `dc77e45`, atomic entry-update guard `9cb80d5` |
+| 10  | Stale payroll entries cleaned before recompute, only while the run is mutable                  | Done   | guarded `delete_entries_for_run` (`services/core/src/core/features/payroll/repository.py`), `9071545`; `test_direct_delete_allowed_on_computed_run` / `test_direct_delete_blocked_on_approved_run` (`tests/integration/api/test_payroll_api.py:446`, `:467`)                                     |
+| 11  | DB-level leave-ledger hardening: append-only movements + non-negative balance                  | Done   | Migration `0009_payroll_movements_triggers.py` (`1345071`); `TestLeaveLedgerTriggers` (`tests/integration/database/test_leave_movement_triggers.py`): negative insert rejected/rolled back, zero allowed, direct update rejected, direct delete rejected (`4cdf622`)                             |
+| 12  | Approval emits the real entry count                                                            | Done   | `test_approve_emits_real_entry_count` asserting `entry_count == 1` (`tests/unit/features/test_payroll_service.py:479`), `233bda7`                                                                                                                                                                |
+| 13  | Employee state machine tightened: termination only from `active`                               | Done   | `test_status_transitions_and_termination` (`tests/integration/api/test_hr_api.py:117`); `test_approve_rejected_for_terminated_employee` (`tests/unit/features/test_leave_service.py`), `0757814`                                                                                                 |
+| 14  | Department update emits changed fields                                                         | Done   | `test_department_update_emits_changed_fields` (`tests/unit/features/test_feature_events.py`)                                                                                                                                                                                                     |
 
 ### Item 2 - repository-level entry immutability (four cases)
 
 Canonical four scenarios, all green at the repository layer (direct repo calls,
 bypassing the service):
 
-| Case | Test | Guard |
-|------|------|-------|
+| Case                               | Test                                                                     | Guard                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------- |
 | UPDATE blocked on **approved** run | `test_direct_update_blocked_on_approved_run` (`test_payroll_api.py:372`) | atomic WHERE-guard in `update_entry` (`payroll/repository.py`) |
-| UPDATE blocked on **paid** run | `test_direct_update_blocked_on_paid_run` (`test_payroll_api.py:391`) | same guard |
-| UPDATE blocked on **voided** run | `test_direct_update_blocked_on_voided_run` (`test_payroll_api.py:412`) | same guard |
-| UPDATE allowed on **computed** run | `test_direct_update_allowed_on_computed_run` (`test_payroll_api.py:431`) | same guard, mutable statuses allowed |
+| UPDATE blocked on **paid** run     | `test_direct_update_blocked_on_paid_run` (`test_payroll_api.py:391`)     | same guard                                                     |
+| UPDATE blocked on **voided** run   | `test_direct_update_blocked_on_voided_run` (`test_payroll_api.py:412`)   | same guard                                                     |
+| UPDATE allowed on **computed** run | `test_direct_update_allowed_on_computed_run` (`test_payroll_api.py:431`) | same guard, mutable statuses allowed                           |
 
 Classification (verified with `git log -p`): a select-then-raise backstop
 predated these tests (`65249aa`), and the tests (`9545006`) formalized that
@@ -118,7 +118,7 @@ rechecking the balance:
 
 Related anomalies logged (not fixed here, out of scope): migration 0009's
 `erp_leave_movements_guard_negative` trigger applies to **all** leave types, so
-a *serial* negative non-accrual approval already 500s at INSERT while the
+a _serial_ negative non-accrual approval already 500s at INSERT while the
 service allows it by design - a pre-existing inconsistency to be reconciled in a
 follow-up.
 
@@ -129,15 +129,15 @@ follow-up.
 All commands run at `services/core` (or repo root where noted), live Postgres on
 `localhost:5433`.
 
-| Check | Result |
-|-------|--------|
-| `pytest tests/ -q` | **361 passed, 0 failed, 0 xfail, 0 xpass** (baseline 355 + 1 xpassed) |
-| `ruff check services/core/` | 12 findings, all pre-existing, none in changed files |
-| `ruff format --check services/core/` | 11 pre-existing files unformatted, none in changed files |
-| `mypy services/core/src/` | 6 errors, all pre-existing baseline, none new |
-| `import-linter lint --config services/core/import-linter.toml` | 4 contracts kept, 0 broken |
-| `pytest tests/integration/database/` | 54 passed, incl. `test_core_migration_chain_round_trips_up_down_up` (upgrade head → downgrade base → upgrade head against a scratch live DB) and all 5 trigger tests |
-| Repeated concurrency runs | stress + deadlock tests: **5/5**; first-grant test: **5/5** |
+| Check                                                          | Result                                                                                                                                                               |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pytest tests/ -q`                                             | **361 passed, 0 failed, 0 xfail, 0 xpass** (baseline 355 + 1 xpassed)                                                                                                |
+| `ruff check services/core/`                                    | 12 findings, all pre-existing, none in changed files                                                                                                                 |
+| `ruff format --check services/core/`                           | 11 pre-existing files unformatted, none in changed files                                                                                                             |
+| `mypy services/core/src/`                                      | 6 errors, all pre-existing baseline, none new                                                                                                                        |
+| `import-linter lint --config services/core/import-linter.toml` | 4 contracts kept, 0 broken                                                                                                                                           |
+| `pytest tests/integration/database/`                           | 54 passed, incl. `test_core_migration_chain_round_trips_up_down_up` (upgrade head → downgrade base → upgrade head against a scratch live DB) and all 5 trigger tests |
+| Repeated concurrency runs                                      | stress + deadlock tests: **5/5**; first-grant test: **5/5**                                                                                                          |
 
 ---
 
@@ -148,15 +148,15 @@ The 14 items and the race fix were re-verified against the merged tree, then
 the full gate was re-run and all new findings fixed in follow-up `d2c941c`.
 All numbers below are the post-merge, post-fix results.
 
-| Check | Result |
-|-------|--------|
-| `pytest tests/ -q` (core) | **441 passed, 0 failed, 0 skipped** (fresh DB; per-test tenant isolation) |
-| `pytest tests/unit -q` + `pytest tests/integration/api -q` (identity) | **580 passed** (511 unit + 69 integration) |
-| `ruff check services/ libs/` | **clean (0 findings)** - 13 violations fixed in `f2c0ed8` (12 TC001/TC003 type-only imports in the audit/sequence feature moved into `TYPE_CHECKING` blocks, 1 I001 in `features/payroll/repository.py`), incl. one I001 the `d2c941c` `CursorResult` import had introduced |
-| `ruff format --check services/ libs/` | **clean (202 files formatted)** - 6 HR/payroll source + test files formatted in `29651a6` |
-| `mypy` core + identity | clean (core 124 files, identity 152 files) - the 6 pre-existing baseline errors fixed in `d2c941c` |
-| `import-linter lint` | 5 contracts kept, 0 broken (dev merge added one contract) |
-| Alembic chain | renumbered core head `0013`, identity head `0017`; `alembic current` = `0013 (head)`; round-trip covered by `test_migration_roundtrip.py` |
+| Check                                                                 | Result                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pytest tests/ -q` (core)                                             | **441 passed, 0 failed, 0 skipped** (fresh DB; per-test tenant isolation)                                                                                                                                                                                                   |
+| `pytest tests/unit -q` + `pytest tests/integration/api -q` (identity) | **580 passed** (511 unit + 69 integration)                                                                                                                                                                                                                                  |
+| `ruff check services/ libs/`                                          | **clean (0 findings)** - 13 violations fixed in `f2c0ed8` (12 TC001/TC003 type-only imports in the audit/sequence feature moved into `TYPE_CHECKING` blocks, 1 I001 in `features/payroll/repository.py`), incl. one I001 the `d2c941c` `CursorResult` import had introduced |
+| `ruff format --check services/ libs/`                                 | **clean (202 files formatted)** - 6 HR/payroll source + test files formatted in `29651a6`                                                                                                                                                                                   |
+| `mypy` core + identity                                                | clean (core 124 files, identity 152 files) - the 6 pre-existing baseline errors fixed in `d2c941c`                                                                                                                                                                          |
+| `import-linter lint`                                                  | 5 contracts kept, 0 broken (dev merge added one contract)                                                                                                                                                                                                                   |
+| Alembic chain                                                         | renumbered core head `0013`, identity head `0017`; `alembic current` = `0013 (head)`; round-trip covered by `test_migration_roundtrip.py`                                                                                                                                   |
 
 **Dev-merge conflicts resolved** (add/add on shared modules):
 `alembic/versions/0010_erp_sequences_and_audit_log.py` (renumbered from 0006),
@@ -166,6 +166,7 @@ All numbers below are the post-merge, post-fix results.
 `tests/unit/core/test_audit_events.py` (kept dev's inventory catalog test).
 
 **Gate fixes shipped in `d2c941c`:**
+
 - identity `test_mfa.py` - `/api/v1/invitations/accept` is now multipart/form-data;
   test switched from `json=` to `data=` (dev added the avatar `UploadFile` field).
 - mypy strict typing: `domain/entities.py`, `models/core_audit_log.py`,

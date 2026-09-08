@@ -6,7 +6,7 @@ export const PAGE_TITLE_EVENT = "skyrict:page-title";
  * breadcrumb; pass `null` to clear it.
  */
 export function setPageTitle(title: string | null): void {
-  window.dispatchEvent(
-    new CustomEvent(PAGE_TITLE_EVENT, { detail: { title } }),
-  );
+    window.dispatchEvent(
+        new CustomEvent(PAGE_TITLE_EVENT, { detail: { title } }),
+    );
 }

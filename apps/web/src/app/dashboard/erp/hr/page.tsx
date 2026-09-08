@@ -5,16 +5,16 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { HrOverview } from "./hr-overview";
 
 export default function HrHomePage() {
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.hr.read">
-      <div className="space-y-6">
-        <PageHeader
-          title="HR"
-          description="The people behind the business employees, departments, and leave."
-          icon={Users}
-        />
-        <HrOverview />
-      </div>
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.hr.read">
+            <div className="space-y-6">
+                <PageHeader
+                    title="HR"
+                    description="The people behind the business employees, departments, and leave."
+                    icon={Users}
+                />
+                <HrOverview />
+            </div>
+        </ModuleAccessBoundary>
+    );
 }

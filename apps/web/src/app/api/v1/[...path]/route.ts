@@ -2,9 +2,9 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import {
-  assertSameOrigin,
-  callBackend,
-  resolveTenantSlug,
+    assertSameOrigin,
+    callBackend,
+    resolveTenantSlug,
 } from "@/lib/server/auth";
 
 export const dynamic = "force-dynamic";
@@ -23,45 +23,59 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * and (c) state-changing methods must pass the Origin/Referer CSRF gate.
  */
 async function proxy(request: NextRequest) {
-  if (SAFE_METHODS.has(request.method.toUpperCase()) === false && !assertSameOrigin(request)) {
-    return NextResponse.json({ detail: "Invalid request origin." }, { status: 403 });
-  }
+    if (
+        SAFE_METHODS.has(request.method.toUpperCase()) === false &&
+        !assertSameOrigin(request)
+    ) {
+        return NextResponse.json(
+            { detail: "Invalid request origin." },
+            { status: 403 },
+        );
+    }
 
-  const slug = resolveTenantSlug(request.headers.get("host"));
-  const authorization = request.headers.get("authorization");
+    const slug = resolveTenantSlug(request.headers.get("host"));
+    const authorization = request.headers.get("authorization");
 
-  const path = `/${request.nextUrl.pathname.replace(/^\/api\/v1\//, "")}${request.nextUrl.search}`;
-  const segment = path.split("/")[1];
+    const path = `/${request.nextUrl.pathname.replace(/^\/api\/v1\//, "")}${request.nextUrl.search}`;
+    const segment = path.split("/")[1];
 
-  const target = ["crm", "sales", "finance", "inventory", "hr", "payroll", "portal", "ai", "dashboards"].includes(
-    segment,
-  )
-    ? "core"
-    : "identity";
-  const body =
-    SAFE_METHODS.has(request.method.toUpperCase()) || !request.body
-      ? undefined
-      : await request.json().catch(() => undefined);
+    const target = [
+        "crm",
+        "sales",
+        "finance",
+        "inventory",
+        "hr",
+        "payroll",
+        "portal",
+        "ai",
+        "dashboards",
+    ].includes(segment)
+        ? "core"
+        : "identity";
+    const body =
+        SAFE_METHODS.has(request.method.toUpperCase()) || !request.body
+            ? undefined
+            : await request.json().catch(() => undefined);
 
-  const result = await callBackend(path, {
-    method: request.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
-    body,
-    tenantSlug: slug,
-    token: authorization?.toLowerCase().startsWith("bearer ")
-      ? authorization.slice("Bearer ".length)
-      : null,
-    target,
-  });
+    const result = await callBackend(path, {
+        method: request.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+        body,
+        tenantSlug: slug,
+        token: authorization?.toLowerCase().startsWith("bearer ")
+            ? authorization.slice("Bearer ".length)
+            : null,
+        target,
+    });
 
-  if (result.status === 0) {
-    const service = target === "core" ? "Core service" : "Identity service";
-    return NextResponse.json(
-      { detail: `${service} is unavailable. Please try again.` },
-      { status: 502 },
-    );
-  }
+    if (result.status === 0) {
+        const service = target === "core" ? "Core service" : "Identity service";
+        return NextResponse.json(
+            { detail: `${service} is unavailable. Please try again.` },
+            { status: 502 },
+        );
+    }
 
-  return NextResponse.json(result.payload, { status: result.status });
+    return NextResponse.json(result.payload, { status: result.status });
 }
 
 export const GET = proxy;

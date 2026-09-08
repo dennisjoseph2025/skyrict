@@ -32,45 +32,45 @@ manual/CI operator control.
 
 ### State machines
 
-| Object | States |
-|---|---|
-| Batch (`ai_payroll_batch_runs`) | `queued` → `processing` → `completed` \| `failed` \| `aborted` |
-| Item (`ai_payroll_batch_items`) | `pending` → `processing` → `done` \| `failed` |
-| Payslip review (`payslip_review`) | `pending` → `approved` \| `rejected` (per payslip; versioned approval lifecycle) |
-| Payroll run (`erp_payroll_runs`) | `draft` → `computed` → `approved` → `paid`; `void` from `draft`/`computed`/`approved` |
+| Object                            | States                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------- |
+| Batch (`ai_payroll_batch_runs`)   | `queued` → `processing` → `completed` \| `failed` \| `aborted`                        |
+| Item (`ai_payroll_batch_items`)   | `pending` → `processing` → `done` \| `failed`                                         |
+| Payslip review (`payslip_review`) | `pending` → `approved` \| `rejected` (per payslip; versioned approval lifecycle)      |
+| Payroll run (`erp_payroll_runs`)  | `draft` → `computed` → `approved` → `paid`; `void` from `draft`/`computed`/`approved` |
 
 ### Key endpoints (full reference in `hr-payroll.md` §7)
 
-| Method | Path | Permission | Purpose |
-|---|---|---|---|
-| POST | `/api/v1/ai/payroll/batches` | `erp.payroll.ai.run` | Enqueue a run (`run_id`, `dry_run?`); idempotent per run |
-| GET | `/api/v1/ai/payroll/batches?status=` | `erp.payroll.ai.read` | Queue view |
-| GET | `/api/v1/ai/payroll/batches/{id}` | `erp.payroll.ai.read` | Batch detail with `preflight` + `totals` |
-| POST | `/api/v1/ai/payroll/tick` | `erp.payroll.ai.run` | Advance processing + fire due schedules; returns `items_processed`, `status_changed`, `schedules_fired` |
-| GET/POST/PATCH/DELETE | `/api/v1/ai/payroll/schedules[...]` | `read` / `run` | Schedule CRUD (`name?`, `cron_expression`, `enabled`) |
-| GET | `/api/v1/ai/payroll/notifications` | `erp.payroll.ai.read` | Inbox; filters `event_type`, `after`/`before` |
-| GET/PUT | `/api/v1/ai/payroll/notifications/preferences` | `erp.payroll.ai.notify` | Per-user `in_app_on`, `email_on` (self-scoped) |
-| GET | `/api/v1/payroll/runs/{id}` | `erp.payroll.read` | Run detail incl. `je_bridge_status` |
-| GET | `/api/v1/payroll/runs/{id}/payslips` | `erp.payroll.read` | Per-employee gross/deductions/net; `[]` while `draft` |
-| GET | `/api/v1/payroll/payslips/reviews?status=&run_id=` | `erp.payroll.approve` | Payable-payslip review queue (filter by `status`, `run_id`) |
-| POST | `/api/v1/payroll/payslips/reviews/{id}/approve` | `erp.payroll.approve` | Approve one payslip; marks it ready + queues `payslip_ready` |
-| POST | `/api/v1/payroll/payslips/reviews/{id}/reject` | `erp.payroll.approve` | Reject one payslip (`reason` required) |
-| GET | `/api/v1/payroll/payslips/reviews/{id}/pdf` | `erp.payroll.read` | On-demand PDF (A4 Run/employee + pay table); regenerated, no BLOB |
-| POST | `/api/v1/payroll/runs/{id}/pay` | `erp.payroll.approve` | `approved→paid`; triggers the JE bridge (docs call this "mark-paid") |
-| PUT | `/api/v1/payroll/settings` | `erp.payroll.write` | `ai_automation_enabled`, `je_bridge_enabled` flags |
+| Method                | Path                                               | Permission              | Purpose                                                                                                 |
+| --------------------- | -------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| POST                  | `/api/v1/ai/payroll/batches`                       | `erp.payroll.ai.run`    | Enqueue a run (`run_id`, `dry_run?`); idempotent per run                                                |
+| GET                   | `/api/v1/ai/payroll/batches?status=`               | `erp.payroll.ai.read`   | Queue view                                                                                              |
+| GET                   | `/api/v1/ai/payroll/batches/{id}`                  | `erp.payroll.ai.read`   | Batch detail with `preflight` + `totals`                                                                |
+| POST                  | `/api/v1/ai/payroll/tick`                          | `erp.payroll.ai.run`    | Advance processing + fire due schedules; returns `items_processed`, `status_changed`, `schedules_fired` |
+| GET/POST/PATCH/DELETE | `/api/v1/ai/payroll/schedules[...]`                | `read` / `run`          | Schedule CRUD (`name?`, `cron_expression`, `enabled`)                                                   |
+| GET                   | `/api/v1/ai/payroll/notifications`                 | `erp.payroll.ai.read`   | Inbox; filters `event_type`, `after`/`before`                                                           |
+| GET/PUT               | `/api/v1/ai/payroll/notifications/preferences`     | `erp.payroll.ai.notify` | Per-user `in_app_on`, `email_on` (self-scoped)                                                          |
+| GET                   | `/api/v1/payroll/runs/{id}`                        | `erp.payroll.read`      | Run detail incl. `je_bridge_status`                                                                     |
+| GET                   | `/api/v1/payroll/runs/{id}/payslips`               | `erp.payroll.read`      | Per-employee gross/deductions/net; `[]` while `draft`                                                   |
+| GET                   | `/api/v1/payroll/payslips/reviews?status=&run_id=` | `erp.payroll.approve`   | Payable-payslip review queue (filter by `status`, `run_id`)                                             |
+| POST                  | `/api/v1/payroll/payslips/reviews/{id}/approve`    | `erp.payroll.approve`   | Approve one payslip; marks it ready + queues `payslip_ready`                                            |
+| POST                  | `/api/v1/payroll/payslips/reviews/{id}/reject`     | `erp.payroll.approve`   | Reject one payslip (`reason` required)                                                                  |
+| GET                   | `/api/v1/payroll/payslips/reviews/{id}/pdf`        | `erp.payroll.read`      | On-demand PDF (A4 Run/employee + pay table); regenerated, no BLOB                                       |
+| POST                  | `/api/v1/payroll/runs/{id}/pay`                    | `erp.payroll.approve`   | `approved→paid`; triggers the JE bridge (docs call this "mark-paid")                                    |
+| PUT                   | `/api/v1/payroll/settings`                         | `erp.payroll.write`     | `ai_automation_enabled`, `je_bridge_enabled` flags                                                      |
 
 ### Preflight checks (run at enqueue; evidence persisted in batch JSONB)
 
-| Check | Block or warn | Detail shown when it trips |
-|---|---|---|
-| `settings` | **block** | no payroll settings row for tenant |
-| `automation_enabled` | **block** | `ai_automation_enabled` is off |
-| `run` | **block** | run is not `draft`/`computed` |
-| `period` | **block** | another run already covers this period |
-| `roster` | **block** | no active employees for the period |
-| `banking` | warn | roster employee(s) missing bank details |
-| `benefit_elections` | warn | employee(s) with no enrolled benefit election |
-| `termination` | warn | active employee flagged with a termination date |
+| Check                | Block or warn | Detail shown when it trips                      |
+| -------------------- | ------------- | ----------------------------------------------- |
+| `settings`           | **block**     | no payroll settings row for tenant              |
+| `automation_enabled` | **block**     | `ai_automation_enabled` is off                  |
+| `run`                | **block**     | run is not `draft`/`computed`                   |
+| `period`             | **block**     | another run already covers this period          |
+| `roster`             | **block**     | no active employees for the period              |
+| `banking`            | warn          | roster employee(s) missing bank details         |
+| `benefit_elections`  | warn          | employee(s) with no enrolled benefit election   |
+| `termination`        | warn          | active employee flagged with a termination date |
 
 A **block** aborts the batch immediately (`status=aborted`, zero items) —
 re-enqueueing after fixing the block **re-arms the same batch row** (fresh
@@ -114,11 +114,11 @@ Accrued Salaries = net; CR `2020` Salary Deductions Payable = `gross − net`
 status `DRAFT`, dated at `paid_at`. Idempotent via
 `UNIQUE(tenant_id, source, source_ref)`.
 
-| Outcome | `je_bridge_status` on the run |
-|---|---|
-| Chart missing 5010/2010/2020 | `pending` |
-| Entry created or already booked | `draft` |
-| Anything else (or flag off / zero gross) | `none` |
+| Outcome                                  | `je_bridge_status` on the run |
+| ---------------------------------------- | ----------------------------- |
+| Chart missing 5010/2010/2020             | `pending`                     |
+| Entry created or already booked          | `draft`                       |
+| Anything else (or flag off / zero gross) | `none`                        |
 
 The bridge **never fails `/pay` (docs "mark-paid")** — the run records the truth instead. Runs
 voided after payment leave the DRAFT entry for the Finance owner.
@@ -182,14 +182,14 @@ All paths below assume operator has `erp.payroll.ai.read` + `erp.payroll.read` +
 
 Per-scenario probes:
 
-| Scenario → likely cause | Probe |
-|---|---|
-| **Batch stuck `queued`/`processing`** — worker not claiming | `SELECT status, claimed_by, started_at FROM ai_payroll_batch_runs WHERE tenant_id=<t> AND status IN ('queued','processing');` then confirm worker process/lifespan and advance with `POST /tick`; a `claimed_by` never finishing implies a crashed worker mid-item |
-| **Batch `failed` / items `failed`** — compute error on an employee | `SELECT employee_id, status, error FROM ai_payroll_batch_items WHERE batch_id=<b> AND status='failed';` read the persisted item error and reconcile against `hr-payroll.md` error cases |
-| **Batch `aborted`** — preflight block | Batch detail `preflight.blocks` (settings / automation_enabled / run / period / roster). Check `erp_payroll_runs.status`, `erp_payroll_settings`, `erp_employees` active roster, and the overlapping-run query `find_overlapping_run` |
-| **No notifications despite `completed`** — fan-out gap | `SELECT event_type, recipient_user_id, subject, dedupe_key FROM ai_payroll_notifications WHERE tenant_id=<t> AND run_id=<r>;` (or inbox API) then `SELECT * FROM ai_payroll_notification_prefs WHERE user_id=<u>;` for `in_app_on`/`email_on` |
-| **`je_bridge_status=pending`** — chart gap | `SELECT code, name FROM erp_chart_of_accounts WHERE tenant_id=<t> AND code IN ('5010','2010','2020');` missing code(s) = the documented chart-of-accounts gap (backlog `finance-chart-of-accounts-gap.md`) |
-| **Schedule not firing** | `SELECT cron_expression, enabled, last_fired_at, next_run_at FROM ai_payroll_schedules WHERE tenant_id=<t>;` then `POST /tick` → `schedules_fired`; confirm worker ticking and the run's period doesn't conflict (`payroll-period-conflict` aborts the ensuing batch) |
+| Scenario → likely cause                                            | Probe                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Batch stuck `queued`/`processing`** — worker not claiming        | `SELECT status, claimed_by, started_at FROM ai_payroll_batch_runs WHERE tenant_id=<t> AND status IN ('queued','processing');` then confirm worker process/lifespan and advance with `POST /tick`; a `claimed_by` never finishing implies a crashed worker mid-item    |
+| **Batch `failed` / items `failed`** — compute error on an employee | `SELECT employee_id, status, error FROM ai_payroll_batch_items WHERE batch_id=<b> AND status='failed';` read the persisted item error and reconcile against `hr-payroll.md` error cases                                                                               |
+| **Batch `aborted`** — preflight block                              | Batch detail `preflight.blocks` (settings / automation_enabled / run / period / roster). Check `erp_payroll_runs.status`, `erp_payroll_settings`, `erp_employees` active roster, and the overlapping-run query `find_overlapping_run`                                 |
+| **No notifications despite `completed`** — fan-out gap             | `SELECT event_type, recipient_user_id, subject, dedupe_key FROM ai_payroll_notifications WHERE tenant_id=<t> AND run_id=<r>;` (or inbox API) then `SELECT * FROM ai_payroll_notification_prefs WHERE user_id=<u>;` for `in_app_on`/`email_on`                         |
+| **`je_bridge_status=pending`** — chart gap                         | `SELECT code, name FROM erp_chart_of_accounts WHERE tenant_id=<t> AND code IN ('5010','2010','2020');` missing code(s) = the documented chart-of-accounts gap (backlog `finance-chart-of-accounts-gap.md`)                                                            |
+| **Schedule not firing**                                            | `SELECT cron_expression, enabled, last_fired_at, next_run_at FROM ai_payroll_schedules WHERE tenant_id=<t>;` then `POST /tick` → `schedules_fired`; confirm worker ticking and the run's period doesn't conflict (`payroll-period-conflict` aborts the ensuing batch) |
 
 ## Mitigation
 

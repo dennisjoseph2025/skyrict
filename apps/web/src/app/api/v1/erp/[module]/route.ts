@@ -1,11 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import {
-    financeData,
-    reportsKpis,
-    type TablePayload,
-} from "@/lib/mock/erp";
+import { financeData, reportsKpis, type TablePayload } from "@/lib/mock/erp";
 
 export const dynamic = "force-dynamic";
 

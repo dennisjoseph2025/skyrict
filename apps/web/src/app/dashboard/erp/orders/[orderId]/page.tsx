@@ -2,14 +2,14 @@ import { RequirePermission } from "@/components/dashboard/shared/require-permiss
 import { OrderDetail } from "@/components/dashboard/erp/sales/order-detail";
 
 export default async function OrderDetailPage({
-  params,
+    params,
 }: {
-  params: Promise<{ orderId: string }>;
+    params: Promise<{ orderId: string }>;
 }) {
-  const { orderId } = await params;
-  return (
-    <RequirePermission permission="erp.sales.read">
-      <OrderDetail orderId={orderId} />
-    </RequirePermission>
-  );
+    const { orderId } = await params;
+    return (
+        <RequirePermission permission="erp.sales.read">
+            <OrderDetail orderId={orderId} />
+        </RequirePermission>
+    );
 }

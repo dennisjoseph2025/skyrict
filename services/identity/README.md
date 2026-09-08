@@ -4,27 +4,27 @@ Authentication, authorization, multi-tenancy, sessions, and audit for Skyrict.
 
 ## Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/auth/login` | Authenticate with email/password |
-| POST | `/api/v1/auth/signup/*` | Onboarding wizard (start, send-code, verify-code, password, check-email, check-slug, organization) |
-| POST | `/api/v1/auth/refresh` | Refresh access token |
-| POST | `/api/v1/auth/logout` | Revoke session |
-| POST | `/api/v1/auth/introspect` | Inspect a token |
-| GET | `/api/v1/users/me` | Get current user profile |
-| PUT | `/api/v1/users/me` | Update profile |
-| POST | `/api/v1/users/me/password` | Change password |
-| GET | `/api/v1/organizations/me` | Get current org |
-| POST | `/api/v1/organizations` | Create org |
-| GET | `/api/v1/sessions` | List active sessions |
-| DELETE | `/api/v1/sessions/{id}` | Revoke session |
-| DELETE | `/api/v1/sessions` | Revoke all sessions |
-| POST | `/api/v1/mfa/setup` | Initiate MFA setup |
-| POST | `/api/v1/mfa/verify` | Verify MFA code |
-| POST | `/api/v1/passkeys/register/start` | Start passkey registration |
-| POST | `/api/v1/sso/oidc/start` | Start OIDC SSO |
-| GET | `/api/v1/health` | Liveness probe |
-| GET | `/api/v1/ready` | Readiness probe |
+| Method | Path                              | Description                                                                                        |
+| ------ | --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| POST   | `/api/v1/auth/login`              | Authenticate with email/password                                                                   |
+| POST   | `/api/v1/auth/signup/*`           | Onboarding wizard (start, send-code, verify-code, password, check-email, check-slug, organization) |
+| POST   | `/api/v1/auth/refresh`            | Refresh access token                                                                               |
+| POST   | `/api/v1/auth/logout`             | Revoke session                                                                                     |
+| POST   | `/api/v1/auth/introspect`         | Inspect a token                                                                                    |
+| GET    | `/api/v1/users/me`                | Get current user profile                                                                           |
+| PUT    | `/api/v1/users/me`                | Update profile                                                                                     |
+| POST   | `/api/v1/users/me/password`       | Change password                                                                                    |
+| GET    | `/api/v1/organizations/me`        | Get current org                                                                                    |
+| POST   | `/api/v1/organizations`           | Create org                                                                                         |
+| GET    | `/api/v1/sessions`                | List active sessions                                                                               |
+| DELETE | `/api/v1/sessions/{id}`           | Revoke session                                                                                     |
+| DELETE | `/api/v1/sessions`                | Revoke all sessions                                                                                |
+| POST   | `/api/v1/mfa/setup`               | Initiate MFA setup                                                                                 |
+| POST   | `/api/v1/mfa/verify`              | Verify MFA code                                                                                    |
+| POST   | `/api/v1/passkeys/register/start` | Start passkey registration                                                                         |
+| POST   | `/api/v1/sso/oidc/start`          | Start OIDC SSO                                                                                     |
+| GET    | `/api/v1/health`                  | Liveness probe                                                                                     |
+| GET    | `/api/v1/ready`                   | Readiness probe                                                                                    |
 
 ## Local Development
 

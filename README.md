@@ -89,19 +89,19 @@ Why this layering: `api → services → repositories → models`. Business logi
 
 ## Tech Stack
 
-| Layer | Choice |
-|-------|--------|
-| Python package manager | **uv** (workspaces, single lockfile) |
-| Language | Python 3.12+ / TypeScript 5.7+ |
-| Web framework | FastAPI (async, type-safe, OpenAPI) |
-| ORM | SQLAlchemy 2.0 (async) + Alembic |
-| Frontend | Next.js 15 / React 19 / shadcn/ui |
-| Frontend tooling | pnpm + Turborepo |
-| OLTP | PostgreSQL 16 + Row-Level Security |
-| Cache | Redis 7 |
-| Event bus | Kafka 3.x (KRaft mode) - deferred until 3+ services need async events |
-| CI/CD | GitHub Actions (path-filtered) |
-| Containers | Docker |
+| Layer                  | Choice                                                                |
+| ---------------------- | --------------------------------------------------------------------- |
+| Python package manager | **uv** (workspaces, single lockfile)                                  |
+| Language               | Python 3.12+ / TypeScript 5.7+                                        |
+| Web framework          | FastAPI (async, type-safe, OpenAPI)                                   |
+| ORM                    | SQLAlchemy 2.0 (async) + Alembic                                      |
+| Frontend               | Next.js 15 / React 19 / shadcn/ui                                     |
+| Frontend tooling       | pnpm + Turborepo                                                      |
+| OLTP                   | PostgreSQL 16 + Row-Level Security                                    |
+| Cache                  | Redis 7                                                               |
+| Event bus              | Kafka 3.x (KRaft mode) - deferred until 3+ services need async events |
+| CI/CD                  | GitHub Actions (path-filtered)                                        |
+| Containers             | Docker                                                                |
 
 ---
 

@@ -5,16 +5,16 @@ import { RequirePermission } from "@/components/dashboard/shared/require-permiss
 import { ActivitiesTable } from "@/components/dashboard/erp/crm/activities-table";
 
 export default function CrmActivitiesPage() {
-  return (
-    <RequirePermission permission="erp.crm.read">
-      <div className="space-y-6">
-        <PageHeader
-          title="Activities"
-          description="Every call, meeting, email, and follow-up filter by what needs attention today."
-          icon={CalendarCheck2}
-        />
-        <ActivitiesTable />
-      </div>
-    </RequirePermission>
-  );
+    return (
+        <RequirePermission permission="erp.crm.read">
+            <div className="space-y-6">
+                <PageHeader
+                    title="Activities"
+                    description="Every call, meeting, email, and follow-up filter by what needs attention today."
+                    icon={CalendarCheck2}
+                />
+                <ActivitiesTable />
+            </div>
+        </RequirePermission>
+    );
 }

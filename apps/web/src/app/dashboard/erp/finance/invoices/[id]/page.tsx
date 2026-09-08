@@ -1,10 +1,10 @@
 import { InvoiceDetail } from "@/features/finance/invoice-detail";
 
 export default async function FinanceInvoiceDetailPage({
-  params,
+    params,
 }: {
-  params: Promise<{ id: string }>;
+    params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  return <InvoiceDetail invoiceId={id} />;
+    const { id } = await params;
+    return <InvoiceDetail invoiceId={id} />;
 }

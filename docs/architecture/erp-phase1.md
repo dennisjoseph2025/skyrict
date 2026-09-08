@@ -20,7 +20,7 @@ Every module is tenant-scoped, permission-gated, event-capable, and exposed thro
 
 - Procurement / purchasing (depends on the same stock/order primitives; deferred)
 - Production/manufacturing, multi-currency, consolidations, statutory filing
-- Payroll *processing* (net-of-tax computation is external; we record pay runs and emit to a ledger)
+- Payroll _processing_ (net-of-tax computation is external; we record pay runs and emit to a ledger)
 - Replacing identity - `services/core` consumes, never re-implements, auth
 - Kafka as a hard runtime dependency in Phase 1 (see "Events", below)
 
@@ -112,16 +112,16 @@ Every module in `features/<module>/` follows the identity convention:
 
 - `services/core` is **stateless with respect to identity**: it verifies the identity-issued access JWT (same issuer/audience, key from `JWT_PUBLIC_KEY`), checks `sid` claim validity only at the BFF (identity already enforces revocation), and never mints its own tokens.
 - **Permissions come from the JWT `permissions` claim** (identity already exposes `users/me/access` → `{roles, permissions}`). `core/core/permissions.py` keeps the ERP permission catalog and a `require_permission("erp.invoice.approve")` FastAPI dependency, mirroring `services/identity/src/identity/core/permissions.py`.
-- **Session-scoped perms vs plan gating:** permission checks gate *who* can act; plan gating (from onboarding/billing) gates *whether the tenant has the module*. Both are enforced server-side; the sidebar filter is UI only.
+- **Session-scoped perms vs plan gating:** permission checks gate _who_ can act; plan gating (from onboarding/billing) gates _whether the tenant has the module_. Both are enforced server-side; the sidebar filter is UI only.
 - **Permissions the workspace already has** (`identity/core/permissions.py`): `erp.invoice.read`, `erp.invoice.approve`, `erp.purchase.approve`, plus `billing.manage`. Phase 1 **adds** the ERP permission keys below to the identity catalog (and to the seeded `tenant_owner`/`organization_admin`/`department_manager` role wiring) via a migration + seed update:
 
-| Domain | Read | Write | Sensitive |
-|---|---|---|---|
-| Finance & Accounting | `erp.finance.read` | `erp.finance.write` | `erp.finance.approve` |
-| Sales & CRM | `erp.sales.read` | `erp.sales.write` | `erp.sales.approve` |
+| Domain                | Read                 | Write                 | Sensitive               |
+| --------------------- | -------------------- | --------------------- | ----------------------- |
+| Finance & Accounting  | `erp.finance.read`   | `erp.finance.write`   | `erp.finance.approve`   |
+| Sales & CRM           | `erp.sales.read`     | `erp.sales.write`     | `erp.sales.approve`     |
 | Inventory & Warehouse | `erp.inventory.read` | `erp.inventory.write` | `erp.inventory.approve` |
-| HR & Payroll | `erp.hr.read` | `erp.hr.write` | `erp.hr.payroll.run` |
-| Reporting & Analytics | `erp.reports.read` | - | - |
+| HR & Payroll          | `erp.hr.read`        | `erp.hr.write`        | `erp.hr.payroll.run`    |
+| Reporting & Analytics | `erp.reports.read`   | -                     | -                       |
 
 - **Role → permission mapping (proposed seed):** `tenant_owner` / `organization_admin` get all ERP permissions; `department_manager` gets `erp.inventory.*`, `erp.sales.*`, `erp.hr.read`; `standard_user` gets `erp.*.read`; `auditor` gets `erp.*.read` + `erp.reports.read`. Fine-grained per-user grants are configured in identity (Members) and enforced here.
 - Every ERP mutation is **audited** via the identity audit integration (module `core`, action, resource id, actor, tenant).
@@ -133,14 +133,14 @@ Every module in `features/<module>/` follows the identity convention:
 - Events are emitted from **services, after commit**, using the BaseEvent envelope, keyed by `tenant_id`.
 - Reserved topics already named in the lib: `finance.journal_entry.posted`, `inventory.stock.level_changed`. Proposed Phase-1 additions:
 
-| Topic | Emitted by | Consumer intent |
-|---|---|---|
-| `finance.journal_entry.posted` | Finance service | Reporting refresh, cash-flow feed (reserved) |
-| `inventory.stock.level_changed` | Inventory service | Reorder alerts, reporting (reserved) |
-| `sales.order.confirmed` | Sales service | Inventory reservation, reporting |
-| `crm.lead.status_changed` | CRM service | Reporting, agent hooks |
-| `hr.employee.onboarded` | HR service | Payroll eligibility, reporting |
-| `reporting.snapshot.refreshed` | Reporting service | Dashboard invalidation |
+| Topic                           | Emitted by        | Consumer intent                              |
+| ------------------------------- | ----------------- | -------------------------------------------- |
+| `finance.journal_entry.posted`  | Finance service   | Reporting refresh, cash-flow feed (reserved) |
+| `inventory.stock.level_changed` | Inventory service | Reorder alerts, reporting (reserved)         |
+| `sales.order.confirmed`         | Sales service     | Inventory reservation, reporting             |
+| `crm.lead.status_changed`       | CRM service       | Reporting, agent hooks                       |
+| `hr.employee.onboarded`         | HR service        | Payroll eligibility, reporting               |
+| `reporting.snapshot.refreshed`  | Reporting service | Dashboard invalidation                       |
 
 ### Error handling, pagination, idempotency
 
@@ -165,12 +165,14 @@ Each module is a feature package under `src/core/features/<module>/` (`router.py
 **Entities.** `erp_chart_of_accounts` (code, name, type: asset/liability/equity/revenue/expense, is_active), `erp_journal_entries` (date, memo, status: draft/posted, source, source_ref) + `erp_journal_lines` (account, debit, credit, Money), `erp_invoices` (customer, number, issue_date, due_date, status: draft/sent/partial/paid/written_off, Money) + `erp_invoice_lines`, `erp_payments` (invoice_id, amount, method, received_at).
 
 **Rules (service layer).**
+
 - A journal entry is balanced (Σ debit == Σ credit) and immutable once `posted`.
 - Invoicing auto-generates the `accounts_receivable` / `sales_revenue` journal lines on posting.
 - Payments apply to an invoice in FIFO of `due_date`; overpayment opens a credit balance.
 - `Money` arithmetic is Decimal; currency is validated against `erp_currencies`.
 
 **Endpoints (draft).**
+
 - `GET/POST /api/v1/finance/chart-of-accounts` (`erp.finance.read` / `.write`)
 - `GET/POST /api/v1/finance/journal-entries` (.read/.write), `POST .../{id}/post` (`erp.finance.approve`)
 - `GET/POST /api/v1/finance/invoices`, `POST .../{id}/approve` (`erp.finance.approve`), `POST .../{id}/payments`, `GET .../{id}`
@@ -186,11 +188,13 @@ Each module is a feature package under `src/core/features/<module>/` (`router.py
 **Entities.** `erp_leads` (source, status: new/contacted/qualified/lost), `erp_opportunities` (lead_id, stage: qualification/proposal/negotiation/won/lost, amount, expected_close_date, owner_id), `erp_customers` (name, email, phone, tax_id, payment_terms, credit_limit), `erp_sales_orders` (customer_id, status: draft/confirmed/fulfilled/cancelled, order_date, Money) + `erp_sales_order_lines` (item_id, qty, unit_price, Money).
 
 **Rules.**
+
 - Winning an opportunity can promote it to a customer; confirmation of an order emits `sales.order.confirmed` (inventory reservation is a Phase-1 async/outbox subscriber or direct service call within `core`).
 - Credit-limit check on order confirmation for `on_credit` terms.
 - `owner_id` references identity users; owners see their own pipeline, managers see the team (server-side filter).
 
 **Endpoints (draft).**
+
 - `GET/POST /api/v1/crm/leads`, `PATCH .../{id}/status`
 - `GET/POST /api/v1/crm/opportunities`, `PATCH .../{id}/stage`
 - `GET/POST /api/v1/crm/customers`
@@ -207,12 +211,14 @@ Each module is a feature package under `src/core/features/<module>/` (`router.py
 **Entities.** `erp_products` (sku, name, category, unit, cost_price, sell_price, reorder_point, is_active), `erp_warehouses` (name, location, is_active), `erp_stock_levels` (product_id, warehouse_id, qty_on_hand, qty_reserved), `erp_stock_movements` (product_id, warehouse_id, type: receive/adjust/transfer/sale/return, qty, ref_type, ref_id, occurred_at, reason).
 
 **Rules.**
+
 - Stock is a **ledger**, not a stored mutable counter: every change is an `erp_stock_movements` row; `qty_on_hand` is the derived sum (materialized in `erp_stock_levels` for reads, recomputed on movement, or via materialized view - decision recorded in ADR-000 core, default to recompute-on-write for Phase 1).
 - `qty_on_hand` never goes negative; transfers are two movements (source −, destination +) in one transaction.
 - Sale/order fulfilment and returns hook here; adjustment requires a `reason` and `erp.inventory.approve` when the delta exceeds a threshold (configurable).
 - Reorder alert when `qty_on_hand ≤ reorder_point` → emits `inventory.stock.level_changed` and surfaces in Reporting.
 
 **Endpoints (draft).**
+
 - `GET/POST /api/v1/inventory/products`, `GET/POST /api/v1/inventory/warehouses`
 - `GET /api/v1/inventory/stock` (per product/warehouse)
 - `POST /api/v1/inventory/stock/adjustments` (`erp.inventory.write`, large deltas `.approve`), `POST /api/v1/inventory/stock/transfers`, `GET /api/v1/inventory/stock/movements`
@@ -229,11 +235,13 @@ Each module is a feature package under `src/core/features/<module>/` (`router.py
 **Entities.** `erp_employees` (user_id, employee_no, department, job_title, hire_date, status: active/terminated, salary, currency, tax_id), `erp_leave_requests` (employee_id, type, from, to, status: requested/approved/rejected, balance), `erp_leave_balances` (employee_id, type, year, accrued, used), `erp_timesheets` (employee_id, period_start, period_end, total_hours, status), `erp_payroll_runs` (period, status: draft/approved/paid, currency, total) + `erp_payroll_entries` (run_id, employee_id, gross, deductions, net, Money).
 
 **Rules.**
+
 - Leave approval gates on remaining balance (`erp.leave.approve` equivalent → reuse `erp.hr.write` in Phase 1 unless an explicit approve key is wanted; keep `erp.hr.payroll.run` separate).
 - Payroll run computes gross from salary/timesheets, applies configured deductions, produces entries, and posts the payroll expense journal entry (Finance) on approval.
 - PII discipline: `tax_id` encrypted at rest (reuse identity's field-level encryption approach); employee records are tenant-scoped.
 
 **Endpoints (draft).**
+
 - `GET/POST /api/v1/hr/employees`, `PATCH .../{id}/status`
 - `GET/POST /api/v1/hr/leave/requests`, `POST .../{id}/approve|reject`
 - `POST /api/v1/hr/timesheets`, `GET /api/v1/hr/timesheets`
@@ -250,17 +258,20 @@ Each module is a feature package under `src/core/features/<module>/` (`router.py
 **Entities.** `erp_report_definitions` (slug, title, module, sql/dataset ref, params), `erp_report_snapshots` (definition_id, period, payload jsonb, generated_at), `erp_dashboards` (title, layout jsonb, tenant_default flag).
 
 **Reporting view (concrete Phase-1 set).**
+
 - **Financial:** P&L by period, AR aging, cash received
 - **Sales/CRM:** pipeline value by stage, orders by period, top customers
 - **Inventory:** stock on hand vs reorder point, movement by type, slow movers
 - **HR:** headcount by department, leave usage, payroll cost by period
 
 **Rules.**
+
 - Views are SQL materialized via a thin query layer (parameterized, tenant-filtered, **read-only**), never raw SQL passed from clients.
 - Snapshots are stored (`erp_report_snapshots`) for trend/backfill and scheduled refresh (outbox/background job in Phase 1).
 - CSV/JSON export is generated server-side and streamed; exports are audited.
 
 **Endpoints (draft).**
+
 - `GET /api/v1/reporting/dashboard` (default tenant dashboard), `PUT /api/v1/reporting/dashboard` (layout)
 - `GET /api/v1/reporting/{definition_slug}?from=&to=`, `GET /api/v1/reporting/{definition_slug}/export.csv`
 - `POST /api/v1/reporting/snapshots` (manual refresh), `GET /api/v1/reporting/snapshots/{id}`

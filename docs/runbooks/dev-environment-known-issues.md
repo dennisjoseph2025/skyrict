@@ -20,10 +20,10 @@ tenant_owner) to allow headless credential login. Same was done earlier for
 
 Current DB state (`users` table in `skyrict_identity`):
 
-| account | mfa_enabled | mfa_secret |
-|---------|-------------|------------|
-| `abhikrishna616@gmail.com` | **false** | set |
-| `admin@bridgeon.io` | true | set |
+| account                    | mfa_enabled | mfa_secret |
+| -------------------------- | ----------- | ---------- |
+| `abhikrishna616@gmail.com` | **false**   | set        |
+| `admin@bridgeon.io`        | true        | set        |
 
 Notes:
 
@@ -65,8 +65,8 @@ that teammate's branch actually merges.
 A re-seed of `skyrict_identity` left the `bridgeon-solutions` tenant with its
 users but **no RBAC rows** (zero `roles`, `memberships`, and `user_roles` for
 that tenant). Symptom: `abhikrishna616@gmail.com` logs in fine but the
-frontend shows *"No spaces available yet. Contact a workspace owner to grant
-you access."* — there is no active membership/role scope behind the user.
+frontend shows _"No spaces available yet. Contact a workspace owner to grant
+you access."_ — there is no active membership/role scope behind the user.
 
 Restored on `2026-09-03` by running an idempotent script through the app's own
 repositories (`RoleRepository` + `MembershipRepository`), mirroring

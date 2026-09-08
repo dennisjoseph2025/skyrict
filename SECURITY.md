@@ -3,7 +3,7 @@
 ## Supported Versions
 
 | Version | Supported          |
-|---------|--------------------|
+| ------- | ------------------ |
 | 0.x     | Active development |
 
 ## Reporting a Vulnerability
@@ -29,6 +29,7 @@ We will acknowledge receipt within 48 hours and aim to provide a resolution time
 ### Scope
 
 In scope:
+
 - Authentication and authorization bypasses
 - SQL injection, XSS, CSRF, or other injection attacks
 - Privilege escalation (including agent guardrail bypasses)
@@ -38,6 +39,7 @@ In scope:
 - Denial of service vectors
 
 Out of scope:
+
 - Social engineering attacks
 - Third-party dependency vulnerabilities (report upstream)
 - Issues requiring physical access to infrastructure

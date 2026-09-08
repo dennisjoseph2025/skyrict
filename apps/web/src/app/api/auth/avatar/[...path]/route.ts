@@ -16,45 +16,48 @@ export const dynamic = "force-dynamic";
  * outside its tenant. The generic /api/v1 proxy cannot be used here because it
  * wraps responses in JSON - this route passes the binary body straight through.
  */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FILENAME_RE = /^[a-f0-9]{32}\.webp$/;
 
 export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ path: string[] }> },
+    request: NextRequest,
+    { params }: { params: Promise<{ path: string[] }> },
 ) {
-  const slug = resolveTenantSlug(request.headers.get("host"));
-  if (!slug) return new NextResponse(null, { status: 404 });
+    const slug = resolveTenantSlug(request.headers.get("host"));
+    if (!slug) return new NextResponse(null, { status: 404 });
 
-  const segments = (await params).path;
-  const [userId, filename] = segments;
-  if (
-    segments.length !== 2 ||
-    !UUID_RE.test(userId ?? "") ||
-    !FILENAME_RE.test(filename ?? "")
-  ) {
-    return new NextResponse(null, { status: 404 });
-  }
+    const segments = (await params).path;
+    const [userId, filename] = segments;
+    if (
+        segments.length !== 2 ||
+        !UUID_RE.test(userId ?? "") ||
+        !FILENAME_RE.test(filename ?? "")
+    ) {
+        return new NextResponse(null, { status: 404 });
+    }
 
-  let response: Response;
-  try {
-    response = await fetch(
-      `${apiBase()}/api/v1/avatars/${encodeURIComponent(userId)}/${encodeURIComponent(filename)}`,
-      { headers: { "X-Tenant-Slug": slug }, cache: "no-store" },
-    );
-  } catch {
-    return new NextResponse(null, { status: 404 });
-  }
+    let response: Response;
+    try {
+        response = await fetch(
+            `${apiBase()}/api/v1/avatars/${encodeURIComponent(userId)}/${encodeURIComponent(filename)}`,
+            { headers: { "X-Tenant-Slug": slug }, cache: "no-store" },
+        );
+    } catch {
+        return new NextResponse(null, { status: 404 });
+    }
 
-  if (!response.ok) return new NextResponse(null, { status: response.status });
+    if (!response.ok)
+        return new NextResponse(null, { status: response.status });
 
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  return new NextResponse(bytes, {
-    status: 200,
-    headers: {
-      "Content-Type": response.headers.get("content-type") ?? "image/webp",
-      "Content-Length": String(bytes.byteLength),
-      "Cache-Control": "public, max-age=31536000, immutable",
-    },
-  });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return new NextResponse(bytes, {
+        status: 200,
+        headers: {
+            "Content-Type":
+                response.headers.get("content-type") ?? "image/webp",
+            "Content-Length": String(bytes.byteLength),
+            "Cache-Control": "public, max-age=31536000, immutable",
+        },
+    });
 }

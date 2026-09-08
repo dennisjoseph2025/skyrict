@@ -15,12 +15,12 @@ This document is the complete, unambiguous specification for building the Financ
 
 ### 1.1 What this module is
 
-Finance is the **system of record for money**. Other modules *promise* things (an order promises a sale; a delivery promises stock movement). Finance records the *truth*: every dollar of revenue, expense, asset, and liability - under double-entry bookkeeping, so the books always balance.
+Finance is the **system of record for money**. Other modules _promise_ things (an order promises a sale; a delivery promises stock movement). Finance records the _truth_: every dollar of revenue, expense, asset, and liability - under double-entry bookkeeping, so the books always balance.
 
 Three rules govern everything here:
 
 1. **Double-entry, always.** Every money event is written twice (money leaves one account, enters another). An entry that does not balance is refused.
-2. **Accrual basis.** Revenue is recognized when it is *earned* (invoice approved), not when cash arrives. Payment just moves money between assets.
+2. **Accrual basis.** Revenue is recognized when it is _earned_ (invoice approved), not when cash arrives. Payment just moves money between assets.
 3. **Exact arithmetic.** All money is stored as exact decimal `NUMERIC(18,4)`. Never floating point. `0.1 + 0.2` must be exactly `0.3`.
 
 ### 1.2 Module architecture
@@ -77,12 +77,12 @@ services/core/src/core/
 
 ### 2.2 Core components
 
-| Layer | Job | Plain-English |
-|---|---|---|
-| Router | Validate HTTP, call service, return JSON | Front desk - takes requests, no real decisions |
-| Service | All business rules: balance gates, closed-period gates, state transitions, numbering | Manager - decides what may happen |
-| Repository | Read/write rows, atomic status updates | Filing clerk - the only one allowed to touch the cabinet |
-| Ports | Declares the invoicing interface other modules call | Contract window - "how to request an invoice" |
+| Layer      | Job                                                                                  | Plain-English                                            |
+| ---------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| Router     | Validate HTTP, call service, return JSON                                             | Front desk - takes requests, no real decisions           |
+| Service    | All business rules: balance gates, closed-period gates, state transitions, numbering | Manager - decides what may happen                        |
+| Repository | Read/write rows, atomic status updates                                               | Filing clerk - the only one allowed to touch the cabinet |
+| Ports      | Declares the invoicing interface other modules call                                  | Contract window - "how to request an invoice"            |
 
 Why: business rules are testable without a database; modules can't bypass each other's rules.
 
@@ -108,11 +108,11 @@ Same mechanism the sales module uses. The database enforces it even if applicati
 
 **Permissions used by this module** (registered in identity in the shared permissions PR - the same one that adds `erp.crm.*` and `erp.sales.*`):
 
-| Key | Role holders | Unlocks |
-|---|---|---|
-| `erp.finance.read` | org_admin, dept_manager, standard_user, auditor | View entries, invoices, trial balance, reports |
-| `erp.finance.write` | org_admin, dept_manager, standard_user | Create drafts, invoices, payments |
-| `erp.finance.approve` | org_admin | **Post** entries, **approve** invoices, close periods (the money moments) |
+| Key                   | Role holders                                    | Unlocks                                                                   |
+| --------------------- | ----------------------------------------------- | ------------------------------------------------------------------------- |
+| `erp.finance.read`    | org_admin, dept_manager, standard_user, auditor | View entries, invoices, trial balance, reports                            |
+| `erp.finance.write`   | org_admin, dept_manager, standard_user          | Create drafts, invoices, payments                                         |
+| `erp.finance.approve` | org_admin                                       | **Post** entries, **approve** invoices, close periods (the money moments) |
 
 > **Note:** [ERP-FND-002] registers `erp.finance.{read,write}` in the Phase-1 identity migration. `erp.finance.approve` must be added (small FND-002 follow-up or the finance migration) before the approve endpoints can grant it. Open point: confirm `auditor` read grant matches the role-seed convention in FND-002.
 
@@ -122,23 +122,23 @@ Same mechanism the sales module uses. The database enforces it even if applicati
 
 Finance announces what it did - but only **after** the database commit succeeds. A failed transaction never emits an event.
 
-| Event | When it fires | Meaning |
-|---|---|---|
-| `finance.journal_entry.posted` | an entry is posted | A balanced entry is now history |
-| `finance.invoice.created` | an invoice is issued | A bill exists (e.g. from a sales order) |
-| `finance.invoice.approved` | an invoice is approved | Revenue is now recognized |
-| `finance.payment.applied` | a payment is applied | Cash came in; AR went down |
+| Event                          | When it fires          | Meaning                                 |
+| ------------------------------ | ---------------------- | --------------------------------------- |
+| `finance.journal_entry.posted` | an entry is posted     | A balanced entry is now history         |
+| `finance.invoice.created`      | an invoice is issued   | A bill exists (e.g. from a sales order) |
+| `finance.invoice.approved`     | an invoice is approved | Revenue is now recognized               |
+| `finance.payment.applied`      | a payment is applied   | Cash came in; AR went down              |
 
 Dev: `KAFKA_BROKERS` unset → producers just log (no-op). Later: real Kafka.
 
 ### 2.6 Errors, pagination, idempotency
 
 - **Errors:** RFC 7807 envelopes - code, message, details, request_id.
-- **Pagination:** repo's existing offset/limit `ListResponse` convention (matches identity). *(Sales doc proposes cursor-based - flag for a team decision.)*
+- **Pagination:** repo's existing offset/limit `ListResponse` convention (matches identity). _(Sales doc proposes cursor-based - flag for a team decision.)_
 - **Idempotency - the "never record money twice" rule.** Three layers:
-  1. Every automatically-created entry is stamped with **where it came from** (e.g. `source='invoice'` + invoice id). The database refuses to create two entries with the same stamp.
-  2. State transitions only succeed if the row is still in the expected state (e.g. only a *draft* can be *issued*). Replays find the state already changed and return the existing result.
-  3. Re-requesting an invoice for the same order returns the **existing** invoice.
+    1. Every automatically-created entry is stamped with **where it came from** (e.g. `source='invoice'` + invoice id). The database refuses to create two entries with the same stamp.
+    2. State transitions only succeed if the row is still in the expected state (e.g. only a _draft_ can be _issued_). Replays find the state already changed and return the existing result.
+    3. Re-requesting an invoice for the same order returns the **existing** invoice.
 
 ### 2.7 Cross-module communication
 
@@ -210,7 +210,7 @@ Validation: `account_type` in {asset, liability, equity, revenue, expense}; `cod
 }
 ```
 
-Validation: every `account_code` exists + is active in the tenant's COA (else 404); each line **debit XOR credit** (exactly one set, non-zero); sum(debit) == sum(credit) (else 422). Entries are created as `draft` - nothing real yet. *(Rent is accrued to Accounts Payable - expense recognized now, paid later.)*
+Validation: every `account_code` exists + is active in the tenant's COA (else 404); each line **debit XOR credit** (exactly one set, non-zero); sum(debit) == sum(credit) (else 422). Entries are created as `draft` - nothing real yet. _(Rent is accrued to Accounts Payable - expense recognized now, paid later.)_
 
 #### post_journal_entry
 
@@ -312,7 +312,7 @@ Rule: **never hard-delete** accounts referenced by history; deactivate only. Del
 }
 ```
 
-The ledger proof - DEALER-based; total_debit == total_credit is an invariant. *(Example uses two transactions: 5000 rent accrued to AP, and a 1250 invoice approval; §5.2.)*
+The ledger proof - DEALER-based; total_debit == total_credit is an invariant. _(Example uses two transactions: 5000 rent accrued to AP, and a 1250 invoice approval; §5.2.)_
 
 #### get_pnl_report
 
@@ -472,15 +472,15 @@ Rule: posting a journal entry with `entry_date` inside a **closed** period → 4
 
 All tables: `id UUID`, `tenant_id UUID NOT NULL`, `created_at`, `updated_at`; money `NUMERIC(18,4)`; RLS policy on every table; composite tenant-scoped FKs.
 
-| Table | Columns (key ones) | Rules |
-|---|---|---|
-| `erp_chart_of_accounts` | `code`, `name`, `account_type`, `is_active` | UNIQUE(tenant_id, code); type in 5 categories |
-| `erp_fiscal_periods` | `name`, `start_date`, `end_date`, `is_closed` | UNIQUE(tenant_id, name) |
-| `erp_journal_entries` | `entry_date`, `memo`, `status`, `source`, `source_ref`, `posted_at`, `posted_by_user_id` | UNIQUE(tenant_id, source, source_ref) - the idempotency lock |
-| `erp_journal_lines` | `entry_id`, `account_id`, `debit`, `credit`, `currency`, `exchange_rate` | composite FK (tenant_id, entry_id), (tenant_id, account_id); CHECK debit XOR credit; no zero lines; `currency` = tenant default in v1 (reserved for multi-currency) |
-| `erp_invoices` | `invoice_number`, `customer_id` (UUID ref), `invoice_date`, `due_date`, `status`, `total` | UNIQUE(tenant_id, invoice_number) |
-| `erp_invoice_lines` | `line_no`, `description`, `account_id`, `quantity`, `unit_price`, `amount` | composite FK (tenant_id, invoice_id) + (tenant_id, account_id) |
-| `erp_payments` | `payment_number`, `invoice_id`, `amount`, `method`, `paid_at`, `status` | composite FK (tenant_id, invoice_id); UNIQUE(tenant_id, source, source_ref) |
+| Table                   | Columns (key ones)                                                                        | Rules                                                                                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `erp_chart_of_accounts` | `code`, `name`, `account_type`, `is_active`                                               | UNIQUE(tenant_id, code); type in 5 categories                                                                                                                       |
+| `erp_fiscal_periods`    | `name`, `start_date`, `end_date`, `is_closed`                                             | UNIQUE(tenant_id, name)                                                                                                                                             |
+| `erp_journal_entries`   | `entry_date`, `memo`, `status`, `source`, `source_ref`, `posted_at`, `posted_by_user_id`  | UNIQUE(tenant_id, source, source_ref) - the idempotency lock                                                                                                        |
+| `erp_journal_lines`     | `entry_id`, `account_id`, `debit`, `credit`, `currency`, `exchange_rate`                  | composite FK (tenant_id, entry_id), (tenant_id, account_id); CHECK debit XOR credit; no zero lines; `currency` = tenant default in v1 (reserved for multi-currency) |
+| `erp_invoices`          | `invoice_number`, `customer_id` (UUID ref), `invoice_date`, `due_date`, `status`, `total` | UNIQUE(tenant_id, invoice_number)                                                                                                                                   |
+| `erp_invoice_lines`     | `line_no`, `description`, `account_id`, `quantity`, `unit_price`, `amount`                | composite FK (tenant_id, invoice_id) + (tenant_id, account_id)                                                                                                      |
+| `erp_payments`          | `payment_number`, `invoice_id`, `amount`, `method`, `paid_at`, `status`                   | composite FK (tenant_id, invoice_id); UNIQUE(tenant_id, source, source_ref)                                                                                         |
 
 Not here: customers (CRM owns), orders (sales owns), floats, hard-deletable history, vendor bills / AP (deferred), tax lines (deferred).
 
@@ -537,23 +537,23 @@ From `draft`/`issued` only in v1. Posted history is never deleted - v1.1 adds re
 
 ## 7. API reference (summary)
 
-| Method | Path | Permission |
-|---|---|---|
-| GET/POST | `/finance/chart-of-accounts` | read / write |
-| POST | `/finance/chart-of-accounts/{id}/deactivate` | write |
-| GET/POST | `/finance/journal-entries` | read / write |
-| POST | `/finance/journal-entries/{id}/post` | approve |
-| POST | `/finance/journal-entries/{id}/void` | write |
-| GET | `/finance/journal-entries/{id}` | read |
-| GET/POST | `/finance/fiscal-periods` | read / write |
-| POST | `/finance/fiscal-periods/{id}/close` | approve |
-| GET | `/finance/trial-balance?as_of=` | read |
-| GET | `/finance/reports/pnl`, `/finance/reports/balance-sheet` | read |
-| GET/POST | `/finance/invoices` | read / write |
-| POST | `/finance/invoices/{id}/issue` | write |
-| POST | `/finance/invoices/{id}/approve` | approve |
-| POST | `/finance/invoices/{id}/void` | write |
-| POST | `/finance/payments` | write |
+| Method   | Path                                                     | Permission   |
+| -------- | -------------------------------------------------------- | ------------ |
+| GET/POST | `/finance/chart-of-accounts`                             | read / write |
+| POST     | `/finance/chart-of-accounts/{id}/deactivate`             | write        |
+| GET/POST | `/finance/journal-entries`                               | read / write |
+| POST     | `/finance/journal-entries/{id}/post`                     | approve      |
+| POST     | `/finance/journal-entries/{id}/void`                     | write        |
+| GET      | `/finance/journal-entries/{id}`                          | read         |
+| GET/POST | `/finance/fiscal-periods`                                | read / write |
+| POST     | `/finance/fiscal-periods/{id}/close`                     | approve      |
+| GET      | `/finance/trial-balance?as_of=`                          | read         |
+| GET      | `/finance/reports/pnl`, `/finance/reports/balance-sheet` | read         |
+| GET/POST | `/finance/invoices`                                      | read / write |
+| POST     | `/finance/invoices/{id}/issue`                           | write        |
+| POST     | `/finance/invoices/{id}/approve`                         | approve      |
+| POST     | `/finance/invoices/{id}/void`                            | write        |
+| POST     | `/finance/payments`                                      | write        |
 
 All under base `/api/v1`, tenant-isolated, RFC 7807 errors.
 
@@ -561,13 +561,13 @@ All under base `/api/v1`, tenant-isolated, RFC 7807 errors.
 
 ## 8. Common error codes
 
-| Code | Meaning |
-|---|---|
-| 401 | Missing/invalid/expired JWT |
-| 403 | Tenant mismatch or missing permission |
-| 404 | Unknown id / code / other tenant (never leak existence) |
-| 409 | Illegal state transition, closed period, duplicate (source, source_ref) / invoice number / COA code, deactivating a referenced account |
-| 422 | Unbalanced entry, bad line (both/neither debit & credit, zero amount), amount > outstanding |
+| Code | Meaning                                                                                                                                |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 401  | Missing/invalid/expired JWT                                                                                                            |
+| 403  | Tenant mismatch or missing permission                                                                                                  |
+| 404  | Unknown id / code / other tenant (never leak existence)                                                                                |
+| 409  | Illegal state transition, closed period, duplicate (source, source_ref) / invoice number / COA code, deactivating a referenced account |
+| 422  | Unbalanced entry, bad line (both/neither debit & credit, zero amount), amount > outstanding                                            |
 
 Idempotent replays of post/approve/issue/pay return **200 with the existing result**, never a 409.
 
@@ -625,21 +625,22 @@ Frontend calls `/api/*`; the BFF routes the `finance` segment to `services/core:
 ## 14. Build order
 
 **Block A (shared / team):**
+
 1. `services/core` skeleton PR - [ERP-FND-001] (already tracked)
 2. Identity permissions PR - [ERP-FND-002] registers `erp.{crm,sales,finance,inventory,hr}.*` (read/write families; finance `approve` lands per open point 5)
 3. BFF routing - `finance` segment → core:8001 (landed in FIN-UI-003)
 
 **Block B (Dennis-owned):**
 
-| # | Deliverable | Contains | Verify by |
-|---|---|---|---|
-| F1 | Domain value objects | Money (Decimal, never float), AccountType (5 types), EntryStatus, InvoiceStatus | unit tests: money math, type rules |
-| F2 | Database models + migration 0004 | All 7 `erp_*` tables - composite FKs, CHECKs (debit XOR credit), RLS policies, UNIQUE constraints | `alembic upgrade head`; two-tenant row visibility |
-| F3 | Repository + service | atomic state transitions (`WHERE status=...`), posting gates (balance, closed period), numbering INV-/PMT- | unit tests with a fake repository |
-| F4 | HTTP layer | schemas.py, router.py, deps wiring (require_permission, tenant context) - COA, journal entries, fiscal periods, trial balance, reports | integration API tests |
-| F5 | Cross-module invoicing | create_from_order (idempotent, issued only), issue, approve (accrual entry), apply payment | integration: sales fulfil → invoice → revenue → payment |
-| F6 | Events | finance.journal_entry.posted, invoice.created, invoice.approved, payment.applied - after commit, no-op producers in dev | unit: event fires only after commit |
-| F7 | Tests + CI + Makefile | unit / integration / two-tenant isolation suites, factories, dev-core / test-core / migrate-core, import-lint guard | full CI green |
+| #   | Deliverable                      | Contains                                                                                                                               | Verify by                                               |
+| --- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| F1  | Domain value objects             | Money (Decimal, never float), AccountType (5 types), EntryStatus, InvoiceStatus                                                        | unit tests: money math, type rules                      |
+| F2  | Database models + migration 0004 | All 7 `erp_*` tables - composite FKs, CHECKs (debit XOR credit), RLS policies, UNIQUE constraints                                      | `alembic upgrade head`; two-tenant row visibility       |
+| F3  | Repository + service             | atomic state transitions (`WHERE status=...`), posting gates (balance, closed period), numbering INV-/PMT-                             | unit tests with a fake repository                       |
+| F4  | HTTP layer                       | schemas.py, router.py, deps wiring (require_permission, tenant context) - COA, journal entries, fiscal periods, trial balance, reports | integration API tests                                   |
+| F5  | Cross-module invoicing           | create_from_order (idempotent, issued only), issue, approve (accrual entry), apply payment                                             | integration: sales fulfil → invoice → revenue → payment |
+| F6  | Events                           | finance.journal_entry.posted, invoice.created, invoice.approved, payment.applied - after commit, no-op producers in dev                | unit: event fires only after commit                     |
+| F7  | Tests + CI + Makefile            | unit / integration / two-tenant isolation suites, factories, dev-core / test-core / migrate-core, import-lint guard                    | full CI green                                           |
 
 **Sequencing note:** F5 is the integration point with Swalih - his "fulfil" flow calls your `create_from_order` (issued only; revenue happens at his later `approve` or the finance API). Coordinate so his fulfil and your invoicing land together or behind the agreed contract.
 

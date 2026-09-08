@@ -2,16 +2,17 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { EmployeesClient, type EmployeeListView } from "./employees";
 
 export default async function EmployeesPage({
-  searchParams,
+    searchParams,
 }: {
-  searchParams: Promise<{ view?: string }>;
+    searchParams: Promise<{ view?: string }>;
 }) {
-  const { view } = await searchParams;
-  const initialView: EmployeeListView = view === "terminated" ? "terminated" : "active";
+    const { view } = await searchParams;
+    const initialView: EmployeeListView =
+        view === "terminated" ? "terminated" : "active";
 
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.hr.read">
-      <EmployeesClient initialView={initialView} />
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.hr.read">
+            <EmployeesClient initialView={initialView} />
+        </ModuleAccessBoundary>
+    );
 }

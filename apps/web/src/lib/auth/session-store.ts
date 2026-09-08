@@ -10,20 +10,21 @@ import { RESERVED_SLUGS } from "@/lib/auth/reserved-slugs";
 let accessToken: string | null = null;
 
 export function setAccessToken(token: string | null): void {
-  accessToken = token;
+    accessToken = token;
 }
 
 export function getAccessToken(): string | null {
-  return accessToken;
+    return accessToken;
 }
 
 /** Tenant slug for API calls: derived from the host, else NEXT_PUBLIC_TENANT_SLUG. */
 export function getTenantSlug(): string {
-  if (typeof window !== "undefined") {
-    const match = /^([a-z0-9-]+)\.(?:signin\.)?(?:localhost|skyrict\.com)$/.exec(
-      window.location.hostname,
-    );
-    if (match && !RESERVED_SLUGS.has(match[1])) return match[1];
-  }
-  return process.env.NEXT_PUBLIC_TENANT_SLUG ?? "";
+    if (typeof window !== "undefined") {
+        const match =
+            /^([a-z0-9-]+)\.(?:signin\.)?(?:localhost|skyrict\.com)$/.exec(
+                window.location.hostname,
+            );
+        if (match && !RESERVED_SLUGS.has(match[1])) return match[1];
+    }
+    return process.env.NEXT_PUBLIC_TENANT_SLUG ?? "";
 }

@@ -10,12 +10,13 @@
  * origin's `/signin` when there is no tenant label (dev without a subdomain).
  */
 export function browserSigninUrl(): string {
-  const { protocol, hostname, port } = window.location;
-  const host = hostname.toLowerCase();
-  const portSuffix = port ? `:${port}` : "";
-  if (host.includes(".signin.")) return `${protocol}//${host}${portSuffix}/signin`;
-  const apex = host.split(".").slice(1).join(".");
-  if (!apex) return `${protocol}//${host}${portSuffix}/signin`;
-  const slug = host.split(".")[0];
-  return `${protocol}//${slug}.signin.${apex}${portSuffix}/signin`;
+    const { protocol, hostname, port } = window.location;
+    const host = hostname.toLowerCase();
+    const portSuffix = port ? `:${port}` : "";
+    if (host.includes(".signin."))
+        return `${protocol}//${host}${portSuffix}/signin`;
+    const apex = host.split(".").slice(1).join(".");
+    if (!apex) return `${protocol}//${host}${portSuffix}/signin`;
+    const slug = host.split(".")[0];
+    return `${protocol}//${slug}.signin.${apex}${portSuffix}/signin`;
 }

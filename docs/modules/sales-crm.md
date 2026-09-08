@@ -16,7 +16,7 @@ This module follows the **same architecture as the rest of Skyrict**. Nothing he
 
 ### 1.1 Why
 
-The Skyrict Business Operating System is built on the "internal truth" pillar: *"A deliberately scoped ERP slice - inventory, sales, cash, orders - capturing what's actually happening inside your company… the ~20% of operations that 80% of SMBs actually use"* (`apps/web/src/config/index.ts`).
+The Skyrict Business Operating System is built on the "internal truth" pillar: _"A deliberately scoped ERP slice - inventory, sales, cash, orders - capturing what's actually happening inside your company… the ~20% of operations that 80% of SMBs actually use"_ (`apps/web/src/config/index.ts`).
 
 **Sales & CRM is the revenue-facing slice of that pillar.** It answers, in one tenant-scoped place:
 
@@ -57,18 +57,18 @@ Key architectural facts this module depends on:
 
 ### 1.3 Usage - who uses it, and the daily flows
 
-| Actor | What they do in the module |
-|---|---|
-| Sales representative | Creates leads, contacts them, qualifies into opportunities, moves stages, records wins/losses, creates customer orders |
-| Department manager | Sees their team's pipeline and orders, approves order confirmation when credit limits are involved, reviews team performance |
-| Organization admin / owner | Sees everything, sets payment terms / credit limits, manages customer records, reports |
+| Actor                      | What they do in the module                                                                                                   |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Sales representative       | Creates leads, contacts them, qualifies into opportunities, moves stages, records wins/losses, creates customer orders       |
+| Department manager         | Sees their team's pipeline and orders, approves order confirmation when credit limits are involved, reviews team performance |
+| Organization admin / owner | Sees everything, sets payment terms / credit limits, manages customer records, reports                                       |
 
 Daily flows (Phase 1):
 
 1. **Lead capture** - a rep (or the owner) records a lead with a source (website, referral, call, social, event, partner, inbound).
-2. **Qualification** - the rep contacts the lead and either qualifies it (→ creates an **opportunity** at the *prospecting* stage) or disqualifies it (records the reason).
-3. **Pipeline movement** - the opportunity moves *prospecting → qualified → proposal → negotiation*, then terminates at *won* or *lost* (with a lost reason). Each move emits an event.
-4. **Customer creation** - a *won* opportunity is promoted to a **customer** record (or a customer is created directly for an existing account).
+2. **Qualification** - the rep contacts the lead and either qualifies it (→ creates an **opportunity** at the _prospecting_ stage) or disqualifies it (records the reason).
+3. **Pipeline movement** - the opportunity moves _prospecting → qualified → proposal → negotiation_, then terminates at _won_ or _lost_ (with a lost reason). Each move emits an event.
+4. **Customer creation** - a _won_ opportunity is promoted to a **customer** record (or a customer is created directly for an existing account).
 5. **Ordering** - a rep drafts a **sales order** against a customer. Confirmation runs a credit check and **reserves stock** (contract with Abinav's inventory module). Fulfilment deducts stock and **creates an invoice** (contract with Dennis's finance module). Cancellation releases any reserved stock.
 6. **Reporting** - the reporting module (M-RPT) consumes this module's events and tables for pipeline value, orders by period, and top customers.
 
@@ -78,7 +78,7 @@ Daily flows (Phase 1):
 
 ### 2.1 Service placement and folder structure
 
-Sales & CRM is built as **two feature packages in `services/core`**: `features/crm` (leads, opportunities, customers) and `features/sales` (sales orders). They are separated because they have different lifecycle rules and different permission families (`erp.crm.*` vs `erp.sales.*`), even though sales orders *reference* CRM customers.
+Sales & CRM is built as **two feature packages in `services/core`**: `features/crm` (leads, opportunities, customers) and `features/sales` (sales orders). They are separated because they have different lifecycle rules and different permission families (`erp.crm.*` vs `erp.sales.*`), even though sales orders _reference_ CRM customers.
 
 The service mirrors `services/identity`'s feature-based layout (this is the contract - follow it exactly, not the `_template` scaffold):
 
@@ -204,15 +204,15 @@ CONSTRAINT erp_sales_order_lines_order_fk
 - Permissions are **resolved from the database at request time** by a `require_permission("erp.crm.read")` dependency in `api/deps.py` - mirroring `services/identity/src/identity/api/deps.py:140`. That dependency loads the current user + their roles, then calls `AuthorizationService.require_permission(...)` against the DB-resolved grants. The JWT carries **no** `permissions` claim; role changes take effect immediately without re-login. Logging comes from `libs/skyrict-common` (`src/skyrict_common/logging.py`) - there is no separate `libs/skyrict-logging`.
 - **Two permission families** (user-approved naming):
 
-| Key | Meaning |
-|---|---|
-| `erp.crm.read` | View leads, opportunities, customers |
-| `erp.crm.write` | Create/edit leads, opportunities, customers; move stages |
-| `erp.sales.read` | View sales orders |
-| `erp.sales.write` | Draft/edit sales orders |
+| Key                 | Meaning                                                               |
+| ------------------- | --------------------------------------------------------------------- |
+| `erp.crm.read`      | View leads, opportunities, customers                                  |
+| `erp.crm.write`     | Create/edit leads, opportunities, customers; move stages              |
+| `erp.sales.read`    | View sales orders                                                     |
+| `erp.sales.write`   | Draft/edit sales orders                                               |
 | `erp.sales.approve` | Confirm, fulfil, or cancel a sales order (side-effecting transitions) |
 
-- **Where these keys are registered:** the platform-fixed catalog in `services/identity/src/identity/core/permissions.py`. The module docstring is explicit: *"A permission must be added here AND via migration before it can be assigned to roles."* So the implementation step is:
+- **Where these keys are registered:** the platform-fixed catalog in `services/identity/src/identity/core/permissions.py`. The module docstring is explicit: _"A permission must be added here AND via migration before it can be assigned to roles."_ So the implementation step is:
 
 ```python
 # services/identity/src/identity/core/permissions.py
@@ -227,13 +227,13 @@ ERP_SALES_APPROVE = "erp.sales.approve"
 
 Then update `core/constants.py` `SYSTEM_ROLE_DEFINITIONS` (this is the seeded role → permission mapping):
 
-| Role | Sales & CRM grants (added to existing) |
-|---|---|
-| `tenant_owner` | `*` (already full access) |
+| Role                 | Sales & CRM grants (added to existing)                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `tenant_owner`       | `*` (already full access)                                                                 |
 | `organization_admin` | `erp.crm.read`, `erp.crm.write`, `erp.sales.read`, `erp.sales.write`, `erp.sales.approve` |
-| `department_manager` | `erp.crm.read`, `erp.crm.write`, `erp.sales.read`, `erp.sales.write` |
-| `standard_user` | `erp.crm.read`, `erp.sales.read` |
-| `auditor` | `erp.crm.read`, `erp.sales.read` |
+| `department_manager` | `erp.crm.read`, `erp.crm.write`, `erp.sales.read`, `erp.sales.write`                      |
+| `standard_user`      | `erp.crm.read`, `erp.sales.read`                                                          |
+| `auditor`            | `erp.crm.read`, `erp.sales.read`                                                          |
 
 And add a migration in identity that inserts the five keys into the permissions table (mirroring the existing permission migration).
 
@@ -247,18 +247,18 @@ Use `libs/skyrict-events` (`src/skyrict_events/base.py`). Every event is a `Base
 
 Events this module emits:
 
-| Topic | Emitted when | Payload highlights | Consumer intent |
-|---|---|---|---|
-| `crm.lead.created` | lead inserted | lead_id, source, owner_id | Reporting |
-| `crm.lead.status_changed` | status transition | lead_id, from_status, to_status | Reporting, agent hooks |
-| `crm.opportunity.stage_changed` | stage transition | opportunity_id, from_stage, to_stage, amount | Reporting, pipeline metrics |
-| `crm.opportunity.won` | stage → won | opportunity_id, amount, customer_id | Reporting, finance context |
-| `crm.opportunity.lost` | stage → lost | opportunity_id, reason, amount | Reporting |
-| `crm.customer.created` | customer inserted | customer_id, name | Reporting |
-| `sales.order.created` | draft persisted | order_id, order_number, customer_id, total | Reporting |
-| `sales.order.confirmed` | confirmation committed | order_id, order_number, total, credit_check | Inventory (reserve), reporting |
-| `sales.order.fulfilled` | fulfilment committed | order_id, invoice_id | Finance, reporting |
-| `sales.order.cancelled` | cancellation committed | order_id, reason | Inventory (release), reporting |
+| Topic                           | Emitted when           | Payload highlights                           | Consumer intent                |
+| ------------------------------- | ---------------------- | -------------------------------------------- | ------------------------------ |
+| `crm.lead.created`              | lead inserted          | lead_id, source, owner_id                    | Reporting                      |
+| `crm.lead.status_changed`       | status transition      | lead_id, from_status, to_status              | Reporting, agent hooks         |
+| `crm.opportunity.stage_changed` | stage transition       | opportunity_id, from_stage, to_stage, amount | Reporting, pipeline metrics    |
+| `crm.opportunity.won`           | stage → won            | opportunity_id, amount, customer_id          | Reporting, finance context     |
+| `crm.opportunity.lost`          | stage → lost           | opportunity_id, reason, amount               | Reporting                      |
+| `crm.customer.created`          | customer inserted      | customer_id, name                            | Reporting                      |
+| `sales.order.created`           | draft persisted        | order_id, order_number, customer_id, total   | Reporting                      |
+| `sales.order.confirmed`         | confirmation committed | order_id, order_number, total, credit_check  | Inventory (reserve), reporting |
+| `sales.order.fulfilled`         | fulfilment committed   | order_id, invoice_id                         | Finance, reporting             |
+| `sales.order.cancelled`         | cancellation committed | order_id, reason                             | Inventory (release), reporting |
 
 Producer sketch (follow `identity`'s `events/producers/invitation_events.py` style):
 
@@ -686,49 +686,49 @@ Base path `/api/v1`. Every endpoint: requires valid identity access JWT + tenant
 
 ### CRM
 
-| Method | Path | Permission | Notes |
-|---|---|---|---|
-| GET | `/api/v1/crm/leads` | `erp.crm.read` | filters: `status`, `source`, `owner_id`, `q` |
-| POST | `/api/v1/crm/leads` ✓ | `erp.crm.write` | soft dedupe on email |
-| GET | `/api/v1/crm/leads/{id}` | `erp.crm.read` | 404 if out of scope |
-| PATCH | `/api/v1/crm/leads/{id}` | `erp.crm.write` | |
-| POST | `/api/v1/crm/leads/{id}/qualify` ✓ | `erp.crm.write` | status→qualified + creates opportunity (atomic) |
-| POST | `/api/v1/crm/leads/{id}/disqualify` ✓ | `erp.crm.write` | body: `reason` |
-| GET | `/api/v1/crm/opportunities` | `erp.crm.read` | filters: `stage`, `owner_id`, `from`/`to` close date |
-| POST | `/api/v1/crm/opportunities` ✓ | `erp.crm.write` | |
-| GET | `/api/v1/crm/opportunities/{id}` | `erp.crm.read` | |
-| PATCH | `/api/v1/crm/opportunities/{id}` | `erp.crm.write` | cannot change stage here |
-| POST | `/api/v1/crm/opportunities/{id}/stage` ✓ | `erp.crm.write` | body: `to_stage`, `lost_reason?` |
-| POST | `/api/v1/crm/opportunities/{id}/promote` ✓ | `erp.crm.write` | stage→won, creates customer; returns `{customer_id}` |
-| GET | `/api/v1/crm/customers` | `erp.crm.read` | filters: `status`, `q` |
-| POST | `/api/v1/crm/customers` ✓ | `erp.crm.write` | |
-| GET | `/api/v1/crm/customers/{id}` | `erp.crm.read` | |
-| PATCH | `/api/v1/crm/customers/{id}` | `erp.crm.write` | |
+| Method | Path                                       | Permission      | Notes                                                |
+| ------ | ------------------------------------------ | --------------- | ---------------------------------------------------- |
+| GET    | `/api/v1/crm/leads`                        | `erp.crm.read`  | filters: `status`, `source`, `owner_id`, `q`         |
+| POST   | `/api/v1/crm/leads` ✓                      | `erp.crm.write` | soft dedupe on email                                 |
+| GET    | `/api/v1/crm/leads/{id}`                   | `erp.crm.read`  | 404 if out of scope                                  |
+| PATCH  | `/api/v1/crm/leads/{id}`                   | `erp.crm.write` |                                                      |
+| POST   | `/api/v1/crm/leads/{id}/qualify` ✓         | `erp.crm.write` | status→qualified + creates opportunity (atomic)      |
+| POST   | `/api/v1/crm/leads/{id}/disqualify` ✓      | `erp.crm.write` | body: `reason`                                       |
+| GET    | `/api/v1/crm/opportunities`                | `erp.crm.read`  | filters: `stage`, `owner_id`, `from`/`to` close date |
+| POST   | `/api/v1/crm/opportunities` ✓              | `erp.crm.write` |                                                      |
+| GET    | `/api/v1/crm/opportunities/{id}`           | `erp.crm.read`  |                                                      |
+| PATCH  | `/api/v1/crm/opportunities/{id}`           | `erp.crm.write` | cannot change stage here                             |
+| POST   | `/api/v1/crm/opportunities/{id}/stage` ✓   | `erp.crm.write` | body: `to_stage`, `lost_reason?`                     |
+| POST   | `/api/v1/crm/opportunities/{id}/promote` ✓ | `erp.crm.write` | stage→won, creates customer; returns `{customer_id}` |
+| GET    | `/api/v1/crm/customers`                    | `erp.crm.read`  | filters: `status`, `q`                               |
+| POST   | `/api/v1/crm/customers` ✓                  | `erp.crm.write` |                                                      |
+| GET    | `/api/v1/crm/customers/{id}`               | `erp.crm.read`  |                                                      |
+| PATCH  | `/api/v1/crm/customers/{id}`               | `erp.crm.write` |                                                      |
 
 ### Sales
 
-| Method | Path | Permission | Notes |
-|---|---|---|---|
-| GET | `/api/v1/sales/orders` | `erp.sales.read` | filters: `status`, `customer_id`, `owner_id`, `from`/`to` order date |
-| POST | `/api/v1/sales/orders` ✓ | `erp.sales.write` | creates draft; totals recomputed server-side |
-| GET | `/api/v1/sales/orders/{id}` | `erp.sales.read` | includes lines + totals |
-| PATCH | `/api/v1/sales/orders/{id}` | `erp.sales.write` | draft only; edit lines/customer/ship date |
-| POST | `/api/v1/sales/orders/{id}/confirm` ✓ | `erp.sales.approve` | idempotent; credit check + stock reserve; returns `{order, credit_check}` |
-| POST | `/api/v1/sales/orders/{id}/fulfil` ✓ | `erp.sales.approve` | confirmed only; consumes stock + creates invoice; returns `{order, invoice_id}` |
-| POST | `/api/v1/sales/orders/{id}/cancel` ✓ | `erp.sales.approve` | body: `reason`; releases reserved stock |
+| Method | Path                                  | Permission          | Notes                                                                           |
+| ------ | ------------------------------------- | ------------------- | ------------------------------------------------------------------------------- |
+| GET    | `/api/v1/sales/orders`                | `erp.sales.read`    | filters: `status`, `customer_id`, `owner_id`, `from`/`to` order date            |
+| POST   | `/api/v1/sales/orders` ✓              | `erp.sales.write`   | creates draft; totals recomputed server-side                                    |
+| GET    | `/api/v1/sales/orders/{id}`           | `erp.sales.read`    | includes lines + totals                                                         |
+| PATCH  | `/api/v1/sales/orders/{id}`           | `erp.sales.write`   | draft only; edit lines/customer/ship date                                       |
+| POST   | `/api/v1/sales/orders/{id}/confirm` ✓ | `erp.sales.approve` | idempotent; credit check + stock reserve; returns `{order, credit_check}`       |
+| POST   | `/api/v1/sales/orders/{id}/fulfil` ✓  | `erp.sales.approve` | confirmed only; consumes stock + creates invoice; returns `{order, invoice_id}` |
+| POST   | `/api/v1/sales/orders/{id}/cancel` ✓  | `erp.sales.approve` | body: `reason`; releases reserved stock                                         |
 
 ### Error cases
 
-| Condition | Status | Problem |
-|---|---|---|
-| Missing/invalid JWT | 401 | `authentication-error` |
-| Valid JWT, missing permission | 403 | `authorization-error` |
-| Unknown/other-tenant resource | 404 | `crm-not-found` / `sales-order-not-found` |
-| Illegal transition (confirm a fulfilled order) | 409 | `illegal-state-transition` |
-| Credit limit exceeded on confirm | 422 | `credit-limit-exceeded` |
-| Insufficient stock on confirm | 409 | `insufficient-stock` |
-| Replayed confirm (order already `confirmed`) | 200 | stored result - no double reservation |
-| Rate limit | 429 | `rate-limit-exceeded` |
+| Condition                                      | Status | Problem                                   |
+| ---------------------------------------------- | ------ | ----------------------------------------- |
+| Missing/invalid JWT                            | 401    | `authentication-error`                    |
+| Valid JWT, missing permission                  | 403    | `authorization-error`                     |
+| Unknown/other-tenant resource                  | 404    | `crm-not-found` / `sales-order-not-found` |
+| Illegal transition (confirm a fulfilled order) | 409    | `illegal-state-transition`                |
+| Credit limit exceeded on confirm               | 422    | `credit-limit-exceeded`                   |
+| Insufficient stock on confirm                  | 409    | `insufficient-stock`                      |
+| Replayed confirm (order already `confirmed`)   | 200    | stored result - no double reservation     |
+| Rate limit                                     | 429    | `rate-limit-exceeded`                     |
 
 ---
 
@@ -742,17 +742,27 @@ The generic proxy `apps/web/src/app/api/v1/[...path]/route.ts` forwards every `/
 
 ```ts
 // apps/web/src/lib/server/auth.ts (add a second target + param)
-const CORE_SEGMENTS = new Set(["crm", "sales", "inventory", "hr", "finance", "reporting"]);
+const CORE_SEGMENTS = new Set([
+    "crm",
+    "sales",
+    "inventory",
+    "hr",
+    "finance",
+    "reporting",
+]);
 
 function routeTarget(path: string): string {
-  const first = path.replace(/^\//, "").split("/")[0] ?? "";
-  return CORE_SEGMENTS.has(first)
-    ? (process.env.CORE_PROXY_TARGET ?? "http://localhost:8001")
-    : apiBase();
+    const first = path.replace(/^\//, "").split("/")[0] ?? "";
+    return CORE_SEGMENTS.has(first)
+        ? (process.env.CORE_PROXY_TARGET ?? "http://localhost:8001")
+        : apiBase();
 }
 
-export async function callBackend(path, { target = routeTarget(path), ...options } = {}) {
-  // fetch(`${target}/api/v1${path}`, ...)   // instead of apiBase()
+export async function callBackend(
+    path,
+    { target = routeTarget(path), ...options } = {},
+) {
+    // fetch(`${target}/api/v1${path}`, ...)   // instead of apiBase()
 }
 ```
 
@@ -766,19 +776,38 @@ New `apps/web/src/lib/api/crm-api.ts`, modeled exactly on `identity-api.ts`: typ
 
 ```ts
 // shape (mirror identity-api.ts)
-export interface LeadOut { id: string; source: string; status: string; companyName?: string;
-  contactName: string; email?: string; ownerId?: string; createdAt: string; }
-export interface ListLeadsParams { status?: string; ownerId?: string; page?: number; pageSize?: number; }
-
-export async function listLeads(params: ListLeadsParams = {}): Promise<ListResponse<LeadOut>> {
-  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
-  return apiFetch(`/api/v1/crm/leads${qs ? `?${qs}` : ""}`);
+export interface LeadOut {
+    id: string;
+    source: string;
+    status: string;
+    companyName?: string;
+    contactName: string;
+    email?: string;
+    ownerId?: string;
+    createdAt: string;
 }
-export async function confirmOrder(orderId: string): Promise<OrderConfirmedOut> {
-  return apiFetch(`/api/v1/sales/orders/${orderId}/confirm`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+export interface ListLeadsParams {
+    status?: string;
+    ownerId?: string;
+    page?: number;
+    pageSize?: number;
+}
+
+export async function listLeads(
+    params: ListLeadsParams = {},
+): Promise<ListResponse<LeadOut>> {
+    const qs = new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v != null),
+    ).toString();
+    return apiFetch(`/api/v1/crm/leads${qs ? `?${qs}` : ""}`);
+}
+export async function confirmOrder(
+    orderId: string,
+): Promise<OrderConfirmedOut> {
+    return apiFetch(`/api/v1/sales/orders/${orderId}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({}),
+    });
 }
 ```
 
@@ -788,13 +817,13 @@ The single-flight 401 → silent refresh in `lib/api/http.ts` works unchanged be
 
 Routes under `apps/web/src/app/dashboard/erp/` (the existing ERP placeholder at `dashboard/erp/page.tsx` becomes a module landing page):
 
-| Route | Page | Key UI |
-|---|---|---|
-| `/dashboard/erp` | Module landing | Cards linking to each section; summary chips (pipeline value, open orders) |
-| `/dashboard/erp/crm/leads` | Leads | Filterable table, create/qualify/disqualify actions |
-| `/dashboard/erp/crm/opportunities` | Opportunities | Pipeline **board** (columns per stage), move/deal actions, won/lost |
-| `/dashboard/erp/crm/customers` | Customers | Table, customer detail with order history |
-| `/dashboard/erp/orders` | Sales orders | Orders table (status filter), order detail, confirm/fulfil/cancel actions |
+| Route                              | Page           | Key UI                                                                     |
+| ---------------------------------- | -------------- | -------------------------------------------------------------------------- |
+| `/dashboard/erp`                   | Module landing | Cards linking to each section; summary chips (pipeline value, open orders) |
+| `/dashboard/erp/crm/leads`         | Leads          | Filterable table, create/qualify/disqualify actions                        |
+| `/dashboard/erp/crm/opportunities` | Opportunities  | Pipeline **board** (columns per stage), move/deal actions, won/lost        |
+| `/dashboard/erp/crm/customers`     | Customers      | Table, customer detail with order history                                  |
+| `/dashboard/erp/orders`            | Sales orders   | Orders table (status filter), order detail, confirm/fulfil/cancel actions  |
 
 Component conventions (follow the existing code):
 
@@ -807,8 +836,8 @@ Component conventions (follow the existing code):
 
 `apps/web/src/components/dashboard/workspace/app-sidebar.tsx` renders the nav from `sidebar-config.ts` (`erpNavGroups`). Expose the ERP sections there, filtered by the session's permissions (`useModuleAccess()` → `getMyRoles()` → `/api/v1/roles/me`):
 
-- *CRM* → shown when `permissions` contains `erp.crm.read`
-- *Orders* → shown when `erp.sales.read`
+- _CRM_ → shown when `permissions` contains `erp.crm.read`
+- _Orders_ → shown when `erp.sales.read`
 - (Inventory / HR / Finance groups appear when their modules land - one shared section, one code path, five permission filters.)
 
 ### 7.5 Plan gating

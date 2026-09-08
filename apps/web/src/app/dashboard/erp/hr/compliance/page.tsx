@@ -4,13 +4,13 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { ComplianceClient } from "./compliance";
 
 export const metadata: Metadata = {
-  title: "Compliance · HR",
+    title: "Compliance · HR",
 };
 
 export default function CompliancePage() {
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.hr.ai.read">
-      <ComplianceClient />
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.hr.ai.read">
+            <ComplianceClient />
+        </ModuleAccessBoundary>
+    );
 }

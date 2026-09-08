@@ -20,12 +20,12 @@ We need a Python package manager that supports a monorepo with multiple independ
 
 Options evaluated:
 
-| Tool | Workspace Support | Lockfile | Speed | Maturity |
-|------|-------------------|----------|-------|----------|
-| **uv** | Native (`[tool.uv.workspace]`) | Single `uv.lock` | Fastest (Rust) | Growing rapidly |
-| Poetry (monorepo plugin) | Via `poetry-monorepo` plugin | Per-package | Moderate | Plugin-dependent |
-| pip + requirements files | Manual | None | Slow | Mature |
-| PDM | Partial | Single | Moderate | Moderate |
+| Tool                     | Workspace Support              | Lockfile         | Speed          | Maturity         |
+| ------------------------ | ------------------------------ | ---------------- | -------------- | ---------------- |
+| **uv**                   | Native (`[tool.uv.workspace]`) | Single `uv.lock` | Fastest (Rust) | Growing rapidly  |
+| Poetry (monorepo plugin) | Via `poetry-monorepo` plugin   | Per-package      | Moderate       | Plugin-dependent |
+| pip + requirements files | Manual                         | None             | Slow           | Mature           |
+| PDM                      | Partial                        | Single           | Moderate       | Moderate         |
 
 ## Decision
 

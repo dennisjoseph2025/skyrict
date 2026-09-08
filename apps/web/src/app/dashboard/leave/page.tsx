@@ -6,5 +6,5 @@ import { LeavePortal } from "./leave-portal";
  * the client renders the backend's error message when access is missing.
  */
 export default function LeavePortalPage() {
-  return <LeavePortal />;
+    return <LeavePortal />;
 }
