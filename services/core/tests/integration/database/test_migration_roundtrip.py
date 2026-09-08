@@ -780,7 +780,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             ).scalar_one_or_none()
             assert cost_perm is not None, "0037 must register erp.inventory.cost"
 
-# 0038: suppliers (SKY-86 / INV-AI-004) - master + performance tables,
+            # 0038: suppliers (SKY-86 / INV-AI-004) - master + performance tables,
             # RLS policies, product:supplier FK, and the two supplier permissions.
             for table in ("erp_suppliers", "erp_supplier_performance"):
                 regclass = (
