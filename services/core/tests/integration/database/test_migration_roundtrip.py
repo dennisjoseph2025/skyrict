@@ -41,6 +41,7 @@ from urllib.parse import urlsplit, urlunsplit
 import asyncpg
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -206,7 +207,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0040", f"head is {version}, expected 0040"
+            assert version == "0041", f"head is {version}, expected 0041"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -887,6 +888,74 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                 )
             ).scalar_one()
             assert not_null == "NO", "0040 drift threshold must be NOT NULL"
+
+            # 0041: revenue forecasts (SKY-82 A4) - one row per (tenant, month),
+            # RLS enabled, and a unique guard so a recompute can never double-
+            # count a month in the UI series.
+            tenant_id = uuid.UUID(tenant_ids[0])
+            await conn.execute(
+                text(
+                    "INSERT INTO erp_revenue_forecast "
+                    "(tenant_id, month, predicted, lower_bound, upper_bound, "
+                    " backtest_mape, model_version) "
+                    "VALUES (:tenant, '2026-10-01', 10000.0000, 9000.0000, 11000.0000, "
+                    " 0.050000, 'sma-6')"
+                ),
+                {"tenant": tenant_id},
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO erp_revenue_forecast "
+                    "(tenant_id, month, predicted, lower_bound, upper_bound, "
+                    " backtest_mape, model_version) "
+                    "VALUES (:tenant, '2026-11-01', 11000.0000, 9900.0000, 12100.0000, "
+                    " 0.050000, 'sma-6')"
+                ),
+                {"tenant": tenant_id},
+            )
+            await conn.commit()
+            forecast_count = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM erp_revenue_forecast "
+                        "WHERE tenant_id = :tenant"
+                    ),
+                    {"tenant": tenant_id},
+                )
+            ).scalar_one()
+            assert forecast_count == 2, "0041 must accept one row per (tenant, month)"
+
+            dup_rejected = False
+            try:
+                await conn.execute(
+                    text(
+                        "INSERT INTO erp_revenue_forecast "
+                        "(tenant_id, month, predicted, model_version) "
+                        "VALUES (:tenant, '2026-10-01', 9999.0000, 'sma-6')"
+                    ),
+                    {"tenant": tenant_id},
+                )
+                await conn.commit()
+            except IntegrityError:
+                dup_rejected = True
+                await conn.rollback()
+            assert dup_rejected, "0041 unique (tenant_id, month) must reject duplicates"
+
+            forecast_policy = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_policies "
+                        "WHERE schemaname = 'public' "
+                        "AND policyname = 'tenant_isolation_erp_revenue_forecast'"
+                    )
+                )
+            ).scalar_one()
+            assert forecast_policy == 1, "0041 must enable RLS on erp_revenue_forecast"
+            await conn.execute(
+                text("DELETE FROM erp_revenue_forecast WHERE tenant_id = :tenant"),
+                {"tenant": tenant_id},
+            )
+            await conn.commit()
     finally:
         await engine.dispose()
 
@@ -911,6 +980,7 @@ async def _assert_downgraded_to_base(url: str) -> None:
                 "public.erp_report_snapshots",
                 "public.erp_suppliers",
                 "public.erp_supplier_performance",
+                "public.erp_revenue_forecast",
             ):
                 regclass = (await conn.execute(text(f"SELECT to_regclass('{table}')"))).scalar_one()
                 assert regclass is None, f"{table} still exists after downgrade base"

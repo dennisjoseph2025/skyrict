@@ -331,6 +331,26 @@ class Settings(BaseSettings):
         default=0, ge=0, le=59, description="minute of hour for the daily narrator digest"
     )
 
+    # --- Revenue forecasting (SKY-82 A4) ---
+    FORECAST_SCHEDULER_ENABLED: bool = Field(
+        default=False,
+        description="start the weekly revenue-forecast cron at boot (SKY-82 A4)",
+    )
+    FORECAST_SCHEDULER_DAY_OF_WEEK: str = Field(
+        default="mon",
+        description="day of week for the weekly forecast recompute (cron expression)",
+    )
+    FORECAST_SCHEDULER_TIMEZONE: str = Field(
+        default="UTC",
+        description="timezone for the weekly forecast cron",
+    )
+    FORECAST_SCHEDULER_HOUR: int = Field(
+        default=6, ge=0, le=23, description="hour of day for the weekly forecast recompute"
+    )
+    FORECAST_SCHEDULER_MINUTE: int = Field(
+        default=0, ge=0, le=59, description="minute of hour for the weekly forecast recompute"
+    )
+
     # --- Email delivery (SMTP) for critical anomaly alerts (spec §4.3) ---
     EMAIL_SMTP_HOST: str = Field(
         default="",
