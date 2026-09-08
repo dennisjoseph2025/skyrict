@@ -29,6 +29,8 @@ from ai_agent.models import (  # noqa: F401  # registers every ORM model
     AgentRegistryModel,
     AiAnomalyModel,
     AiAuditLogModel,
+<<<<<<< HEAD
+    AiDocumentEmbeddingModel,
     AiFinanceEvalRunModel,
     AiQueryLogModel,
     AiSuggestionModel,

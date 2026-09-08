@@ -60,6 +60,9 @@ class TestRegistry:
             "ai_finance_eval_runs",
             # SKY-70 product-embedding snapshot
             "ai_inv_item_embeddings",
+<<<<<<< HEAD
+            # SKY-87 document OCR/embedding enrichment store
+            "ai_document_embeddings",
             # SKY-67 C1 finance-line snapshot
             "ai_finance_line_embeddings",
             # LangGraph orchestration (SKY-59)
