@@ -33,6 +33,7 @@ from core.features.reporting.reports_schemas import (
     ReportRunResult,
     ReportSnapshotRead,
 )
+from core.features.reporting.seeds import find_seed_for_sql
 from core.features.reporting.service import ReportService
 from skyrict_common.schemas import ResponseEnvelope
 
@@ -43,6 +44,26 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 _get_service = get_report_service
 _require_reports_read = require_permission(ERP_REPORTS_READ)
 _require_reports_create = require_permission(ERP_REPORTS_CREATE)
+
+
+def _to_definition_read(definition: Any) -> ReportDefinitionRead:
+    """Serialize a definition, overlaying the canonical seed's NL vocabulary.
+
+    ``dataset``/``dimensions``/``measures`` are not stored columns - they are
+    resolved from the canonical seed whose SQL matches the definition, so both
+    seeded reports and user-created saved reports (whose SQL is always one of
+    the whitelisted templates) expose the same selectable semantics to the NL
+    report builder.
+    """
+    read = ReportDefinitionRead.model_validate(definition, from_attributes=True)
+    sql = definition.get("sql") if isinstance(definition, dict) else getattr(definition, "sql", None)
+    if sql:
+        seed = find_seed_for_sql(sql)
+        if seed is not None:
+            read.dataset = seed.dataset
+            read.dimensions = list(seed.dimensions)
+            read.measures = list(seed.measures)
+    return read
 
 
 def _tenant_id(current_user: dict[str, Any]) -> uuid.UUID:
@@ -64,10 +85,7 @@ async def list_reports(
     """List the tenant's active report definitions, optionally by module."""
     definitions = await service.list_reports(tenant_id=_tenant_id(current_user), module=module)
     return ResponseEnvelope(
-        data=[
-            ReportDefinitionRead.model_validate(definition, from_attributes=True)
-            for definition in definitions
-        ],
+        data=[_to_definition_read(definition) for definition in definitions],
         message=f"{len(definitions)} reports",
     )
 
@@ -106,9 +124,7 @@ async def create_report(
     )
     return ResponseEnvelope(
         data=ReportCreateResult(
-            definition=ReportDefinitionRead.model_validate(
-                result["definition"], from_attributes=True
-            ),
+            definition=_to_definition_read(result["definition"]),
             default_params=result["default_params"],
         )
     )
@@ -122,9 +138,7 @@ async def get_report_metadata(
 ) -> ResponseEnvelope[ReportDefinitionRead]:
     """Return one report definition's metadata (the UI's build contract)."""
     definition = await service.get_report(tenant_id=_tenant_id(current_user), slug=slug)
-    return ResponseEnvelope(
-        data=ReportDefinitionRead.model_validate(definition, from_attributes=True)
-    )
+    return ResponseEnvelope(data=_to_definition_read(definition))
 
 
 @router.post(

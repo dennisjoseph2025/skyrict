@@ -10,7 +10,15 @@ from pydantic import BaseModel, Field
 
 
 class ReportDefinitionRead(BaseModel):
-    """Metadata for one report definition (the UI's build-from-metadata contract)."""
+    """Metadata for one report definition (the UI's build-from-metadata contract).
+
+    ``dataset``, ``dimensions`` and ``measures`` are the NL report builder's
+    selectable vocabulary (RPT-AI-001, SKY-80): the only dataset/grouping
+    dimensions/numeric measures an LLM may pick for this definition. They are
+    pure metadata populated from the canonical seed (matched by SQL content,
+    so user-created saved reports inherit their template's semantics); they
+    default to None/empty for any definition without a matching template.
+    """
 
     id: uuid.UUID
     slug: str
@@ -18,6 +26,9 @@ class ReportDefinitionRead(BaseModel):
     module: str
     description: str | None = None
     params: list[str] = Field(default_factory=list)
+    dataset: str | None = None
+    dimensions: list[str] = Field(default_factory=list)
+    measures: list[str] = Field(default_factory=list)
     permission_key: str
     version: int
     updated_at: datetime
