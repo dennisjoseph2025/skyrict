@@ -11,20 +11,26 @@
 let email: string | null = null;
 let password: string | null = null;
 
-export function setWizardCredentials(creds: { email: string; password: string }): void {
-  email = creds.email;
-  password = creds.password;
+export function setWizardCredentials(creds: {
+    email: string;
+    password: string;
+}): void {
+    email = creds.email;
+    password = creds.password;
 }
 
-export function consumeWizardCredentials(): { email: string; password: string } | null {
-  if (!email || !password) return null;
-  const creds = { email, password };
-  email = null;
-  password = null;
-  return creds;
+export function consumeWizardCredentials(): {
+    email: string;
+    password: string;
+} | null {
+    if (!email || !password) return null;
+    const creds = { email, password };
+    email = null;
+    password = null;
+    return creds;
 }
 
 export function clearWizardCredentials(): void {
-  email = null;
-  password = null;
+    email = null;
+    password = null;
 }

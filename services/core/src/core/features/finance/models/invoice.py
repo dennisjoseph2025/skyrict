@@ -25,6 +25,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    ForeignKey,
     Index,
     Numeric,
     String,
@@ -71,6 +72,15 @@ class ErpInvoiceModel(Base):
         server_default=text("'draft'"),
     )
     total: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
+    currency: Mapped[str] = mapped_column(
+        String(3),
+        ForeignKey("erp_currencies.code"),
+        nullable=False,
+        server_default=text("'USD'"),
+    )
+    exchange_rate: Mapped[Decimal] = mapped_column(
+        Numeric(18, 6), nullable=False, server_default=text("1")
+    )
     source: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'manual'"))
     source_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

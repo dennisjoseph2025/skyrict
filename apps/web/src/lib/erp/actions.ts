@@ -10,64 +10,68 @@
  * and the matrices are unit-testable without a backend.
  */
 
-import type { LeadStatus, OpportunityStage, OrderStatus } from "@/lib/api/crm-api";
+import type {
+    LeadStatus,
+    OpportunityStage,
+    OrderStatus,
+} from "@/lib/api/crm-api";
 
 export interface LeadActions {
-  qualify: boolean;
-  disqualify: boolean;
+    qualify: boolean;
+    disqualify: boolean;
 }
 
 export function leadActions(status: LeadStatus): LeadActions {
-  switch (status) {
-    case "new":
-    case "contacted":
-      return { qualify: true, disqualify: true };
-    default:
-      return { qualify: false, disqualify: false };
-  }
+    switch (status) {
+        case "new":
+        case "contacted":
+            return { qualify: true, disqualify: true };
+        default:
+            return { qualify: false, disqualify: false };
+    }
 }
 
 /** The pipeline columns in order - the board renders one per stage. */
 export const PIPELINE_STAGES: OpportunityStage[] = [
-  "prospecting",
-  "qualified",
-  "proposal",
-  "negotiation",
-  "won",
-  "lost",
+    "prospecting",
+    "qualified",
+    "proposal",
+    "negotiation",
+    "won",
+    "lost",
 ];
 
 export function isTerminalStage(stage: OpportunityStage): boolean {
-  return stage === "won" || stage === "lost";
+    return stage === "won" || stage === "lost";
 }
 
 /** Allowed forward transitions from a stage. Won/lost are terminal. */
 const FORWARD_TRANSITIONS: Record<OpportunityStage, OpportunityStage[]> = {
-  prospecting: ["qualified"],
-  qualified: ["proposal"],
-  proposal: ["negotiation"],
-  negotiation: ["won", "lost"],
-  won: [],
-  lost: [],
+    prospecting: ["qualified"],
+    qualified: ["proposal"],
+    proposal: ["negotiation"],
+    negotiation: ["won", "lost"],
+    won: [],
+    lost: [],
 };
 
 export function nextStages(stage: OpportunityStage): OpportunityStage[] {
-  return FORWARD_TRANSITIONS[stage];
+    return FORWARD_TRANSITIONS[stage];
 }
 
 export interface OrderActions {
-  confirm: boolean;
-  fulfil: boolean;
-  cancel: boolean;
+    confirm: boolean;
+    fulfil: boolean;
+    cancel: boolean;
 }
 
 export function orderActions(status: OrderStatus): OrderActions {
-  switch (status) {
-    case "draft":
-      return { confirm: true, fulfil: false, cancel: true };
-    case "confirmed":
-      return { confirm: false, fulfil: true, cancel: true };
-    default:
-      return { confirm: false, fulfil: false, cancel: false };
-  }
+    switch (status) {
+        case "draft":
+            return { confirm: true, fulfil: false, cancel: true };
+        case "confirmed":
+            return { confirm: false, fulfil: true, cancel: true };
+        default:
+            return { confirm: false, fulfil: false, cancel: false };
+    }
 }

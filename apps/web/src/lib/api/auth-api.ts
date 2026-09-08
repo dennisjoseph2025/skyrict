@@ -15,48 +15,63 @@ import { getAccessToken, setAccessToken } from "@/lib/auth/session-store";
 export { ApiError };
 
 export interface AuthUser {
-  id: string;
-  email: string;
-  fullName: string;
-  isActive: boolean;
-  isVerified: boolean;
-  mfaEnabled: boolean;
-  createdAt: string;
-  /** Relative path `{user_id}/{filename}` served by /api/auth/avatar/... */
-  avatarUrl: string;
+    id: string;
+    email: string;
+    fullName: string;
+    isActive: boolean;
+    isVerified: boolean;
+    mfaEnabled: boolean;
+    createdAt: string;
+    /** Relative path `{user_id}/{filename}` served by /api/auth/avatar/... */
+    avatarUrl: string;
 }
 
 export type LoginResult =
-  | { status: "authenticated"; accessToken: string; expiresIn: number; user: AuthUser }
-  | { status: "mfa_setup"; accessToken: string; expiresIn: number; user: AuthUser }
-  | { status: "mfa_challenge"; mfaToken: string; user: AuthUser };
+    | {
+          status: "authenticated";
+          accessToken: string;
+          expiresIn: number;
+          user: AuthUser;
+      }
+    | {
+          status: "mfa_setup";
+          accessToken: string;
+          expiresIn: number;
+          user: AuthUser;
+      }
+    | { status: "mfa_challenge"; mfaToken: string; user: AuthUser };
 
 export type VerifyMfaResult =
-  | { status: "ok"; accessToken: string; expiresIn: number; user: AuthUser }
-  | { status: "invalid" };
+    | { status: "ok"; accessToken: string; expiresIn: number; user: AuthUser }
+    | { status: "invalid" };
 
 /** POST to a same-origin BFF route; the JSON body is the response payload. */
 async function bffPost<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
+    let res: Response;
+    try {
+        res = await fetch(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            cache: "no-store",
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
 
-  const payload = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) {
-    throw new ApiError(
-      res.status,
-      payload.error ?? "Request failed. Please try again.",
-    );
-  }
-  return payload as T;
+    const payload = (await res.json().catch(() => ({}))) as T & {
+        error?: string;
+    };
+    if (!res.ok) {
+        throw new ApiError(
+            res.status,
+            payload.error ?? "Request failed. Please try again.",
+        );
+    }
+    return payload as T;
 }
 
 // ---------------------------------------------------------------------------
@@ -64,104 +79,118 @@ async function bffPost<T>(path: string, body: unknown): Promise<T> {
 // ---------------------------------------------------------------------------
 
 interface BffLoginResponse {
-  status: "authenticated" | "mfa_setup" | "mfa_challenge";
-  accessToken?: string | null;
-  expiresIn?: number;
-  mfaToken?: string | null;
-  user?: AuthUser | null;
-  error?: string;
+    status: "authenticated" | "mfa_setup" | "mfa_challenge";
+    accessToken?: string | null;
+    expiresIn?: number;
+    mfaToken?: string | null;
+    user?: AuthUser | null;
+    error?: string;
 }
 
 export async function loginEmailPassword(input: {
-  email: string;
-  password: string;
+    email: string;
+    password: string;
 }): Promise<LoginResult> {
-  let response: Response;
-  try {
-    response = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
-
-  const payload = (await response.json().catch(() => ({}))) as BffLoginResponse;
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      payload.error ?? "Unable to sign in. Check your credentials and try again.",
-    );
-  }
-
-  if (payload.status === "mfa_challenge") {
-    setAccessToken(null);
-    if (!payload.mfaToken || !payload.user) {
-      throw new ApiError(502, "Unexpected login response.");
+    let response: Response;
+    try {
+        response = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
     }
-    return {
-      status: "mfa_challenge",
-      mfaToken: payload.mfaToken,
-      user: payload.user,
-    };
-  }
 
-  if (!payload.accessToken || !payload.user) {
-    throw new ApiError(502, "Unexpected login response.");
-  }
-  setAccessToken(payload.accessToken);
-  return {
-    status: payload.status === "mfa_setup" ? "mfa_setup" : "authenticated",
-    accessToken: payload.accessToken,
-    expiresIn: payload.expiresIn ?? 0,
-    user: payload.user,
-  };
+    const payload = (await response
+        .json()
+        .catch(() => ({}))) as BffLoginResponse;
+    if (!response.ok) {
+        throw new ApiError(
+            response.status,
+            payload.error ??
+                "Unable to sign in. Check your credentials and try again.",
+        );
+    }
+
+    if (payload.status === "mfa_challenge") {
+        setAccessToken(null);
+        if (!payload.mfaToken || !payload.user) {
+            throw new ApiError(502, "Unexpected login response.");
+        }
+        return {
+            status: "mfa_challenge",
+            mfaToken: payload.mfaToken,
+            user: payload.user,
+        };
+    }
+
+    if (!payload.accessToken || !payload.user) {
+        throw new ApiError(502, "Unexpected login response.");
+    }
+    setAccessToken(payload.accessToken);
+    return {
+        status: payload.status === "mfa_setup" ? "mfa_setup" : "authenticated",
+        accessToken: payload.accessToken,
+        expiresIn: payload.expiresIn ?? 0,
+        user: payload.user,
+    };
 }
 
 interface BffMfaVerifyResponse {
-  status: "authenticated";
-  accessToken?: string | null;
-  expiresIn?: number;
-  user?: AuthUser | null;
-  error?: string;
+    status: "authenticated";
+    accessToken?: string | null;
+    expiresIn?: number;
+    user?: AuthUser | null;
+    error?: string;
 }
 
 export async function verifyMfa(input: {
-  code: string;
-  mfaToken: string;
+    code: string;
+    mfaToken: string;
 }): Promise<VerifyMfaResult> {
-  let response: Response;
-  try {
-    response = await fetch("/api/auth/mfa/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mfa_token: input.mfaToken, code: input.code }),
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
+    let response: Response;
+    try {
+        response = await fetch("/api/auth/mfa/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                mfa_token: input.mfaToken,
+                code: input.code,
+            }),
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
 
-  const payload = (await response.json().catch(() => ({}))) as BffMfaVerifyResponse;
-  if (response.status === 401 || response.status === 403) {
-    return { status: "invalid" };
-  }
-  if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      payload.error ?? "Unable to verify the code.",
-    );
-  }
-  if (!payload.accessToken || !payload.user) {
-    throw new ApiError(502, "Unexpected verification response.");
-  }
-  setAccessToken(payload.accessToken);
-  return {
-    status: "ok",
-    accessToken: payload.accessToken,
-    expiresIn: payload.expiresIn ?? 0,
-    user: payload.user,
-  };
+    const payload = (await response
+        .json()
+        .catch(() => ({}))) as BffMfaVerifyResponse;
+    if (response.status === 401 || response.status === 403) {
+        return { status: "invalid" };
+    }
+    if (!response.ok) {
+        throw new ApiError(
+            response.status,
+            payload.error ?? "Unable to verify the code.",
+        );
+    }
+    if (!payload.accessToken || !payload.user) {
+        throw new ApiError(502, "Unexpected verification response.");
+    }
+    setAccessToken(payload.accessToken);
+    return {
+        status: "ok",
+        accessToken: payload.accessToken,
+        expiresIn: payload.expiresIn ?? 0,
+        user: payload.user,
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,164 +198,173 @@ export async function verifyMfa(input: {
 // ---------------------------------------------------------------------------
 
 export interface RiskAssessment {
-  requiresCaptcha: boolean;
-  requiresChallenge: boolean;
-  signals: string[];
+    requiresCaptcha: boolean;
+    requiresChallenge: boolean;
+    signals: string[];
 }
 
 export async function assessRisk(): Promise<RiskAssessment> {
-  return {
-    requiresCaptcha: true,
-    requiresChallenge: false,
-    signals: [],
-  };
+    return {
+        requiresCaptcha: true,
+        requiresChallenge: false,
+        signals: [],
+    };
 }
 
 export async function solveCaptcha(): Promise<{ status: "ok" }> {
-  return { status: "ok" };
+    return { status: "ok" };
 }
 
 export async function signupStart(input: {
-  email: string;
-  turnstileToken?: string;
+    email: string;
+    turnstileToken?: string;
 }): Promise<{ status: "ok" }> {
-  return bffPost<{ status: "ok" }>("/api/auth/start", {
-    email: input.email,
-    turnstileToken: input.turnstileToken,
-  });
+    return bffPost<{ status: "ok" }>("/api/auth/start", {
+        email: input.email,
+        turnstileToken: input.turnstileToken,
+    });
 }
 
 export async function checkEmailAvailability(input: {
-  email: string;
+    email: string;
 }): Promise<{ available: boolean }> {
-  return bffPost<{ available: boolean }>("/api/auth/check/email", {
-    email: input.email,
-  });
+    return bffPost<{ available: boolean }>("/api/auth/check/email", {
+        email: input.email,
+    });
 }
 
 export async function requestVerificationCode(input: {
-  email: string;
+    email: string;
 }): Promise<{
-  status: "ok";
-  resendIn: number;
-  code?: string | null;
+    status: "ok";
+    resendIn: number;
+    code?: string | null;
 }> {
-  return bffPost<{ status: "ok"; resendIn: number; code?: string | null }>(
-    "/api/auth/code/send",
-    { email: input.email },
-  );
+    return bffPost<{ status: "ok"; resendIn: number; code?: string | null }>(
+        "/api/auth/code/send",
+        { email: input.email },
+    );
 }
 
 export type VerifyEmailCodeResult =
-  | { status: "ok"; verificationToken: string }
-  | { status: "invalid" }
-  | { status: "expired" };
+    | { status: "ok"; verificationToken: string }
+    | { status: "invalid" }
+    | { status: "expired" };
 
 export async function verifyEmailCode(input: {
-  email: string;
-  code: string;
+    email: string;
+    code: string;
 }): Promise<VerifyEmailCodeResult> {
-  const data = await bffPost<{
-    status: "ok" | "invalid" | "expired";
-    verificationToken?: string | null;
-  }>("/api/auth/code/verify", { email: input.email, code: input.code });
-  if (data.status === "ok" && data.verificationToken) {
-    return { status: "ok", verificationToken: data.verificationToken };
-  }
-  if (data.status === "expired") {
-    return { status: "expired" };
-  }
-  return { status: "invalid" };
+    const data = await bffPost<{
+        status: "ok" | "invalid" | "expired";
+        verificationToken?: string | null;
+    }>("/api/auth/code/verify", { email: input.email, code: input.code });
+    if (data.status === "ok" && data.verificationToken) {
+        return { status: "ok", verificationToken: data.verificationToken };
+    }
+    if (data.status === "expired") {
+        return { status: "expired" };
+    }
+    return { status: "invalid" };
 }
 
-export async function getCaptcha(): Promise<{ captchaId: string; image: string }> {
-  let res: Response;
-  try {
-    res = await fetch("/api/auth/captcha", { cache: "no-store" });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
+export async function getCaptcha(): Promise<{
+    captchaId: string;
+    image: string;
+}> {
+    let res: Response;
+    try {
+        res = await fetch("/api/auth/captcha", { cache: "no-store" });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
 
-  const payload = (await res.json().catch(() => ({}))) as {
-    captchaId?: string;
-    image?: string;
-    error?: string;
-  };
-  if (!res.ok) {
-    throw new ApiError(res.status, payload.error ?? "Could not load the security code.");
-  }
-  if (!payload.captchaId || !payload.image) {
-    throw new ApiError(502, "Unexpected captcha response.");
-  }
-  return { captchaId: payload.captchaId, image: payload.image };
+    const payload = (await res.json().catch(() => ({}))) as {
+        captchaId?: string;
+        image?: string;
+        error?: string;
+    };
+    if (!res.ok) {
+        throw new ApiError(
+            res.status,
+            payload.error ?? "Could not load the security code.",
+        );
+    }
+    if (!payload.captchaId || !payload.image) {
+        throw new ApiError(502, "Unexpected captcha response.");
+    }
+    return { captchaId: payload.captchaId, image: payload.image };
 }
 
 export async function completeSecurityStep(input: {
-  email: string;
-  verificationToken: string;
-  password: string;
-  captchaId: string;
-  captchaAnswer: string;
+    email: string;
+    verificationToken: string;
+    password: string;
+    captchaId: string;
+    captchaAnswer: string;
 }): Promise<{ status: "ok" }> {
-  return bffPost<{ status: "ok" }>("/api/auth/password", {
-    email: input.email,
-    verificationToken: input.verificationToken,
-    password: input.password,
-    captchaId: input.captchaId,
-    captchaAnswer: input.captchaAnswer,
-  });
+    return bffPost<{ status: "ok" }>("/api/auth/password", {
+        email: input.email,
+        verificationToken: input.verificationToken,
+        password: input.password,
+        captchaId: input.captchaId,
+        captchaAnswer: input.captchaAnswer,
+    });
 }
 
 export async function checkWorkspaceSlug(input: {
-  slug: string;
+    slug: string;
 }): Promise<{ available: boolean }> {
-  return bffPost<{ available: boolean }>("/api/auth/check/slug", {
-    slug: input.slug,
-  });
+    return bffPost<{ available: boolean }>("/api/auth/check/slug", {
+        slug: input.slug,
+    });
 }
 
 export interface CreateOrganizationInput {
-  email: string;
-  verificationToken: string;
-  planId: string;
-  companyName: string;
-  industry: string;
-  workspaceSlug: string;
-  ownerFullName: string;
-  phoneCountry: string;
-  phoneNumber: string;
-  address: {
-    country: string;
-    addressLine1: string;
-    addressLine2?: string;
-    city: string;
-    state: string;
-    postalCode: string;
-  };
+    email: string;
+    verificationToken: string;
+    planId: string;
+    companyName: string;
+    industry: string;
+    workspaceSlug: string;
+    ownerFullName: string;
+    phoneCountry: string;
+    phoneNumber: string;
+    address: {
+        country: string;
+        addressLine1: string;
+        addressLine2?: string;
+        city: string;
+        state: string;
+        postalCode: string;
+    };
 }
 
 export interface CreateOrganizationResult {
-  status: "ok";
-  mfaRequired: boolean;
-  tenantId: string;
-  tenantSlug: string;
+    status: "ok";
+    mfaRequired: boolean;
+    tenantId: string;
+    tenantSlug: string;
 }
 
 export async function createOrganization(
-  input: CreateOrganizationInput,
+    input: CreateOrganizationInput,
 ): Promise<CreateOrganizationResult> {
-  return bffPost<CreateOrganizationResult>("/api/auth/org", {
-    email: input.email,
-    verificationToken: input.verificationToken,
-    planId: input.planId,
-    companyName: input.companyName,
-    industry: input.industry,
-    workspaceSlug: input.workspaceSlug,
-    ownerFullName: input.ownerFullName,
-    phoneCountry: input.phoneCountry,
-    phoneNumber: input.phoneNumber,
-    address: input.address,
-  });
+    return bffPost<CreateOrganizationResult>("/api/auth/org", {
+        email: input.email,
+        verificationToken: input.verificationToken,
+        planId: input.planId,
+        companyName: input.companyName,
+        industry: input.industry,
+        workspaceSlug: input.workspaceSlug,
+        ownerFullName: input.ownerFullName,
+        phoneCountry: input.phoneCountry,
+        phoneNumber: input.phoneNumber,
+        address: input.address,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -334,74 +372,89 @@ export async function createOrganization(
 // ---------------------------------------------------------------------------
 
 export interface MfaSetup {
-  secret: string;
-  otpauthUri: string;
-  backupCodes: string[];
+    secret: string;
+    otpauthUri: string;
+    backupCodes: string[];
 }
 
 function authHeaders(contentType: string | null = "application/json"): Headers {
-  const headers = new Headers();
-  if (contentType) headers.set("Content-Type", contentType);
-  const token = getAccessToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  return headers;
+    const headers = new Headers();
+    if (contentType) headers.set("Content-Type", contentType);
+    const token = getAccessToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return headers;
 }
 
 export async function setupMfa(): Promise<MfaSetup> {
-  let res: Response;
-  try {
-    res = await fetch("/api/auth/mfa/setup", {
-      method: "POST",
-      headers: authHeaders(),
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
+    let res: Response;
+    try {
+        res = await fetch("/api/auth/mfa/setup", {
+            method: "POST",
+            headers: authHeaders(),
+            cache: "no-store",
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
 
-  const payload = (await res.json().catch(() => ({}))) as {
-    secret?: string;
-    provisioning_uri?: string;
-    backup_codes?: string[];
-    error?: string;
-  };
-  if (!res.ok) {
-    throw new ApiError(res.status, payload.error ?? "Could not start MFA setup.");
-  }
+    const payload = (await res.json().catch(() => ({}))) as {
+        secret?: string;
+        provisioning_uri?: string;
+        backup_codes?: string[];
+        error?: string;
+    };
+    if (!res.ok) {
+        throw new ApiError(
+            res.status,
+            payload.error ?? "Could not start MFA setup.",
+        );
+    }
 
-  return {
-    secret: payload.secret ?? "",
-    otpauthUri: payload.provisioning_uri ?? "",
-    backupCodes: Array.isArray(payload.backup_codes) ? payload.backup_codes : [],
-  };
+    return {
+        secret: payload.secret ?? "",
+        otpauthUri: payload.provisioning_uri ?? "",
+        backupCodes: Array.isArray(payload.backup_codes)
+            ? payload.backup_codes
+            : [],
+    };
 }
 
-export async function regenerateBackupCodes(): Promise<{ backupCodes: string[] }> {
-  let res: Response;
-  try {
-    res = await fetch("/api/auth/mfa/backup-codes", {
-      method: "POST",
-      headers: authHeaders(),
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
+export async function regenerateBackupCodes(): Promise<{
+    backupCodes: string[];
+}> {
+    let res: Response;
+    try {
+        res = await fetch("/api/auth/mfa/backup-codes", {
+            method: "POST",
+            headers: authHeaders(),
+            cache: "no-store",
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
 
-  const payload = (await res.json().catch(() => ({}))) as {
-    backup_codes?: string[];
-    error?: string;
-  };
-  if (!res.ok) {
-    throw new ApiError(
-      res.status,
-      payload.error ?? "Could not regenerate recovery codes.",
-    );
-  }
+    const payload = (await res.json().catch(() => ({}))) as {
+        backup_codes?: string[];
+        error?: string;
+    };
+    if (!res.ok) {
+        throw new ApiError(
+            res.status,
+            payload.error ?? "Could not regenerate recovery codes.",
+        );
+    }
 
-  return {
-    backupCodes: Array.isArray(payload.backup_codes) ? payload.backup_codes : [],
-  };
+    return {
+        backupCodes: Array.isArray(payload.backup_codes)
+            ? payload.backup_codes
+            : [],
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -415,56 +468,62 @@ export async function regenerateBackupCodes(): Promise<{ backupCodes: string[] }
  * root. The URL bar ends on {slug}.localhost - never signin.
  */
 export async function completeHandoff(redirect = "/"): Promise<void> {
-  const mint = await bffPost<{
-    token: string;
-    workspaceUrl: string;
-    redirect: string;
-  }>("/api/auth/handoff/mint", { redirect });
+    const mint = await bffPost<{
+        token: string;
+        workspaceUrl: string;
+        redirect: string;
+    }>("/api/auth/handoff/mint", { redirect });
 
-  // Redeem via a top-level form POST navigation, not fetch. The workspace
-  // origin sets the host-scoped session cookie during a first-party navigation
-  // and 302s to the redirect target - no CORS, no third-party-cookie blocking.
-  // (A cross-site fetch would drop the Set-Cookie under Chrome's third-party
-  // cookie blocking, bouncing the user straight back to signin.)
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = new URL("/api/auth/handoff", mint.workspaceUrl).toString();
-  form.style.display = "none";
-  const tokenInput = document.createElement("input");
-  tokenInput.type = "hidden";
-  tokenInput.name = "token";
-  tokenInput.value = mint.token;
-  form.appendChild(tokenInput);
-  document.body.appendChild(form);
-  form.submit();
+    // Redeem via a top-level form POST navigation, not fetch. The workspace
+    // origin sets the host-scoped session cookie during a first-party navigation
+    // and 302s to the redirect target - no CORS, no third-party-cookie blocking.
+    // (A cross-site fetch would drop the Set-Cookie under Chrome's third-party
+    // cookie blocking, bouncing the user straight back to signin.)
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = new URL("/api/auth/handoff", mint.workspaceUrl).toString();
+    form.style.display = "none";
+    const tokenInput = document.createElement("input");
+    tokenInput.type = "hidden";
+    tokenInput.name = "token";
+    tokenInput.value = mint.token;
+    form.appendChild(tokenInput);
+    document.body.appendChild(form);
+    form.submit();
 }
 
 export async function confirmMfaSetup(input: {
-  code: string;
+    code: string;
 }): Promise<{ status: "ok" } | { status: "invalid" }> {
-  let res: Response;
-  try {
-    res = await fetch("/api/auth/mfa/confirm", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ code: input.code }),
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
+    let res: Response;
+    try {
+        res = await fetch("/api/auth/mfa/confirm", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ code: input.code }),
+            cache: "no-store",
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
 
-  const payload = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    error?: string;
-  };
-  if (res.status === 400 || res.status === 403) {
-    return { status: "invalid" };
-  }
-  if (!res.ok) {
-    throw new ApiError(res.status, payload.error ?? "Could not verify the code.");
-  }
-  return payload.ok ? { status: "ok" } : { status: "invalid" };
+    const payload = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+    };
+    if (res.status === 400 || res.status === 403) {
+        return { status: "invalid" };
+    }
+    if (!res.ok) {
+        throw new ApiError(
+            res.status,
+            payload.error ?? "Could not verify the code.",
+        );
+    }
+    return payload.ok ? { status: "ok" } : { status: "invalid" };
 }
 
 // ---------------------------------------------------------------------------
@@ -472,50 +531,59 @@ export async function confirmMfaSetup(input: {
 // ---------------------------------------------------------------------------
 
 interface BffAvatarResponse {
-  user?: AuthUser | null;
-  error?: string;
+    user?: AuthUser | null;
+    error?: string;
 }
 
 /** Parse a BFF avatar response, throwing the surfaced error on failure. */
 async function bffAvatarResult(res: Response): Promise<AuthUser> {
-  const payload = (await res.json().catch(() => ({}))) as BffAvatarResponse;
-  if (!res.ok) {
-    throw new ApiError(res.status, payload.error ?? "Could not update your avatar.");
-  }
-  if (!payload.user) {
-    throw new ApiError(502, "Unexpected avatar response.");
-  }
-  return payload.user;
+    const payload = (await res.json().catch(() => ({}))) as BffAvatarResponse;
+    if (!res.ok) {
+        throw new ApiError(
+            res.status,
+            payload.error ?? "Could not update your avatar.",
+        );
+    }
+    if (!payload.user) {
+        throw new ApiError(502, "Unexpected avatar response.");
+    }
+    return payload.user;
 }
 
 export async function uploadAvatar(file: File): Promise<AuthUser> {
-  let res: Response;
-  try {
-    const form = new FormData();
-    form.append("avatar", file);
-    res = await fetch("/api/auth/avatar", {
-      method: "PUT",
-      // The browser sets the multipart boundary, so no Content-Type header.
-      headers: authHeaders(null),
-      body: form,
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
-  return bffAvatarResult(res);
+    let res: Response;
+    try {
+        const form = new FormData();
+        form.append("avatar", file);
+        res = await fetch("/api/auth/avatar", {
+            method: "PUT",
+            // The browser sets the multipart boundary, so no Content-Type header.
+            headers: authHeaders(null),
+            body: form,
+            cache: "no-store",
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
+    return bffAvatarResult(res);
 }
 
 export async function removeAvatar(): Promise<AuthUser> {
-  let res: Response;
-  try {
-    res = await fetch("/api/auth/avatar", {
-      method: "DELETE",
-      headers: authHeaders(),
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(0, "Network error - check your connection and try again.");
-  }
-  return bffAvatarResult(res);
+    let res: Response;
+    try {
+        res = await fetch("/api/auth/avatar", {
+            method: "DELETE",
+            headers: authHeaders(),
+            cache: "no-store",
+        });
+    } catch {
+        throw new ApiError(
+            0,
+            "Network error - check your connection and try again.",
+        );
+    }
+    return bffAvatarResult(res);
 }

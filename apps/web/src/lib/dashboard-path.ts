@@ -6,6 +6,8 @@
  * normalize before matching.
  */
 export function normalizeDashboardPath(pathname: string): string {
-  if (pathname === "/") return "/dashboard";
-  return pathname.startsWith("/dashboard") ? pathname : `/dashboard${pathname}`;
+    if (pathname === "/") return "/dashboard";
+    return pathname.startsWith("/dashboard")
+        ? pathname
+        : `/dashboard${pathname}`;
 }

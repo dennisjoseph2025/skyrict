@@ -216,6 +216,22 @@ class Settings(BaseSettings):
         description="per-item retry budget before an item is marked failed permanently",
     )
 
+    # --- Reminder email delivery (SMTP -> Mailpit in dev) ---
+    EMAIL_SMTP_HOST: str = Field(
+        default="",
+        description=(
+            "SMTP relay host for payment-reminder email. Empty selects the "
+            "log-only transport (dev/test default). Dev: 'mailpit' for the "
+            "Mailpit container. Mirrors the ai-agent/identity SMTP blocks so "
+            "compose can share one relay."
+        ),
+    )
+    EMAIL_SMTP_PORT: int = Field(default=1025, description="SMTP relay port")
+    EMAIL_FROM_ADDR: str = Field(
+        default="Skyrict <no-reply@skyrict.dev>",
+        description="From address for reminder email",
+    )
+
     # --- Reporting endpoints (RPT-BE-001) ---
     REPORTING_QUERY_TIMEOUT_SECONDS: int = Field(
         default=30,

@@ -6,5 +6,5 @@
  * same-origin /api/auth/* BFF route handlers.
  */
 export const env = {
-  turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "",
+    turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "",
 };

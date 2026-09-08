@@ -11,42 +11,42 @@ import { headers } from "next/headers";
 import { hostSurface, resolveTenantSlug } from "@/lib/server/auth";
 
 interface OriginParts {
-  proto: string;
-  port: string;
-  apex: string;
-  host: string;
+    proto: string;
+    port: string;
+    apex: string;
+    host: string;
 }
 
 async function originParts(): Promise<OriginParts> {
-  const h = await headers();
-  const host = h.get("host") ?? "";
-  const forwarded = h.get("x-forwarded-proto");
-  const proto =
-    forwarded?.split(",")[0]?.trim() ??
-    (process.env.NODE_ENV === "production" ? "https" : "http");
-  const hostname = host.replace(/:\d+$/, "").toLowerCase();
-  const port = host.includes(":") ? `:${host.split(":").pop()}` : "";
-  const apex = hostname.split(".").slice(1).join(".") || hostname;
-  return { proto, port, apex, host };
+    const h = await headers();
+    const host = h.get("host") ?? "";
+    const forwarded = h.get("x-forwarded-proto");
+    const proto =
+        forwarded?.split(",")[0]?.trim() ??
+        (process.env.NODE_ENV === "production" ? "https" : "http");
+    const hostname = host.replace(/:\d+$/, "").toLowerCase();
+    const port = host.includes(":") ? `:${host.split(":").pop()}` : "";
+    const apex = hostname.split(".").slice(1).join(".") || hostname;
+    return { proto, port, apex, host };
 }
 
 /** Absolute `{slug}.signin.{apex}/signin` URL for the current tenant. */
 export async function signinUrl(error?: string): Promise<string> {
-  const { proto, port, apex, host } = await originParts();
-  const { surface, slug } = hostSurface(host);
-  const tenant = slug || resolveTenantSlug(host) || "app";
-  const base =
-    surface === "signin"
-      ? `${proto}://${host}/signin`
-      : `${proto}://${tenant}.signin.${apex}${port}/signin`;
-  return error ? `${base}?error=${encodeURIComponent(error)}` : base;
+    const { proto, port, apex, host } = await originParts();
+    const { surface, slug } = hostSurface(host);
+    const tenant = slug || resolveTenantSlug(host) || "app";
+    const base =
+        surface === "signin"
+            ? `${proto}://${host}/signin`
+            : `${proto}://${tenant}.signin.${apex}${port}/signin`;
+    return error ? `${base}?error=${encodeURIComponent(error)}` : base;
 }
 
 /** Absolute `{slug}.{apex}` origin for the current tenant. */
 export async function workspaceUrl(): Promise<string> {
-  const { proto, port, apex, host } = await originParts();
-  const { surface, slug } = hostSurface(host);
-  if (surface === "workspace") return `${proto}://${host}`;
-  const tenant = slug || resolveTenantSlug(host) || "app";
-  return `${proto}://${tenant}.${apex}${port}`;
+    const { proto, port, apex, host } = await originParts();
+    const { surface, slug } = hostSurface(host);
+    if (surface === "workspace") return `${proto}://${host}`;
+    const tenant = slug || resolveTenantSlug(host) || "app";
+    return `${proto}://${tenant}.${apex}${port}`;
 }

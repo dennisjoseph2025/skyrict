@@ -4,13 +4,13 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { AutomationClient } from "./automation";
 
 export const metadata: Metadata = {
-  title: "Payroll automation",
+    title: "Payroll automation",
 };
 
 export default function AutomationPage() {
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.payroll.ai.read">
-      <AutomationClient />
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.payroll.ai.read">
+            <AutomationClient />
+        </ModuleAccessBoundary>
+    );
 }

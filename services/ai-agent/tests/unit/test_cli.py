@@ -32,6 +32,17 @@ def test_expected_command_surface_registered() -> None:
     assert {"serve", "migrate", "ingest", "evaluate", "sweep_caches"} <= set(commands)
 
 
+def test_eval_finance_command_registered() -> None:
+    """The FIN-AI-002 prompt eval is dispatched as `ai-agent eval-finance`."""
+    import inspect
+
+    commands = _registered()
+    assert "eval_finance" in commands
+    params = set(inspect.signature(commands["eval_finance"]).parameters)
+    assert "config" in params
+    assert "dry_run" in params
+
+
 def test_eval_command_accepts_threshold_flags() -> None:
     """The gate thresholds are tunable from the command line (CI overrides)."""
     import inspect

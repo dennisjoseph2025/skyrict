@@ -41,6 +41,7 @@ from core.core.constants import INVOICE_PREFIX, PAYMENT_PREFIX
 from core.domain.entities import (
     AccountCodeSuggestion,
     AiFinanceAnomaly,
+    AiFinanceQualityScore,
     AiFinanceSuggestion,
     ArAging,
     ArAgingBucket,
@@ -57,6 +58,7 @@ from core.domain.entities import (
     ComparativePnlRow,
     DuplicateCandidate,
     DuplicateGroup,
+    ExchangeRate,
     FiscalPeriod,
     HealthComponent,
     HealthScore,
@@ -80,8 +82,10 @@ from core.domain.entities import (
 )
 from core.domain.value_objects import AccountType, EntryStatus, InvoiceStatus, PaymentStatus
 from core.features.finance.models.ai_finance_anomaly import AiFinanceAnomalyModel
+from core.features.finance.models.ai_finance_quality_score import AiFinanceQualityScoreModel
 from core.features.finance.models.ai_finance_suggestion import AiFinanceSuggestionModel
 from core.features.finance.models.chart_of_account import ErpChartOfAccountModel
+from core.features.finance.models.exchange_rate import ErpExchangeRateModel
 from core.features.finance.models.fiscal_period import ErpFiscalPeriodModel
 from core.features.finance.models.invoice import ErpInvoiceModel
 from core.features.finance.models.invoice_line import ErpInvoiceLineModel
@@ -223,6 +227,8 @@ def _invoice_from_orm(model: ErpInvoiceModel, lines: Sequence[InvoiceLine]) -> I
         due_date=model.due_date,
         status=model.status,
         total=model.total,
+        currency=model.currency,
+        exchange_rate=model.exchange_rate,
         source=model.source,
         source_ref=model.source_ref,
         lines=tuple(lines),
@@ -232,6 +238,16 @@ def _invoice_from_orm(model: ErpInvoiceModel, lines: Sequence[InvoiceLine]) -> I
         voided_at=model.voided_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
+    )
+
+
+def _exchange_rate_from_orm(model: ErpExchangeRateModel) -> ExchangeRate:
+    return ExchangeRate(
+        tenant_id=model.tenant_id,
+        base_currency=model.base_currency,
+        quote_currency=model.quote_currency,
+        effective_date=model.effective_date,
+        rate=model.rate,
     )
 
 
@@ -271,6 +287,7 @@ def _ai_suggestion_from_orm(model: AiFinanceSuggestionModel) -> AiFinanceSuggest
         suggested_name=model.suggested_name,
         confidence=model.confidence,
         status=model.status,
+        feature=model.feature,
         id=model.id,
         created_at=model.created_at,
     )
@@ -604,6 +621,8 @@ class FinanceRepository:
             due_date=invoice.due_date,
             status=invoice.status,
             total=invoice.total,
+            currency=invoice.currency,
+            exchange_rate=invoice.exchange_rate,
             source=invoice.source,
             source_ref=invoice.source_ref,
         )
@@ -666,7 +685,7 @@ class FinanceRepository:
         offset: int = 0,
         limit: int = 50,
     ) -> Sequence[Invoice]:
-        """List invoice HEADERS (lines are loaded by ``get_invoice``)."""
+        """List invoice headers with their line items, in one page."""
         stmt = select(ErpInvoiceModel).where(ErpInvoiceModel.tenant_id == tenant_id)
         if status is not None:
             stmt = stmt.where(ErpInvoiceModel.status == status)
@@ -675,8 +694,22 @@ class FinanceRepository:
             .offset(offset)
             .limit(limit)
         )
-        result = await self.session.execute(stmt)
-        return [_invoice_from_orm(model, ()) for model in result.scalars().all()]
+        models = list((await self.session.execute(stmt)).scalars().all())
+        lines_by_invoice: dict[uuid.UUID, list[InvoiceLine]] = {}
+        if models:
+            line_stmt = (
+                select(ErpInvoiceLineModel)
+                .where(
+                    ErpInvoiceLineModel.tenant_id == tenant_id,
+                    ErpInvoiceLineModel.invoice_id.in_([m.id for m in models]),
+                )
+                .order_by(ErpInvoiceLineModel.line_no)
+            )
+            for line_model in (await self.session.execute(line_stmt)).scalars().all():
+                lines_by_invoice.setdefault(line_model.invoice_id, []).append(
+                    _invoice_line_from_orm(line_model)
+                )
+        return [_invoice_from_orm(model, lines_by_invoice.get(model.id, ())) for model in models]
 
     async def issue_invoice(
         self, invoice_id: uuid.UUID, tenant_id: uuid.UUID, *, issued_at: datetime
@@ -813,6 +846,63 @@ class FinanceRepository:
         stmt = select(text("nextval('seq_erp_invoice_number')"))
         seq = int((await self.session.execute(stmt)).scalar_one())
         return _document_number(INVOICE_PREFIX, year, seq)
+
+    async def count_invoices_since(self, tenant_id: uuid.UUID, since: datetime) -> int:
+        stmt = select(func.count(ErpInvoiceModel.id)).where(
+            ErpInvoiceModel.tenant_id == tenant_id,
+            ErpInvoiceModel.invoice_date >= since.date(),
+        )
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def get_exchange_rate(
+        self,
+        tenant_id: uuid.UUID,
+        base_currency: str,
+        quote_currency: str,
+        on_date: date,
+    ) -> ExchangeRate | None:
+        stmt = (
+            select(ErpExchangeRateModel)
+            .where(
+                ErpExchangeRateModel.tenant_id == tenant_id,
+                ErpExchangeRateModel.base_currency == base_currency,
+                ErpExchangeRateModel.quote_currency == quote_currency,
+                ErpExchangeRateModel.effective_date <= on_date,
+            )
+            .order_by(ErpExchangeRateModel.effective_date.desc())
+            .limit(1)
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        return _exchange_rate_from_orm(model) if model is not None else None
+
+    async def upsert_exchange_rate(self, rate: ExchangeRate) -> ExchangeRate:
+        model = ErpExchangeRateModel(
+            tenant_id=rate.tenant_id,
+            base_currency=rate.base_currency,
+            quote_currency=rate.quote_currency,
+            effective_date=rate.effective_date,
+            rate=rate.rate,
+        )
+        await self.session.merge(model)
+        await self.session.flush()
+        return rate
+
+    async def list_exchange_rates(
+        self, tenant_id: uuid.UUID, *, currency: str | None = None
+    ) -> Sequence[ExchangeRate]:
+        stmt = select(ErpExchangeRateModel).where(ErpExchangeRateModel.tenant_id == tenant_id)
+        if currency is not None:
+            stmt = stmt.where(
+                (ErpExchangeRateModel.base_currency == currency)
+                | (ErpExchangeRateModel.quote_currency == currency)
+            )
+        stmt = stmt.order_by(
+            ErpExchangeRateModel.base_currency,
+            ErpExchangeRateModel.quote_currency,
+            ErpExchangeRateModel.effective_date.desc(),
+        )
+        models = (await self.session.execute(stmt)).scalars().all()
+        return [_exchange_rate_from_orm(model) for model in models]
 
     async def next_payment_number(self, tenant_id: uuid.UUID, year: int) -> str:
         stmt = select(text("nextval('seq_erp_payment_number')"))
@@ -1736,12 +1826,14 @@ class FinanceRepository:
         stmt = select(AiFinanceSuggestionModel).where(
             AiFinanceSuggestionModel.tenant_id == tenant_id,
             AiFinanceSuggestionModel.description == suggestion.description,
+            AiFinanceSuggestionModel.feature == suggestion.feature,
         )
         model = (await self.session.execute(stmt)).scalar_one_or_none()
         if model is None:
             model = AiFinanceSuggestionModel(
                 tenant_id=tenant_id,
                 description=suggestion.description,
+                feature=suggestion.feature,
                 suggested_code=suggestion.suggested_code,
                 suggested_name=suggestion.suggested_name,
                 confidence=suggestion.confidence,
@@ -1754,6 +1846,92 @@ class FinanceRepository:
         await self.session.flush()
         await self.session.refresh(model)
         return _ai_suggestion_from_orm(model)
+
+    async def get_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion | None:
+        stmt = select(AiFinanceSuggestionModel).where(
+            AiFinanceSuggestionModel.tenant_id == tenant_id,
+            AiFinanceSuggestionModel.id == suggestion_id,
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            return None
+        return _ai_suggestion_from_orm(model)
+
+    async def review_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID, *, accepted: bool
+    ) -> AiFinanceSuggestion | None:
+        stmt = select(AiFinanceSuggestionModel).where(
+            AiFinanceSuggestionModel.tenant_id == tenant_id,
+            AiFinanceSuggestionModel.id == suggestion_id,
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            return None
+        model.status = "accepted" if accepted else "dismissed"
+        await self.session.flush()
+        await self.session.refresh(model)
+        return _ai_suggestion_from_orm(model)
+
+    async def suggestion_acceptance_counts(
+        self, tenant_id: uuid.UUID, window_days: int
+    ) -> Sequence[tuple[str, int, int]]:
+        cutoff = datetime.now(UTC) - timedelta(days=window_days)
+        stmt = (
+            select(
+                AiFinanceSuggestionModel.feature,
+                func.count(AiFinanceSuggestionModel.id).filter(
+                    AiFinanceSuggestionModel.status == "accepted"
+                ),
+                func.count(AiFinanceSuggestionModel.id).filter(
+                    AiFinanceSuggestionModel.status == "dismissed"
+                ),
+            )
+            .where(
+                AiFinanceSuggestionModel.tenant_id == tenant_id,
+                AiFinanceSuggestionModel.created_at >= cutoff,
+            )
+            .group_by(AiFinanceSuggestionModel.feature)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [(str(row[0]), int(row[1]), int(row[2])) for row in rows]
+
+    async def upsert_ai_quality_score(
+        self, tenant_id: uuid.UUID, score: AiFinanceQualityScore
+    ) -> AiFinanceQualityScore:
+        stmt = select(AiFinanceQualityScoreModel).where(
+            AiFinanceQualityScoreModel.tenant_id == tenant_id,
+            AiFinanceQualityScoreModel.feature == score.feature,
+            AiFinanceQualityScoreModel.window_days == score.window_days,
+        )
+        model = (await self.session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            model = AiFinanceQualityScoreModel(
+                tenant_id=tenant_id,
+                feature=score.feature,
+                window_days=score.window_days,
+                sample_count=score.sample_count,
+                acceptance_rate=score.acceptance_rate,
+                below_threshold=score.below_threshold,
+            )
+            self.session.add(model)
+        else:
+            model.sample_count = score.sample_count
+            model.acceptance_rate = score.acceptance_rate
+            model.below_threshold = score.below_threshold
+        await self.session.flush()
+        await self.session.refresh(model)
+        return AiFinanceQualityScore(
+            tenant_id=model.tenant_id,
+            feature=model.feature,
+            window_days=model.window_days,
+            sample_count=model.sample_count,
+            acceptance_rate=model.acceptance_rate,
+            below_threshold=model.below_threshold,
+            id=model.id,
+            computed_at=model.computed_at,
+        )
 
     async def upsert_ai_anomaly(
         self, tenant_id: uuid.UUID, anomaly: AiFinanceAnomaly

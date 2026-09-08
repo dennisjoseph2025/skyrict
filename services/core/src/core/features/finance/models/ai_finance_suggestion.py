@@ -1,7 +1,9 @@
 """ai_finance_suggestions - persisted account-code suggestion rows.
 
-Upserted on duplicate scan (deduped on tenant + description hash) and
-accepted/dismissed later by humans (SKY-66)."""
+Upserted on account-code suggestion (deduped on tenant + description +
+feature hash) and accepted/dismissed by humans (SKY-66). ``status`` moves
+pending -> accepted|dismissed; the acceptance rate per feature feeds
+``ai_finance_quality_scores`` (SKY-67 acceptance telemetry)."""
 
 from __future__ import annotations
 
@@ -9,7 +11,16 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Numeric, String, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,7 +33,12 @@ class AiFinanceSuggestionModel(Base):
         UniqueConstraint(
             "tenant_id",
             "description",
-            name="uq_ai_finance_suggestions_tenant_description",
+            "feature",
+            name="uq_ai_finance_suggestions_tenant_description_feature",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'accepted', 'dismissed')",
+            name="ck_ai_finance_suggestions_status",
         ),
     )
 
@@ -33,6 +49,9 @@ class AiFinanceSuggestionModel(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
     )
     description: Mapped[str] = mapped_column(String(512), nullable=False)
+    feature: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'account_suggest'")
+    )
     suggested_code: Mapped[str] = mapped_column(String(32), nullable=False)
     suggested_name: Mapped[str] = mapped_column(String(255), nullable=False)
     confidence: Mapped[Decimal] = mapped_column(Numeric(3, 2), nullable=False)

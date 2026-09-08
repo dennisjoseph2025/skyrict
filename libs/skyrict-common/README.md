@@ -21,9 +21,9 @@ logger = get_logger(__name__)
 
 ## Modules
 
-| Module | Purpose |
-|--------|---------|
+| Module       | Purpose                                                                          |
+| ------------ | -------------------------------------------------------------------------------- |
 | `exceptions` | Base exceptions for every domain error (auth, user, tenant, session, validation) |
-| `schemas` | `ResponseEnvelope`, `ErrorResponse`, `ListResponse`, `PaginationMeta` |
-| `pagination` | `PaginationParams` with offset/limit calculation |
-| `logging` | Structured JSON logging via structlog |
+| `schemas`    | `ResponseEnvelope`, `ErrorResponse`, `ListResponse`, `PaginationMeta`            |
+| `pagination` | `PaginationParams` with offset/limit calculation                                 |
+| `logging`    | Structured JSON logging via structlog                                            |

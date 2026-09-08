@@ -59,6 +59,11 @@ ERP_FINANCE_APPROVE = "erp.finance.approve"
 ERP_FINANCE_AI_READ = "erp.finance.ai.read"
 ERP_FINANCE_AI_WRITE = "erp.finance.ai.write"
 
+# Currency FX (C2, SKY-67): read gates exchange-rate lookup/context used by the
+# invoice currency selector; write gates tenants entering/updating rates.
+CORE_FX_READ = "core.fx.read"
+CORE_FX_WRITE = "core.fx.write"
+
 # HR (design doc docs/design/hr-payroll.md)
 ERP_HR_READ = "erp.hr.read"
 ERP_HR_WRITE = "erp.hr.write"
@@ -131,6 +136,8 @@ CATALOG: tuple[str, ...] = (
     ERP_FINANCE_APPROVE,
     ERP_FINANCE_AI_READ,
     ERP_FINANCE_AI_WRITE,
+    CORE_FX_READ,
+    CORE_FX_WRITE,
     ERP_HR_READ,
     ERP_HR_WRITE,
     ERP_HR_APPROVE,
@@ -178,6 +185,7 @@ PERMISSION_MODULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Finance AI",
         (ERP_FINANCE_AI_READ, ERP_FINANCE_AI_WRITE),
     ),
+    ("fx", "FX rates", (CORE_FX_READ, CORE_FX_WRITE)),
     ("hr", "HR", (ERP_HR_READ, ERP_HR_WRITE, ERP_HR_APPROVE)),
     ("payroll", "Payroll", (ERP_PAYROLL_READ, ERP_PAYROLL_WRITE, ERP_PAYROLL_APPROVE)),
     ("ai", "AI assistant", (ERP_AI_INVOKE, ERP_AI_NARRATOR_REFRESH)),
@@ -230,6 +238,8 @@ _assert_catalog_union()
 
 __all__ = [
     "CATALOG",
+    "CORE_FX_READ",
+    "CORE_FX_WRITE",
     "ERP_AI_INVOKE",
     "ERP_AI_NARRATOR_REFRESH",
     "ERP_CRM_READ",

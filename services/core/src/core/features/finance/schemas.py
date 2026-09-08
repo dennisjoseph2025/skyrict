@@ -56,12 +56,22 @@ class InvoiceCreateRequest(BaseModel):
     invoice_date: date
     due_date: date
     lines: list[InvoiceLineRequest] = Field(..., min_length=1)
+    currency: str | None = Field(
+        default=None, max_length=3, description="ISO 4217; defaults to the tenant's base currency"
+    )
 
 
 class PaymentApplyRequest(BaseModel):
     amount: Decimal = Field(..., gt=0)
     method: str = Field(..., min_length=1, max_length=32)
     paid_at: datetime
+
+
+class ExchangeRateWriteRequest(BaseModel):
+    base_currency: str = Field(..., min_length=3, max_length=3)
+    quote_currency: str = Field(..., min_length=3, max_length=3)
+    effective_date: date
+    rate: Decimal = Field(..., gt=0)
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +160,8 @@ class InvoiceResponse(BaseModel):
     due_date: date
     status: InvoiceStatus
     total: Decimal
+    currency: str
+    exchange_rate: Decimal
     source: str
     source_ref: str | None
     source_order_number: str | None = None
@@ -159,6 +171,22 @@ class InvoiceResponse(BaseModel):
     voided_at: datetime | None
     created_at: datetime | None
     updated_at: datetime | None
+
+
+class ExchangeRateResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    base_currency: str
+    quote_currency: str
+    effective_date: date
+    rate: Decimal
+
+
+class FxContextResponse(BaseModel):
+    """What the invoice currency selector needs on open (C2)."""
+
+    default_currency: str
+    currencies: list[str]
 
 
 class PaymentResponse(BaseModel):
@@ -308,6 +336,39 @@ class AccountCodeSuggestionResponse(BaseModel):
     side: str = "debit"
     contra_code: str = ""
     contra_name: str = ""
+    id: uuid.UUID | None = None
+    status: str = "pending"
+    feature: str = "account_suggest"
+
+
+class InvoiceLineSuggestionResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    description: str
+    account_code: str
+    account_name: str
+    times_used: int
+    score: float
+
+
+class SuggestionQualityScoreResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    feature: str
+    window_days: int
+    sample_count: int
+    acceptance_rate: Decimal | None = None
+    below_threshold: bool
+    computed_at: datetime | None = None
+
+
+class SuggestionQualityResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    window_days: int
+    overall_acceptance_rate: Decimal | None = None
+    low_quality: bool
+    features: list[SuggestionQualityScoreResponse]
 
 
 class WorkingCapitalAlertResponse(BaseModel):
@@ -392,13 +453,28 @@ class SuggestionRequest(BaseModel):
 
 class WorkingCapitalSettingsRequest(BaseModel):
     threshold: Decimal = Field(..., gt=0)
+    invoice_numbering_scheme: str | None = Field(default=None, max_length=64)
 
 
 class TenantSettingsResponse(BaseModel):
     working_capital_threshold: Decimal
+    invoice_numbering_scheme: str | None = None
+
+
+class InvoiceNumberingSchemeResponse(BaseModel):
+    model_config = _RESPONSE_CONFIG
+
+    prefix: str
+    scheme: str
+    seq_width: int
+    rationale: str
 
 
 class SuggestAccountCodeRequest(BaseModel):
+    description: str = Field(..., min_length=1, max_length=512)
+
+
+class SuggestInvoiceLinesRequest(BaseModel):
     description: str = Field(..., min_length=1, max_length=512)
 
 

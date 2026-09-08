@@ -287,7 +287,9 @@ export function ProductsClient() {
                     </div>
                     {abcMap.size > 0 && (
                         <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-muted-foreground">ABC:</span>
+                            <span className="text-xs text-muted-foreground">
+                                ABC:
+                            </span>
                             {(["all", "A", "B", "C"] as const).map((b) => (
                                 <button
                                     key={b}
@@ -317,8 +319,16 @@ export function ProductsClient() {
 
             {visibleProducts.length === 0 ? (
                 <InventoryEmpty
-                    title={abcFilter !== "all" ? `No Band ${abcFilter} products` : "No products yet"}
-                    description={abcFilter !== "all" ? "No products match the selected ABC filter." : "Products are what you track stock for. Create one to start building your catalog."}
+                    title={
+                        abcFilter !== "all"
+                            ? `No Band ${abcFilter} products`
+                            : "No products yet"
+                    }
+                    description={
+                        abcFilter !== "all"
+                            ? "No products match the selected ABC filter."
+                            : "Products are what you track stock for. Create one to start building your catalog."
+                    }
                     icon={Package}
                     action={
                         canWrite && abcFilter === "all" ? (
@@ -392,115 +402,119 @@ export function ProductsClient() {
                                 {visibleProducts.map((product) => {
                                     const band = abcMap.get(product.id);
                                     return (
-                                    <tr
-                                        key={product.id}
-                                        className="border-b border-border/60 transition-colors last:border-0 hover:bg-muted/30"
-                                    >
-                                        <td className="px-4 py-3 font-medium text-foreground">
-                                            {product.sku}
-                                        </td>
-                                        <td className="px-4 py-3 text-foreground">
-                                            {product.name}
-                                        </td>
-                                        <td className="px-4 py-3 text-muted-foreground">
-                                            {product.category ?? "-"}
-                                        </td>
-                                        <td className="px-4 py-3 text-right tabular-nums text-foreground">
-                                            {formatMoney(product.sellPrice)}
-                                        </td>
-                                        <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                                            {product.reorderPoint}
-                                        </td>
-                                        {abcMap.size > 0 && (
+                                        <tr
+                                            key={product.id}
+                                            className="border-b border-border/60 transition-colors last:border-0 hover:bg-muted/30"
+                                        >
+                                            <td className="px-4 py-3 font-medium text-foreground">
+                                                {product.sku}
+                                            </td>
+                                            <td className="px-4 py-3 text-foreground">
+                                                {product.name}
+                                            </td>
+                                            <td className="px-4 py-3 text-muted-foreground">
+                                                {product.category ?? "-"}
+                                            </td>
+                                            <td className="px-4 py-3 text-right tabular-nums text-foreground">
+                                                {formatMoney(product.sellPrice)}
+                                            </td>
+                                            <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                                                {product.reorderPoint}
+                                            </td>
+                                            {abcMap.size > 0 && (
+                                                <td className="px-4 py-3">
+                                                    {band ? (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-xs ring-1 ${
+                                                                band === "A"
+                                                                    ? "bg-red-500/10 text-red-700 ring-red-500/30"
+                                                                    : band ===
+                                                                        "B"
+                                                                      ? "bg-amber-500/10 text-amber-700 ring-amber-500/30"
+                                                                      : "bg-blue-500/10 text-blue-700 ring-blue-500/30"
+                                                            }`}
+                                                        >
+                                                            {band}
+                                                        </Badge>
+                                                    ) : (
+                                                        <span className="text-xs text-muted-foreground">
+                                                            -
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            )}
                                             <td className="px-4 py-3">
-                                                {band ? (
+                                                {product.isActive ? (
                                                     <Badge
                                                         variant="outline"
-                                                        className={`text-xs ring-1 ${
-                                                            band === "A"
-                                                                ? "bg-red-500/10 text-red-700 ring-red-500/30"
-                                                                : band === "B"
-                                                                  ? "bg-amber-500/10 text-amber-700 ring-amber-500/30"
-                                                                  : "bg-blue-500/10 text-blue-700 ring-blue-500/30"
-                                                        }`}
+                                                        className="bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-400"
                                                     >
-                                                        {band}
+                                                        Active
                                                     </Badge>
                                                 ) : (
-                                                    <span className="text-xs text-muted-foreground">-</span>
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="text-muted-foreground"
+                                                    >
+                                                        Archived
+                                                    </Badge>
                                                 )}
                                             </td>
-                                        )}
-                                        <td className="px-4 py-3">
-                                            {product.isActive ? (
-                                                <Badge
-                                                    variant="outline"
-                                                    className="bg-emerald-500/15 text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-400"
-                                                >
-                                                    Active
-                                                </Badge>
-                                            ) : (
-                                                <Badge
-                                                    variant="outline"
-                                                    className="text-muted-foreground"
-                                                >
-                                                    Archived
-                                                </Badge>
-                                            )}
-                                        </td>
-                                        {canWrite ? (
-                                            <td className="px-4 py-3">
-                                                <div className="flex items-center justify-end gap-1">
-                                                    {product.isActive ? (
-                                                        <>
+                                            {canWrite ? (
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center justify-end gap-1">
+                                                        {product.isActive ? (
+                                                            <>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon-sm"
+                                                                    onClick={() =>
+                                                                        openEdit(
+                                                                            product,
+                                                                        )
+                                                                    }
+                                                                    aria-label={`Edit ${product.name}`}
+                                                                >
+                                                                    <Pencil aria-hidden="true" />
+                                                                </Button>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon-sm"
+                                                                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                                                    onClick={() => {
+                                                                        setDeleteError(
+                                                                            null,
+                                                                        );
+                                                                        setDeleting(
+                                                                            product,
+                                                                        );
+                                                                    }}
+                                                                    aria-label={`Delete ${product.name}`}
+                                                                >
+                                                                    <Trash2 aria-hidden="true" />
+                                                                </Button>
+                                                            </>
+                                                        ) : (
                                                             <Button
                                                                 variant="ghost"
                                                                 size="icon-sm"
                                                                 onClick={() =>
-                                                                    openEdit(
+                                                                    void handleReactivate(
                                                                         product,
                                                                     )
                                                                 }
-                                                                aria-label={`Edit ${product.name}`}
+                                                                aria-label={`Reactivate ${product.name}`}
                                                             >
-                                                                <Pencil aria-hidden="true" />
+                                                                <RotateCcw aria-hidden="true" />
                                                             </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon-sm"
-                                                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                                                onClick={() => {
-                                                                    setDeleteError(
-                                                                        null,
-                                                                    );
-                                                                    setDeleting(
-                                                                        product,
-                                                                    );
-                                                                }}
-                                                                aria-label={`Delete ${product.name}`}
-                                                            >
-                                                                <Trash2 aria-hidden="true" />
-                                                            </Button>
-                                                        </>
-                                                    ) : (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon-sm"
-                                                            onClick={() =>
-                                                                void handleReactivate(
-                                                                    product,
-                                                                )
-                                                            }
-                                                            aria-label={`Reactivate ${product.name}`}
-                                                        >
-                                                            <RotateCcw aria-hidden="true" />
-                                                        </Button>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        ) : null}
-                                    </tr>
-                                )})}
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            ) : null}
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

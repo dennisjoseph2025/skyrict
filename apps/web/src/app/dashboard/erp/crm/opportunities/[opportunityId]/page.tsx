@@ -2,14 +2,14 @@ import { RequirePermission } from "@/components/dashboard/shared/require-permiss
 import { OpportunityDetail } from "@/components/dashboard/erp/crm/opportunity-detail";
 
 export default async function OpportunityDetailPage({
-  params,
+    params,
 }: {
-  params: Promise<{ opportunityId: string }>;
+    params: Promise<{ opportunityId: string }>;
 }) {
-  const { opportunityId } = await params;
-  return (
-    <RequirePermission permission="erp.crm.read">
-      <OpportunityDetail opportunityId={opportunityId} />
-    </RequirePermission>
-  );
+    const { opportunityId } = await params;
+    return (
+        <RequirePermission permission="erp.crm.read">
+            <OpportunityDetail opportunityId={opportunityId} />
+        </RequirePermission>
+    );
 }

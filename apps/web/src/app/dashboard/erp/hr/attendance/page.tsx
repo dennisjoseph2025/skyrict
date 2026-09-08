@@ -2,15 +2,15 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { AttendanceClient } from "./attendance";
 
 export default async function AttendancePage({
-  searchParams,
+    searchParams,
 }: {
-  searchParams: Promise<{ employee?: string }>;
+    searchParams: Promise<{ employee?: string }>;
 }) {
-  const { employee } = await searchParams;
+    const { employee } = await searchParams;
 
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.hr.read">
-      <AttendanceClient initialEmployeeId={employee ?? null} />
-    </ModuleAccessBoundary>
-  );
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.hr.read">
+            <AttendanceClient initialEmployeeId={employee ?? null} />
+        </ModuleAccessBoundary>
+    );
 }

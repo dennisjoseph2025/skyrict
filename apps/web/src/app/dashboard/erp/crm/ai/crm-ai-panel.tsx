@@ -9,9 +9,9 @@ import { FollowUpsFeed } from "@/components/dashboard/erp/crm/follow-ups-feed";
  * tables via the AiScore and DealHealthBadge components.
  */
 export function CrmAiPanel() {
-  return (
-    <div className="space-y-8">
-      <FollowUpsFeed />
-    </div>
-  );
+    return (
+        <div className="space-y-8">
+            <FollowUpsFeed />
+        </div>
+    );
 }

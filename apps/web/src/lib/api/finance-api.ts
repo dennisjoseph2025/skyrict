@@ -138,6 +138,8 @@ export interface Invoice {
     due_date: string;
     status: InvoiceStatus;
     total: number;
+    currency: string;
+    exchange_rate: number;
     source: string;
     source_ref: string | null;
     source_order_number?: string | null;
@@ -154,6 +156,19 @@ export interface InvoiceCreateInput {
     invoice_date: string;
     due_date: string;
     lines: InvoiceLineInput[];
+    currency?: string;
+}
+
+export interface ExchangeRateEntry {
+    base_currency: string;
+    quote_currency: string;
+    effective_date: string;
+    rate: number;
+}
+
+export interface FxContext {
+    default_currency: string;
+    currencies: string[];
 }
 
 export type InvoiceListParams = {
@@ -321,6 +336,33 @@ export function createInvoice(input: InvoiceCreateInput): Promise<Invoice> {
     return apiPost<Invoice>(`${FINANCE}/invoices`, input);
 }
 
+// --- FX rates (invoice currency) ---
+
+export function getFxContext(): Promise<FxContext> {
+    return apiFetch<FxContext>(`${FINANCE}/fx/context`);
+}
+
+export function getFxRate(
+    quoteCurrency: string,
+    on: string,
+): Promise<ExchangeRateEntry> {
+    return apiFetch<ExchangeRateEntry>(
+        `${FINANCE}/fx/rates/${encodeURIComponent(quoteCurrency)}${queryString({ on })}`,
+    );
+}
+
+export function upsertFxRate(input: {
+    base_currency: string;
+    quote_currency: string;
+    effective_date: string;
+    rate: number;
+}): Promise<ExchangeRateEntry> {
+    return apiFetch<ExchangeRateEntry>(`${FINANCE}/fx/rates`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+    });
+}
+
 export function issueInvoice(invoiceId: string): Promise<Invoice> {
     return apiPost<Invoice>(`${FINANCE}/invoices/${invoiceId}/issue`, {});
 }
@@ -438,6 +480,25 @@ export interface AccountCodeSuggestion {
     side: "debit" | "credit";
     contra_code: string;
     contra_name: string;
+    id?: string | null;
+    status?: string;
+    feature?: string;
+}
+
+export interface SuggestionQualityScore {
+    feature: string;
+    window_days: number;
+    sample_count: number;
+    acceptance_rate: number | null;
+    below_threshold: boolean;
+    computed_at: string | null;
+}
+
+export interface SuggestionQuality {
+    window_days: number;
+    overall_acceptance_rate: number | null;
+    low_quality: boolean;
+    features: SuggestionQualityScore[];
 }
 
 export interface WorkingCapitalAlert {
@@ -502,6 +563,14 @@ export interface FinanceAnomaly {
 
 export interface TenantSettings {
     working_capital_threshold: number;
+    invoice_numbering_scheme?: string | null;
+}
+
+export interface InvoiceNumberingScheme {
+    prefix: string;
+    scheme: string;
+    seq_width: number;
+    rationale: string;
 }
 
 export function getAging(asOf: string): Promise<ArAging> {
@@ -526,6 +595,51 @@ export function suggestAccountCode(
     return apiPost<AccountCodeSuggestion>(
         `${AUTOMATION}/suggest-account-code`,
         { description },
+    );
+}
+
+export interface InvoiceLineSuggestion {
+    description: string;
+    account_code: string;
+    account_name: string;
+    times_used: number;
+    score: number;
+}
+
+export function suggestInvoiceLines(
+    description: string,
+): Promise<InvoiceLineSuggestion[]> {
+    return apiPost<InvoiceLineSuggestion[]>(
+        `${AUTOMATION}/suggest-invoice-lines`,
+        { description },
+    );
+}
+
+export function acceptSuggestion(
+    suggestionId: string,
+): Promise<AccountCodeSuggestion> {
+    return apiPost<AccountCodeSuggestion>(
+        `${AUTOMATION}/suggestions/${suggestionId}/accept`,
+        {},
+    );
+}
+
+export function dismissSuggestion(
+    suggestionId: string,
+): Promise<AccountCodeSuggestion> {
+    return apiPost<AccountCodeSuggestion>(
+        `${AUTOMATION}/suggestions/${suggestionId}/dismiss`,
+        {},
+    );
+}
+
+export function getSuggestionQuality(
+    windowDays = 30,
+): Promise<SuggestionQuality> {
+    return apiFetch<SuggestionQuality>(
+        `${AUTOMATION}/suggestions/quality${queryString({
+            window_days: windowDays,
+        })}`,
     );
 }
 
@@ -581,11 +695,23 @@ export function getAutomationSettings(): Promise<TenantSettings> {
 
 export function updateAutomationSettings(
     threshold: number,
+    invoiceNumberingScheme?: string,
 ): Promise<TenantSettings> {
     return apiFetch<TenantSettings>(`${AUTOMATION}/settings`, {
         method: "PUT",
-        body: JSON.stringify({ threshold }),
+        body: JSON.stringify({
+            threshold,
+            ...(invoiceNumberingScheme !== undefined
+                ? { invoice_numbering_scheme: invoiceNumberingScheme }
+                : {}),
+        }),
     });
+}
+
+export function recommendInvoiceNumberingScheme(): Promise<InvoiceNumberingScheme> {
+    return apiFetch<InvoiceNumberingScheme>(
+        `${AUTOMATION}/invoice-numbering-scheme`,
+    );
 }
 
 export function reverseJournalEntry(entryId: string): Promise<JournalEntry> {

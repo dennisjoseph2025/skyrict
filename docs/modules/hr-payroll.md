@@ -16,7 +16,7 @@ This module follows the **same architecture as the rest of Skyrict**. Nothing he
 
 ### 1.1 Why
 
-The Skyrict Business Operating System is built on the "internal truth" pillar: *"A deliberately scoped ERP slice capturing what's actually happening inside your company… the ~20% of operations that 80% of SMBs actually use."*
+The Skyrict Business Operating System is built on the "internal truth" pillar: _"A deliberately scoped ERP slice capturing what's actually happening inside your company… the ~20% of operations that 80% of SMBs actually use."_
 
 **HR & Payroll is the people-and-compensation slice of that pillar.** It answers, in one tenant-scoped place:
 
@@ -47,30 +47,30 @@ Key architectural facts this module depends on:
 
 ### 1.3 The core idea (the spine of this module)
 
-- **Leave balance is a ledger, not a number.** You never "set the balance to 20". You record a movement (`+1 annual accrual`, `−3 approved leave`) and the balance is *derived* from the movements. This makes leave balances verifiable against the request history.
+- **Leave balance is a ledger, not a number.** You never "set the balance to 20". You record a movement (`+1 annual accrual`, `−3 approved leave`) and the balance is _derived_ from the movements. This makes leave balances verifiable against the request history.
 - **Salary is effective-dated history, never overwritten.** A pay change inserts a new `erp_compensation` row with a new `effective_from`; the old row stays. Payroll reads the row that was effective on the period end.
 - **Payroll entries are immutable once approved.** After a run is approved, no entry can be edited or deleted - only a whole-run `void` reopens the period.
 
 ### 1.4 Services used by HR & Payroll
 
-| Service / lib | How HR & Payroll uses it |
-|---|---|
-| `services/core` | The service the module lives in - own engine, `db/session.py` with the `after_begin` RLS hook, own Alembic migrations, `features/hr` + `features/payroll` |
-| `services/identity` | Access JWT verification (RS256, shared public key, issuer/audience), tenant resolution from slug (`X-Tenant-Slug` in dev/test), **DB-resolved permissions** via `require_permission` (roles → permissions), user records (`employee.user_id` linkage, validated but not created by HR) |
-| `libs/skyrict-common` | `ResponseEnvelope` / `ListResponse` / `PaginationMeta` response wrappers, `PaginationParams` (offset/limit pagination), `SkyrictError` exception hierarchy (RFC 7807 mapping), `configure_logging` |
-| `libs/skyrict-events` | `BaseEvent` envelope shape for all `hr.*` / `payroll.run.*` events (Phase 1: structlog-stub producers) |
-| Postgres | All `erp_*` tables, `current_tenant_id()` function + RLS policies, composite tenant FKs, partial unique indexes, `NUMERIC(18,4)` money columns |
-| Redis | Optional - rate limiting and any tenant slug → UUID cache (not required for HR & Payroll logic) |
+| Service / lib         | How HR & Payroll uses it                                                                                                                                                                                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `services/core`       | The service the module lives in - own engine, `db/session.py` with the `after_begin` RLS hook, own Alembic migrations, `features/hr` + `features/payroll`                                                                                                                              |
+| `services/identity`   | Access JWT verification (RS256, shared public key, issuer/audience), tenant resolution from slug (`X-Tenant-Slug` in dev/test), **DB-resolved permissions** via `require_permission` (roles → permissions), user records (`employee.user_id` linkage, validated but not created by HR) |
+| `libs/skyrict-common` | `ResponseEnvelope` / `ListResponse` / `PaginationMeta` response wrappers, `PaginationParams` (offset/limit pagination), `SkyrictError` exception hierarchy (RFC 7807 mapping), `configure_logging`                                                                                     |
+| `libs/skyrict-events` | `BaseEvent` envelope shape for all `hr.*` / `payroll.run.*` events (Phase 1: structlog-stub producers)                                                                                                                                                                                 |
+| Postgres              | All `erp_*` tables, `current_tenant_id()` function + RLS policies, composite tenant FKs, partial unique indexes, `NUMERIC(18,4)` money columns                                                                                                                                         |
+| Redis                 | Optional - rate limiting and any tenant slug → UUID cache (not required for HR & Payroll logic)                                                                                                                                                                                        |
 
 ### 1.5 Usage - who uses it, and the daily flows
 
-| Actor | What they do in the module |
-|---|---|
-| HR admin | Creates/edits departments and employees, manages leave, reviews team |
-| Manager | Sees their team, approves/rejects leave requests |
-| Payroll admin | Creates runs, computes, reviews entries, approves and marks paid |
-| Employee | Requests leave, views their own pay entries |
-| Organization admin / owner | Sees everything, sets payroll settings, manages compensation |
+| Actor                      | What they do in the module                                           |
+| -------------------------- | -------------------------------------------------------------------- |
+| HR admin                   | Creates/edits departments and employees, manages leave, reviews team |
+| Manager                    | Sees their team, approves/rejects leave requests                     |
+| Payroll admin              | Creates runs, computes, reviews entries, approves and marks paid     |
+| Employee                   | Requests leave, views their own pay entries                          |
+| Organization admin / owner | Sees everything, sets payroll settings, manages compensation         |
 
 Daily flows (Phase 1):
 
@@ -85,7 +85,7 @@ Daily flows (Phase 1):
 
 ### 2.1 Service placement and folder structure
 
-HR & Payroll is built as **two feature packages in `services/core`**: `features/hr` (departments, employees, leave) and `features/payroll` (compensation, runs, entries, settings). They are separated because they have different lifecycle rules and different permission families (`erp.hr.*` vs `erp.payroll.*`), even though payroll entries *reference* employees.
+HR & Payroll is built as **two feature packages in `services/core`**: `features/hr` (departments, employees, leave) and `features/payroll` (compensation, runs, entries, settings). They are separated because they have different lifecycle rules and different permission families (`erp.hr.*` vs `erp.payroll.*`), even though payroll entries _reference_ employees.
 
 The service mirrors `services/identity`'s feature-based layout:
 
@@ -212,28 +212,28 @@ Applied to every tenant-to-tenant FK: `erp_leave_requests → erp_employees`, `e
 
 - **Two permission families**:
 
-| Key | Meaning |
-|---|---|
-| `erp.hr.read` | View departments, employees, leave requests, balances, movements |
-| `erp.hr.write` | Create/edit departments, employees, leave requests; manual balance adjustments; accrue leave |
-| `erp.hr.approve` | Approve/reject/cancel leave requests |
-| `erp.payroll.read` | View compensation, payroll runs, entries, settings |
-| `erp.payroll.write` | Create runs, compute, edit draft entries, update settings, record compensation |
-| `erp.payroll.approve` | Approve, void, or mark-paid a payroll run |
-| `erp.payroll.ai.read` | View automation batches, schedules, notifications, digests (HR-AUT-001) |
-| `erp.payroll.ai.run` | Enqueue batches, manual tick, create/update/delete schedules (HR-AUT-001) |
-| `erp.payroll.ai.notify` | Read/update own notification delivery preferences (HR-AUT-001) |
-| `erp.payroll.ai.approve` | Reserved for automated run-approval actions (HR-AUT-001; not yet wired) |
+| Key                      | Meaning                                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| `erp.hr.read`            | View departments, employees, leave requests, balances, movements                             |
+| `erp.hr.write`           | Create/edit departments, employees, leave requests; manual balance adjustments; accrue leave |
+| `erp.hr.approve`         | Approve/reject/cancel leave requests                                                         |
+| `erp.payroll.read`       | View compensation, payroll runs, entries, settings                                           |
+| `erp.payroll.write`      | Create runs, compute, edit draft entries, update settings, record compensation               |
+| `erp.payroll.approve`    | Approve, void, or mark-paid a payroll run                                                    |
+| `erp.payroll.ai.read`    | View automation batches, schedules, notifications, digests (HR-AUT-001)                      |
+| `erp.payroll.ai.run`     | Enqueue batches, manual tick, create/update/delete schedules (HR-AUT-001)                    |
+| `erp.payroll.ai.notify`  | Read/update own notification delivery preferences (HR-AUT-001)                               |
+| `erp.payroll.ai.approve` | Reserved for automated run-approval actions (HR-AUT-001; not yet wired)                      |
 
-- **Where these keys are registered:** [ERP-FND-002] (SKY-39) extends `services/identity/src/identity/core/permissions.py` - constants + `CATALOG` + `PERMISSION_MODULES` (the module docstring: *"A permission must be added here AND via migration before it can be assigned to roles"*) - with the full Phase-1 ERP catalog via a new identity Alembic migration inserting the keys (`ON CONFLICT (key) DO NOTHING`) and updating `identity/core/constants.py` `SYSTEM_ROLE_DEFINITIONS`. This module consumes the catalog; it does not add its own identity migration (single ownership point, see finance-accounting.md:117):
+- **Where these keys are registered:** [ERP-FND-002] (SKY-39) extends `services/identity/src/identity/core/permissions.py` - constants + `CATALOG` + `PERMISSION_MODULES` (the module docstring: _"A permission must be added here AND via migration before it can be assigned to roles"_) - with the full Phase-1 ERP catalog via a new identity Alembic migration inserting the keys (`ON CONFLICT (key) DO NOTHING`) and updating `identity/core/constants.py` `SYSTEM_ROLE_DEFINITIONS`. This module consumes the catalog; it does not add its own identity migration (single ownership point, see finance-accounting.md:117):
 
-| Role | HR & Payroll grants (added to existing) |
-|---|---|
-| `tenant_owner` | `*` (already full access) |
-| `organization_admin` | all six keys |
+| Role                 | HR & Payroll grants (added to existing)           |
+| -------------------- | ------------------------------------------------- |
+| `tenant_owner`       | `*` (already full access)                         |
+| `organization_admin` | all six keys                                      |
 | `department_manager` | `erp.hr.read`, `erp.hr.write`, `erp.payroll.read` |
-| `standard_user` | `erp.hr.read` |
-| `auditor` | `erp.hr.read`, `erp.payroll.read` |
+| `standard_user`      | `erp.hr.read`                                     |
+| `auditor`            | `erp.hr.read`, `erp.payroll.read`                 |
 
 The **payroll automation** keys (`erp.payroll.ai.*`, HR-AUT-001) are
 registered in the same catalog plus a dedicated `payroll_ai` module
@@ -248,21 +248,21 @@ Use the envelope from `libs/skyrict-events` (`src/skyrict_events/base.py`): `{ev
 
 Events this module emits:
 
-| Topic | Emitted when | Payload highlights |
-|---|---|---|
-| `hr.department.created` | department inserted | department_id, name |
-| `hr.employee.created` | employee inserted | employee_id, employee_number, department_id, status |
-| `hr.employee.onboarded` | same transaction as `.created` (alias; reserved by erp-phase1.md for payroll eligibility + reporting) | employee_id, hire_date, department_id |
-| `hr.employee.updated` | employee edited | employee_id, changed fields |
-| `hr.employee.terminated` | terminate transition | employee_id, termination_date |
-| `hr.leave.requested` | request inserted | request_id, employee_id, leave_type, days |
-| `hr.leave.approved` | approval committed | request_id, employee_id, leave_type, days |
-| `hr.leave.rejected` | rejection committed | request_id, employee_id, reason |
-| `hr.leave.cancelled` | cancellation committed | request_id, employee_id, leave_type, days |
-| `payroll.run.computed` | compute committed | run_id, period_start, period_end, total_gross, total_net |
-| `payroll.run.approved` | approval committed | run_id, total_net, entry_count |
-| `payroll.run.paid` | mark-paid committed | run_id, total_net, paid_at, je_bridge_status, je_bridge_entry_id |
-| `payroll.run.voided` | void committed | run_id, reason |
+| Topic                    | Emitted when                                                                                          | Payload highlights                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `hr.department.created`  | department inserted                                                                                   | department_id, name                                              |
+| `hr.employee.created`    | employee inserted                                                                                     | employee_id, employee_number, department_id, status              |
+| `hr.employee.onboarded`  | same transaction as `.created` (alias; reserved by erp-phase1.md for payroll eligibility + reporting) | employee_id, hire_date, department_id                            |
+| `hr.employee.updated`    | employee edited                                                                                       | employee_id, changed fields                                      |
+| `hr.employee.terminated` | terminate transition                                                                                  | employee_id, termination_date                                    |
+| `hr.leave.requested`     | request inserted                                                                                      | request_id, employee_id, leave_type, days                        |
+| `hr.leave.approved`      | approval committed                                                                                    | request_id, employee_id, leave_type, days                        |
+| `hr.leave.rejected`      | rejection committed                                                                                   | request_id, employee_id, reason                                  |
+| `hr.leave.cancelled`     | cancellation committed                                                                                | request_id, employee_id, leave_type, days                        |
+| `payroll.run.computed`   | compute committed                                                                                     | run_id, period_start, period_end, total_gross, total_net         |
+| `payroll.run.approved`   | approval committed                                                                                    | run_id, total_net, entry_count                                   |
+| `payroll.run.paid`       | mark-paid committed                                                                                   | run_id, total_net, paid_at, je_bridge_status, je_bridge_entry_id |
+| `payroll.run.voided`     | void committed                                                                                        | run_id, reason                                                   |
 
 Producer sketch:
 
@@ -460,7 +460,7 @@ All tables: `id UUID PRIMARY KEY`, `tenant_id UUID NOT NULL`, RLS enabled with a
 - `code` - unique `(tenant_id, code)` named `uq_erp_leave_types_tenant_code`
 - `is_accrual BOOLEAN` - accrual types get balance rows and are balance-capped; non-accrual types are tracked via movements only and never get balance rows (they are never capped)
 - `accrual_days_per_year INT NULL` - accrual types only
-- **Design note:** there is no per-type `allow_negative` flag. The rule is fixed and simple: *accrual balances can never go negative (service + DB CHECK); non-accrual types have no balance*. This keeps the `CHECK` constraint sound.
+- **Design note:** there is no per-type `allow_negative` flag. The rule is fixed and simple: _accrual balances can never go negative (service + DB CHECK); non-accrual types have no balance_. This keeps the `CHECK` constraint sound.
 
 **`erp_leave_requests`** - leave requests and their approval state.
 
@@ -508,7 +508,8 @@ CREATE UNIQUE INDEX uq_erp_payroll_runs_period_active
   WHERE status <> 'void';
 ```
 
-  A voided run keeps its row for audit but does **not** block a fresh run for the same period.
+A voided run keeps its row for audit but does **not** block a fresh run for the same period.
+
 - Indexes: `(tenant_id, status)`, `(tenant_id, period_start, period_end)` (partial unique above)
 
 **`erp_payroll_entries`** - per run per employee.
@@ -602,7 +603,7 @@ All rules are implemented in the **service layer** (`features/hr/service.py`, `f
 
 5. **Resolved - concurrent-approval race (HR-BE-002):** the single-request
    atomicity above originally did **not** extend across two concurrent
-   approvals on *different* requests for the *same* employee: both could read
+   approvals on _different_ requests for the _same_ employee: both could read
    the same pre-approval balance, both pass the §4.2 check, and both write a
    materialized `erp_leave_balances` row based only on their own transaction's
    view - the ledger could go negative while the materialized balance still
@@ -641,7 +642,7 @@ All rules are implemented in the **service layer** (`features/hr/service.py`, `f
 ### 4.5 Rule 5 - Cancelling approved leave reverses the deduction
 
 1. `cancel_leave_request` (from `approved`, before `start_date`) writes a `+days` reversal movement (`ref_type=leave_request`) and recomputes the balance - one transaction with the atomic `approved → cancelled` guard.
-2. Reversal never takes the balance negative for the *reason* of the reversal itself (it only ever adds back what was deducted); §4.2 still applies to any *other* negative movement in the same transaction (none here).
+2. Reversal never takes the balance negative for the _reason_ of the reversal itself (it only ever adds back what was deducted); §4.2 still applies to any _other_ negative movement in the same transaction (none here).
 3. Cancelling a `pending` request writes no movement.
 
 ### 4.6 Rule 6 - No self-approval
@@ -665,10 +666,10 @@ The actor calling `approve`/`reject` must not be the requesting employee (approv
 For each active (non-terminated, or terminated on/after period start) employee with an effective compensation row on `period_end`:
 
 - `pay_days` = days in period, minus:
-  - days after `termination_date` (pay through termination_date **inclusive**),
-  - days before `hire_date` (new hires prorated from hire date),
-  - calendar days covered by **approved `unpaid`** leave overlapping the period (`max(0, min(end, period_end) − max(start, period_start) + 1)`).
-  - `sick` and `annual` (paid) leave do **not** reduce pay.
+    - days after `termination_date` (pay through termination_date **inclusive**),
+    - days before `hire_date` (new hires prorated from hire date),
+    - calendar days covered by **approved `unpaid`** leave overlapping the period (`max(0, min(end, period_end) − max(start, period_start) + 1)`).
+    - `sick` and `annual` (paid) leave do **not** reduce pay.
 - `gross = monthly_salary × pay_days / days_in_period` (calendar-day proration; a stated Phase-1 approximation for monthly salaries over calendar-month runs - §12).
 - `deductions = (pf_rate + tax_rate) × gross` from `erp_payroll_settings` + any manual `adjustments.deductions`.
 - `net = gross − deductions` (rounded per settings).
@@ -679,9 +680,9 @@ For each active (non-terminated, or terminated on/after period start) employee w
 When `mark_paid` transitions a run `approved → paid`, and `je_bridge_enabled` is true and `total_gross > 0`, the run drafts a **salary accrual journal entry** in Finance through the `PayrollAccrualPort` (implemented in-process by `features/finance`; a worker/scheduler construction passes `finance=None` and skips the bridge — the API always wires Finance):
 
 - **Entry shape** — source `payroll`, `source_ref = str(run_id)`, status `DRAFT`, dated at the `paid_at` moment:
-  - DR `5010` (Salaries Expense) = gross
-  - CR `2010` (Accrued Salaries) = net
-  - CR `2020` (Salary Deductions Payable) = `gross − net`, **only when `deductions > 0`** (`ck_erp_journal_lines_amount_nonzero` rejects a `0.00` line, so zero-deduction runs skip it)
+    - DR `5010` (Salaries Expense) = gross
+    - CR `2010` (Accrued Salaries) = net
+    - CR `2020` (Salary Deductions Payable) = `gross − net`, **only when `deductions > 0`** (`ck_erp_journal_lines_amount_nonzero` rejects a `0.00` line, so zero-deduction runs skip it)
 - **Outcome → run status:** `missing_accounts` → `je_bridge_status = pending` (finance chart incomplete — ties to `finance-chart-of-accounts-gap.md`); created **or** already-booked (idempotent `ConflictError` on `UNIQUE (tenant_id, source, source_ref)`) → `draft`; anything else → `none`. Always succeeds — mark-paid never fails on the bridge; the run records the truth instead.
 - **Guards:** only on `paid` (not on recompute/void); runs voided after payment leave the entry for the Finance owner to handle.
 - **Readable everywhere:** `GET /payroll/runs/{id}` returns `je_bridge_status`; `GET /payroll/runs/{id}/payslips` returns per-employee gross/deductions/net; the Finance owner sees the DRAFT entry in the journal-entries inbox. `erp.payroll.ai.approve` stays reserved for automated approvals; the bridge is a synchronous seam, not the automation path.
@@ -822,47 +823,47 @@ Base path `/api/v1`. Every endpoint: requires a valid identity access JWT + tena
 
 ### HR
 
-| Method | Path | Permission | Notes |
-|---|---|---|---|
-| GET | `/api/v1/hr/departments` | `erp.hr.read` | filters: `q`; offset/limit |
-| POST | `/api/v1/hr/departments` ✓ | `erp.hr.write` | |
-| GET | `/api/v1/hr/departments/{id}` | `erp.hr.read` | 404 if out of scope |
-| PATCH | `/api/v1/hr/departments/{id}` ✓ | `erp.hr.write` | soft-disable via `is_active=false` |
-| GET | `/api/v1/hr/employees` | `erp.hr.read` | filters: `status`, `department_id`, `q` |
-| POST | `/api/v1/hr/employees` ✓ | `erp.hr.write` | validates user via port; creates compensation + accrual in same tx |
-| GET | `/api/v1/hr/employees/{id}` | `erp.hr.read` | includes active compensation |
-| PATCH | `/api/v1/hr/employees/{id}` ✓ | `erp.hr.write` | not allowed on `terminated` |
-| POST | `/api/v1/hr/employees/{id}/status` ✓ | `erp.hr.write` | body: `employment_status` (`active`/`on_leave`); only non-terminated employees; sets the `active ⇄ on_leave` transition (§3.3) |
-| POST | `/api/v1/hr/employees/{id}/terminate` ✓ | `erp.hr.write` | body: `termination_date`, `reason?`; only from `active` |
-| GET | `/api/v1/hr/leave/requests` | `erp.hr.read` | filters: `status`, `employee_id`, `from`/`to` dates |
-| POST | `/api/v1/hr/leave/requests` ✓ | `erp.hr.write` | days computed server-side |
-| GET | `/api/v1/hr/leave/requests/{id}` | `erp.hr.read` | |
-| POST | `/api/v1/hr/leave/requests/{id}/approve` ✓ | `erp.hr.approve` | approver ≠ requester; atomic; balance check |
-| POST | `/api/v1/hr/leave/requests/{id}/reject` ✓ | `erp.hr.approve` | body: `reason?` |
-| POST | `/api/v1/hr/leave/requests/{id}/cancel` ✓ | `erp.hr.write` **or** `erp.hr.approve` | from `pending` or `approved` (pre-start); reversal on approved |
-| GET | `/api/v1/hr/leave/balances` | `erp.hr.read` | `?employee_id=` (required) → balances by type |
-| GET | `/api/v1/hr/leave/movements` | `erp.hr.read` | **read-only ledger**; filters: `employee_id`, `leave_type`; no update/delete endpoints exist |
-| POST | `/api/v1/hr/leave/balances/accrue` ✓ | `erp.hr.write` | body: `employee_id`, `leave_year?`; idempotent |
-| POST | `/api/v1/hr/leave/balances/adjustments` ✓ | `erp.hr.write` | body: `employee_id`, `leave_type`, `qty`, `reason` (reason required) |
+| Method | Path                                       | Permission                             | Notes                                                                                                                          |
+| ------ | ------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/v1/hr/departments`                   | `erp.hr.read`                          | filters: `q`; offset/limit                                                                                                     |
+| POST   | `/api/v1/hr/departments` ✓                 | `erp.hr.write`                         |                                                                                                                                |
+| GET    | `/api/v1/hr/departments/{id}`              | `erp.hr.read`                          | 404 if out of scope                                                                                                            |
+| PATCH  | `/api/v1/hr/departments/{id}` ✓            | `erp.hr.write`                         | soft-disable via `is_active=false`                                                                                             |
+| GET    | `/api/v1/hr/employees`                     | `erp.hr.read`                          | filters: `status`, `department_id`, `q`                                                                                        |
+| POST   | `/api/v1/hr/employees` ✓                   | `erp.hr.write`                         | validates user via port; creates compensation + accrual in same tx                                                             |
+| GET    | `/api/v1/hr/employees/{id}`                | `erp.hr.read`                          | includes active compensation                                                                                                   |
+| PATCH  | `/api/v1/hr/employees/{id}` ✓              | `erp.hr.write`                         | not allowed on `terminated`                                                                                                    |
+| POST   | `/api/v1/hr/employees/{id}/status` ✓       | `erp.hr.write`                         | body: `employment_status` (`active`/`on_leave`); only non-terminated employees; sets the `active ⇄ on_leave` transition (§3.3) |
+| POST   | `/api/v1/hr/employees/{id}/terminate` ✓    | `erp.hr.write`                         | body: `termination_date`, `reason?`; only from `active`                                                                        |
+| GET    | `/api/v1/hr/leave/requests`                | `erp.hr.read`                          | filters: `status`, `employee_id`, `from`/`to` dates                                                                            |
+| POST   | `/api/v1/hr/leave/requests` ✓              | `erp.hr.write`                         | days computed server-side                                                                                                      |
+| GET    | `/api/v1/hr/leave/requests/{id}`           | `erp.hr.read`                          |                                                                                                                                |
+| POST   | `/api/v1/hr/leave/requests/{id}/approve` ✓ | `erp.hr.approve`                       | approver ≠ requester; atomic; balance check                                                                                    |
+| POST   | `/api/v1/hr/leave/requests/{id}/reject` ✓  | `erp.hr.approve`                       | body: `reason?`                                                                                                                |
+| POST   | `/api/v1/hr/leave/requests/{id}/cancel` ✓  | `erp.hr.write` **or** `erp.hr.approve` | from `pending` or `approved` (pre-start); reversal on approved                                                                 |
+| GET    | `/api/v1/hr/leave/balances`                | `erp.hr.read`                          | `?employee_id=` (required) → balances by type                                                                                  |
+| GET    | `/api/v1/hr/leave/movements`               | `erp.hr.read`                          | **read-only ledger**; filters: `employee_id`, `leave_type`; no update/delete endpoints exist                                   |
+| POST   | `/api/v1/hr/leave/balances/accrue` ✓       | `erp.hr.write`                         | body: `employee_id`, `leave_year?`; idempotent                                                                                 |
+| POST   | `/api/v1/hr/leave/balances/adjustments` ✓  | `erp.hr.write`                         | body: `employee_id`, `leave_type`, `qty`, `reason` (reason required)                                                           |
 
 ### Payroll
 
-| Method | Path | Permission | Notes |
-|---|---|---|---|
-| GET | `/api/v1/payroll/runs` | `erp.payroll.read` | filters: `status`, `period_from`/`period_to` |
-| POST | `/api/v1/payroll/runs` ✓ | `erp.payroll.write` | non-overlapping period (per §3.2 partial unique) |
-| GET | `/api/v1/payroll/runs/{id}` | `erp.payroll.read` | includes entries + totals + `je_bridge_status` |
-| POST | `/api/v1/payroll/runs/{id}/compute` ✓ | `erp.payroll.write` | idempotent; draft/computed only; accrue leave + upsert entries |
-| POST | `/api/v1/payroll/runs/{id}/approve` ✓ | `erp.payroll.approve` | computed only; locks entries |
-| POST | `/api/v1/payroll/runs/{id}/mark-paid` ✓ | `erp.payroll.approve` | approved only; emits `payroll.run.paid`; runs the JE bridge (§4.10) |
-| POST | `/api/v1/payroll/runs/{id}/void` ✓ | `erp.payroll.approve` | body: `reason`; draft/computed/approved only; frees period |
-| GET | `/api/v1/payroll/runs/{id}/entries` | `erp.payroll.read` | `?employee_id=` |
-| GET | `/api/v1/payroll/runs/{id}/payslips` | `erp.payroll.read` | per-employee `{employee_id, employee_number, employee_name, gross, deductions, net}`; `[]` on draft; sorted by employee number (Commit 4) |
-| PATCH | `/api/v1/payroll/runs/{id}/entries/{entry_id}` ✓ | `erp.payroll.write` | **draft/computed only**; adjusts `adjustments` JSONB |
-| GET | `/api/v1/payroll/compensation` | `erp.payroll.read` | `?employee_id=` (required) → history |
-| POST | `/api/v1/payroll/compensation` ✓ | `erp.payroll.write` | body: `employee_id`, `effective_from`, `monthly_salary`, `currency` |
-| GET | `/api/v1/payroll/settings` | `erp.payroll.read` | |
-| PUT | `/api/v1/payroll/settings` ✓ | `erp.payroll.write` | body: `pf_rate`, `tax_rate`, `default_currency`, `rounding`, `ai_automation_enabled`, `je_bridge_enabled` |
+| Method | Path                                             | Permission            | Notes                                                                                                                                     |
+| ------ | ------------------------------------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/payroll/runs`                           | `erp.payroll.read`    | filters: `status`, `period_from`/`period_to`                                                                                              |
+| POST   | `/api/v1/payroll/runs` ✓                         | `erp.payroll.write`   | non-overlapping period (per §3.2 partial unique)                                                                                          |
+| GET    | `/api/v1/payroll/runs/{id}`                      | `erp.payroll.read`    | includes entries + totals + `je_bridge_status`                                                                                            |
+| POST   | `/api/v1/payroll/runs/{id}/compute` ✓            | `erp.payroll.write`   | idempotent; draft/computed only; accrue leave + upsert entries                                                                            |
+| POST   | `/api/v1/payroll/runs/{id}/approve` ✓            | `erp.payroll.approve` | computed only; locks entries                                                                                                              |
+| POST   | `/api/v1/payroll/runs/{id}/mark-paid` ✓          | `erp.payroll.approve` | approved only; emits `payroll.run.paid`; runs the JE bridge (§4.10)                                                                       |
+| POST   | `/api/v1/payroll/runs/{id}/void` ✓               | `erp.payroll.approve` | body: `reason`; draft/computed/approved only; frees period                                                                                |
+| GET    | `/api/v1/payroll/runs/{id}/entries`              | `erp.payroll.read`    | `?employee_id=`                                                                                                                           |
+| GET    | `/api/v1/payroll/runs/{id}/payslips`             | `erp.payroll.read`    | per-employee `{employee_id, employee_number, employee_name, gross, deductions, net}`; `[]` on draft; sorted by employee number (Commit 4) |
+| PATCH  | `/api/v1/payroll/runs/{id}/entries/{entry_id}` ✓ | `erp.payroll.write`   | **draft/computed only**; adjusts `adjustments` JSONB                                                                                      |
+| GET    | `/api/v1/payroll/compensation`                   | `erp.payroll.read`    | `?employee_id=` (required) → history                                                                                                      |
+| POST   | `/api/v1/payroll/compensation` ✓                 | `erp.payroll.write`   | body: `employee_id`, `effective_from`, `monthly_salary`, `currency`                                                                       |
+| GET    | `/api/v1/payroll/settings`                       | `erp.payroll.read`    |                                                                                                                                           |
+| PUT    | `/api/v1/payroll/settings` ✓                     | `erp.payroll.write`   | body: `pf_rate`, `tax_rate`, `default_currency`, `rounding`, `ai_automation_enabled`, `je_bridge_enabled`                                 |
 
 ### Payroll automation (HR-AUT-001)
 
@@ -871,36 +872,36 @@ worker (started in the API lifespan) drains the batch queue and fires due
 schedules; `POST /tick` is the deterministic, testable way to advance both
 frozen against a fixed clock.
 
-| Method | Path | Permission | Notes |
-|---|---|---|---|
-| POST | `/api/v1/ai/payroll/batches` ✓ | `erp.payroll.ai.run` | body: `run_id`, `dry_run?`; idempotent per run |
-| GET | `/api/v1/ai/payroll/batches` | `erp.payroll.ai.read` | filters: `status`; offset/limit |
-| GET | `/api/v1/ai/payroll/batches/{id}` | `erp.payroll.ai.read` | includes preflight + totals |
-| POST | `/api/v1/ai/payroll/tick` ✓ | `erp.payroll.ai.run` | drain one item + fire due schedules; returns `items_processed`, `schedules_fired` |
-| GET | `/api/v1/ai/payroll/schedules` | `erp.payroll.ai.read` | |
-| POST | `/api/v1/ai/payroll/schedules` ✓ | `erp.payroll.ai.run` | body: `name?`, `cron_expression`, `enabled` |
-| GET | `/api/v1/ai/payroll/schedules/{id}` | `erp.payroll.ai.read` | |
-| PATCH | `/api/v1/ai/payroll/schedules/{id}` ✓ | `erp.payroll.ai.run` | same body as create |
-| DELETE | `/api/v1/ai/payroll/schedules/{id}` ✓ | `erp.payroll.ai.run` | |
-| GET | `/api/v1/ai/payroll/notifications` | `erp.payroll.ai.read` | filters: `event_type`, `after`/`before`, `limit` |
-| GET | `/api/v1/ai/payroll/notifications/preferences` | `erp.payroll.ai.notify` | per-user, self-scoped |
-| PUT | `/api/v1/ai/payroll/notifications/preferences` ✓ | `erp.payroll.ai.notify` | body: `in_app_on`, `email_on` |
+| Method | Path                                             | Permission              | Notes                                                                             |
+| ------ | ------------------------------------------------ | ----------------------- | --------------------------------------------------------------------------------- |
+| POST   | `/api/v1/ai/payroll/batches` ✓                   | `erp.payroll.ai.run`    | body: `run_id`, `dry_run?`; idempotent per run                                    |
+| GET    | `/api/v1/ai/payroll/batches`                     | `erp.payroll.ai.read`   | filters: `status`; offset/limit                                                   |
+| GET    | `/api/v1/ai/payroll/batches/{id}`                | `erp.payroll.ai.read`   | includes preflight + totals                                                       |
+| POST   | `/api/v1/ai/payroll/tick` ✓                      | `erp.payroll.ai.run`    | drain one item + fire due schedules; returns `items_processed`, `schedules_fired` |
+| GET    | `/api/v1/ai/payroll/schedules`                   | `erp.payroll.ai.read`   |                                                                                   |
+| POST   | `/api/v1/ai/payroll/schedules` ✓                 | `erp.payroll.ai.run`    | body: `name?`, `cron_expression`, `enabled`                                       |
+| GET    | `/api/v1/ai/payroll/schedules/{id}`              | `erp.payroll.ai.read`   |                                                                                   |
+| PATCH  | `/api/v1/ai/payroll/schedules/{id}` ✓            | `erp.payroll.ai.run`    | same body as create                                                               |
+| DELETE | `/api/v1/ai/payroll/schedules/{id}` ✓            | `erp.payroll.ai.run`    |                                                                                   |
+| GET    | `/api/v1/ai/payroll/notifications`               | `erp.payroll.ai.read`   | filters: `event_type`, `after`/`before`, `limit`                                  |
+| GET    | `/api/v1/ai/payroll/notifications/preferences`   | `erp.payroll.ai.notify` | per-user, self-scoped                                                             |
+| PUT    | `/api/v1/ai/payroll/notifications/preferences` ✓ | `erp.payroll.ai.notify` | body: `in_app_on`, `email_on`                                                     |
 
 ### Error cases
 
-| Condition | Status | Problem type |
-|---|---|---|
-| Missing/invalid JWT | 401 | `authentication-error` |
-| Valid JWT, missing permission | 403 | `authorization-error` |
-| Unknown/other-tenant resource | 404 | `hr-not-found` / `payroll-run-not-found` |
-| Duplicate employee number / department name | 409 | `duplicate-record` |
-| Leave balance would go negative | 422 | `leave-balance-exceeded` |
-| Self-approval attempted | 422 | `self-approval-forbidden` |
-| Illegal state transition (approve a paid run) | 409 | `illegal-state-transition` |
-| Edit an approved/paid run's entry | 409 | `payroll-entry-immutable` |
-| Terminated employee: re-hire or post-termination activity | 409 | `employee-terminated` |
-| Overlapping payroll period | 409 | `payroll-period-conflict` |
-| Rate limit | 429 | `rate-limit-exceeded` |
+| Condition                                                 | Status | Problem type                             |
+| --------------------------------------------------------- | ------ | ---------------------------------------- |
+| Missing/invalid JWT                                       | 401    | `authentication-error`                   |
+| Valid JWT, missing permission                             | 403    | `authorization-error`                    |
+| Unknown/other-tenant resource                             | 404    | `hr-not-found` / `payroll-run-not-found` |
+| Duplicate employee number / department name               | 409    | `duplicate-record`                       |
+| Leave balance would go negative                           | 422    | `leave-balance-exceeded`                 |
+| Self-approval attempted                                   | 422    | `self-approval-forbidden`                |
+| Illegal state transition (approve a paid run)             | 409    | `illegal-state-transition`               |
+| Edit an approved/paid run's entry                         | 409    | `payroll-entry-immutable`                |
+| Terminated employee: re-hire or post-termination activity | 409    | `employee-terminated`                    |
+| Overlapping payroll period                                | 409    | `payroll-period-conflict`                |
+| Rate limit                                                | 429    | `rate-limit-exceeded`                    |
 
 ---
 
@@ -914,7 +915,15 @@ The generic proxy `apps/web/src/app/api/v1/[...path]/route.ts` forwards every `/
 
 ```ts
 // apps/web/src/lib/server/auth.ts - CORE_SEGMENTS (added by FND-002)
-const CORE_SEGMENTS = new Set(["crm", "sales", "inventory", "hr", "payroll", "finance", "reporting"]);
+const CORE_SEGMENTS = new Set([
+    "crm",
+    "sales",
+    "inventory",
+    "hr",
+    "payroll",
+    "finance",
+    "reporting",
+]);
 ```
 
 Nothing else changes: same `assertSameOrigin` gate for state-changing methods, same `resolveTenantSlug` from Host, same `no-store` discipline.
@@ -927,22 +936,22 @@ New `apps/web/src/lib/api/hr-api.ts` and `apps/web/src/lib/api/payroll-api.ts`, 
 
 Routes under `apps/web/src/app/dashboard/erp/`:
 
-| Route | Page | Key UI |
-|---|---|---|
-| `/dashboard/erp/hr/employees` | Employees | Filterable table, create/edit/terminate, detail with compensation + leave balance |
-| `/dashboard/erp/hr/departments` | Departments | Table, create/edit, manager assignment |
-| `/dashboard/erp/hr/leave` | Leave | Requests list, approve/reject/cancel actions, balances by employee |
-| `/dashboard/erp/payroll/runs` | Payroll runs | Run list, create, compute/approve/mark-paid/void actions, run detail with entries |
-| `/dashboard/erp/payroll/compensation` | Compensation | Salary history per employee, effective-dated changes |
-| `/dashboard/erp/payroll/settings` | Payroll settings | Statutory rates, currency, rounding |
-| `/dashboard/erp/payroll/automation` | Payroll automation (HR-AUT-001) | Schedule calendar + CRUD, run-now tick, notification inbox, delivery preferences — gated `erp.payroll.ai.read` (actions gated `erp.payroll.ai.run` / preferences `erp.payroll.ai.notify`) |
+| Route                                 | Page                            | Key UI                                                                                                                                                                                    |
+| ------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/dashboard/erp/hr/employees`         | Employees                       | Filterable table, create/edit/terminate, detail with compensation + leave balance                                                                                                         |
+| `/dashboard/erp/hr/departments`       | Departments                     | Table, create/edit, manager assignment                                                                                                                                                    |
+| `/dashboard/erp/hr/leave`             | Leave                           | Requests list, approve/reject/cancel actions, balances by employee                                                                                                                        |
+| `/dashboard/erp/payroll/runs`         | Payroll runs                    | Run list, create, compute/approve/mark-paid/void actions, run detail with entries                                                                                                         |
+| `/dashboard/erp/payroll/compensation` | Compensation                    | Salary history per employee, effective-dated changes                                                                                                                                      |
+| `/dashboard/erp/payroll/settings`     | Payroll settings                | Statutory rates, currency, rounding                                                                                                                                                       |
+| `/dashboard/erp/payroll/automation`   | Payroll automation (HR-AUT-001) | Schedule calendar + CRUD, run-now tick, notification inbox, delivery preferences — gated `erp.payroll.ai.read` (actions gated `erp.payroll.ai.run` / preferences `erp.payroll.ai.notify`) |
 
 Component conventions (follow the existing code): server components render the shell + `PageHeader` (`apps/web/src/components/dashboard/shared/page-header.tsx`); client components ("use client") do data fetching with `useSession()` + the feature API clients; mutations use optimistic UI + `ApiError` surfaced as inline/toast errors. **Permission gating note:** `useSession()` does NOT carry permissions - fetch them via `getMyRoles()` → `/api/v1/roles/me` (the `lib/access/modules.ts` pattern) and gate on `permissions`. **UI-kit gap (build once in this ticket):** `@/components/ui/*` has no empty states, skeletons, toasts, or status badges yet - add minimal reusable ones (or reuse what FND/sibling UI tickets land) instead of page-local one-offs. The real permission gate is backend `require_permission`; UI gating is cosmetic only.
 
 ### 8.4 Sidebar
 
-`apps/web/src/components/dashboard/workspace/sidebar-config.ts` (`erpNavGroups`): add an ERP *People* group — *Employees*, *Departments*, *Leave* → shown when `getMyRoles().permissions` contain `erp.hr.read`; *Payroll*, *Compensation*, *Settings* → shown when `erp.payroll.read`; *Automation* → shown when `erp.payroll.ai.read` (HR-AUT-001). (Sidebar gating today is `filterNavGroupsByPermissions` over `useModuleAccess()` permissions — the `erp.hr.read` item already exists; the `erp.payroll.read` item lands with HR-UI-003.)
-`apps/web/src/components/dashboard/workspace/sidebar-config.ts` (`erpNavGroups`): add an ERP *People* group - *Employees*, *Departments*, *Leave* → shown when `getMyRoles().permissions` contain `erp.hr.read`; *Payroll*, *Compensation*, *Settings* → shown when `erp.payroll.read`. (Sidebar gating today is `filterNavGroupsByPermissions` over `useModuleAccess()` permissions - the `erp.hr.read` item already exists; the `erp.payroll.read` item lands with HR-UI-003.)
+`apps/web/src/components/dashboard/workspace/sidebar-config.ts` (`erpNavGroups`): add an ERP _People_ group — _Employees_, _Departments_, _Leave_ → shown when `getMyRoles().permissions` contain `erp.hr.read`; _Payroll_, _Compensation_, _Settings_ → shown when `erp.payroll.read`; _Automation_ → shown when `erp.payroll.ai.read` (HR-AUT-001). (Sidebar gating today is `filterNavGroupsByPermissions` over `useModuleAccess()` permissions — the `erp.hr.read` item already exists; the `erp.payroll.read` item lands with HR-UI-003.)
+`apps/web/src/components/dashboard/workspace/sidebar-config.ts` (`erpNavGroups`): add an ERP _People_ group - _Employees_, _Departments_, _Leave_ → shown when `getMyRoles().permissions` contain `erp.hr.read`; _Payroll_, _Compensation_, _Settings_ → shown when `erp.payroll.read`. (Sidebar gating today is `filterNavGroupsByPermissions` over `useModuleAccess()` permissions - the `erp.hr.read` item already exists; the `erp.payroll.read` item lands with HR-UI-003.)
 
 ### 8.5 Plan gating
 
@@ -1021,15 +1030,15 @@ Real Postgres + `alembic upgrade head`, provision two tenants via `X-Tenant-Slug
 
 ## 12. Open decisions (confirm with the team before/at build time)
 
-| # | Decision | Recommended default |
-|---|---|---|
-| 1 | Leave year | **Calendar year**, accrual pro-rated from hire date |
-| 2 | Accrual trigger | **Explicit + idempotent** (`accrue` at compute + manual endpoint); no scheduler in Phase 1 |
-| 3 | Payroll proration | **Calendar-day proration** of monthly salary over the period (stated approximation) |
-| 4 | Self-approval | **Blocked** (approver ≠ requester) |
-| 5 | `department_manager` scope | **All rows** until a real team model lands |
-| 6 | Manual balance adjustments | Allowed (`erp.hr.write`) with required reason; always audited |
-| 7 | Void semantics | Void keeps rows for audit, frees the period for a new draft run |
+| #   | Decision                   | Recommended default                                                                        |
+| --- | -------------------------- | ------------------------------------------------------------------------------------------ |
+| 1   | Leave year                 | **Calendar year**, accrual pro-rated from hire date                                        |
+| 2   | Accrual trigger            | **Explicit + idempotent** (`accrue` at compute + manual endpoint); no scheduler in Phase 1 |
+| 3   | Payroll proration          | **Calendar-day proration** of monthly salary over the period (stated approximation)        |
+| 4   | Self-approval              | **Blocked** (approver ≠ requester)                                                         |
+| 5   | `department_manager` scope | **All rows** until a real team model lands                                                 |
+| 6   | Manual balance adjustments | Allowed (`erp.hr.write`) with required reason; always audited                              |
+| 7   | Void semantics             | Void keeps rows for audit, frees the period for a new draft run                            |
 
 ---
 

@@ -20,31 +20,42 @@ type ShellKey = "erp" | "agents" | "intelligence" | "portal";
  * Everything else stays in the workspace shell.
  */
 export function ShellRouter({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const moduleKey = detectModule(pathname);
+    const pathname = usePathname();
+    const moduleKey = detectModule(pathname);
 
-  if (moduleKey === "agents") return <AgentsShell>{children}</AgentsShell>;
-  if (moduleKey === "erp") return <ErpShell>{children}</ErpShell>;
-  if (moduleKey === "intelligence") return <IntelligenceShell>{children}</IntelligenceShell>;
-  if (moduleKey === "portal") return <PortalShell>{children}</PortalShell>;
-  return <DashboardShell>{children}</DashboardShell>;
+    if (moduleKey === "agents") return <AgentsShell>{children}</AgentsShell>;
+    if (moduleKey === "erp") return <ErpShell>{children}</ErpShell>;
+    if (moduleKey === "intelligence")
+        return <IntelligenceShell>{children}</IntelligenceShell>;
+    if (moduleKey === "portal") return <PortalShell>{children}</PortalShell>;
+    return <DashboardShell>{children}</DashboardShell>;
 }
 
 function detectModule(pathname: string): ShellKey | null {
-  const normalized = normalizeDashboardPath(pathname);
-  if (normalized === "/dashboard/erp" || normalized.startsWith("/dashboard/erp/")) return "erp";
-  if (normalized === "/dashboard/agents" || normalized.startsWith("/dashboard/agents/")) {
-    return "agents";
-  }
-  if (
-    normalized === "/dashboard/intelligence" ||
-    normalized.startsWith("/dashboard/intelligence/")
-  ) {
-    return "intelligence";
-  }
-  // Self-service leave portal - its own minimal chrome, no workspace nav.
-  if (normalized === "/dashboard/leave" || normalized.startsWith("/dashboard/leave/")) {
-    return "portal";
-  }
-  return null;
+    const normalized = normalizeDashboardPath(pathname);
+    if (
+        normalized === "/dashboard/erp" ||
+        normalized.startsWith("/dashboard/erp/")
+    )
+        return "erp";
+    if (
+        normalized === "/dashboard/agents" ||
+        normalized.startsWith("/dashboard/agents/")
+    ) {
+        return "agents";
+    }
+    if (
+        normalized === "/dashboard/intelligence" ||
+        normalized.startsWith("/dashboard/intelligence/")
+    ) {
+        return "intelligence";
+    }
+    // Self-service leave portal - its own minimal chrome, no workspace nav.
+    if (
+        normalized === "/dashboard/leave" ||
+        normalized.startsWith("/dashboard/leave/")
+    ) {
+        return "portal";
+    }
+    return null;
 }

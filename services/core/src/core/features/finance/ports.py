@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from core.domain.entities import (
         AccountCodeSuggestion,
         AiFinanceAnomaly,
+        AiFinanceQualityScore,
         AiFinanceSuggestion,
         ArAging,
         AuditReadiness,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
         CloseChecklist,
         ComparativePnl,
         DuplicateGroup,
+        ExchangeRate,
         FiscalPeriod,
         HealthScore,
         Invoice,
@@ -300,6 +302,24 @@ class FinanceRepositoryPort(Protocol):
         self, tenant_id: uuid.UUID, suggestion: AiFinanceSuggestion
     ) -> AiFinanceSuggestion: ...
 
+    async def get_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID
+    ) -> AiFinanceSuggestion | None: ...
+
+    async def review_ai_suggestion(
+        self, tenant_id: uuid.UUID, suggestion_id: uuid.UUID, *, accepted: bool
+    ) -> AiFinanceSuggestion | None: ...
+
+    async def upsert_ai_quality_score(
+        self, tenant_id: uuid.UUID, score: AiFinanceQualityScore
+    ) -> AiFinanceQualityScore: ...
+
+    async def suggestion_acceptance_counts(
+        self, tenant_id: uuid.UUID, window_days: int
+    ) -> Sequence[tuple[str, int, int]]: ...
+
+    async def count_invoices_since(self, tenant_id: uuid.UUID, since: datetime) -> int: ...
+
     async def upsert_ai_anomaly(
         self, tenant_id: uuid.UUID, anomaly: AiFinanceAnomaly
     ) -> AiFinanceAnomaly: ...
@@ -325,6 +345,39 @@ class FinanceRepositoryPort(Protocol):
     async def get_invoice_by_id(
         self, tenant_id: uuid.UUID, invoice_id: uuid.UUID
     ) -> Invoice | None: ...
+
+    # --- Exchange rates (SKY-67 C2) ---
+
+    async def get_exchange_rate(
+        self,
+        tenant_id: uuid.UUID,
+        base_currency: str,
+        quote_currency: str,
+        on_date: date,
+    ) -> ExchangeRate | None: ...
+
+    async def upsert_exchange_rate(self, rate: ExchangeRate) -> ExchangeRate: ...
+
+    async def list_exchange_rates(
+        self, tenant_id: uuid.UUID, *, currency: str | None = None
+    ) -> Sequence[ExchangeRate]: ...
+
+
+# ---------------------------------------------------------------------------
+# Tenant default currency (seam for payroll settings)
+# ---------------------------------------------------------------------------
+
+
+class TenantDefaultCurrencyPort(Protocol):
+    """Resolves the tenant's default (base) currency for FX conversion.
+
+    Implemented by an adapter over the payroll settings store (C2: default
+    invoice currency = ``erp_payroll_settings.default_currency``). Returns
+    ``None`` when the tenant has no explicit preference so the service can fall
+    back to ``settings.DEFAULT_CURRENCY``.
+    """
+
+    async def get_default_currency(self, tenant_id: uuid.UUID) -> str | None: ...
 
 
 # ---------------------------------------------------------------------------

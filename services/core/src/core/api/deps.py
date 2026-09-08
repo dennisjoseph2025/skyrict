@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     )
     from core.features.inventory.service import InventoryService
     from core.features.payroll.ports import PayslipApprovedNotifierPort
+    from core.features.payroll.repository import PayrollRepository
     from core.features.payroll.service import PayrollService
     from core.features.payroll_automation.service import PayrollAutomationService
     from core.features.reporting.service import DashboardService, ReportService
@@ -634,6 +635,27 @@ async def get_hr_ai_individual(
     return grants_permission(granted, ERP_HR_AI_INDIVIDUAL)
 
 
+class _PayrollDefaultCurrencyPort:
+    """Wires the finance FX base currency to payroll's ``default_currency`` (SKY-67 C2).
+
+    Implements :class:`TenantDefaultCurrencyPort` over
+    ``PayrollRepository.get_settings``; returns ``None`` (service falls back to
+    ``settings.DEFAULT_CURRENCY``) when a tenant has never seeded a payroll
+    setting, so FX never 500s an unfinished tenant's invoice dialog.
+    """
+
+    def __init__(self, repo: PayrollRepository) -> None:
+        self._repo = repo
+
+    async def get_default_currency(self, tenant_id: uuid.UUID) -> str | None:
+        try:
+            settings = await self._repo.get_settings(tenant_id)
+        except Exception:  # ponytail: tenant may predate payroll seeding
+            return None
+        code = getattr(settings, "default_currency", None)
+        return code or None
+
+
 def get_finance_service(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -652,6 +674,7 @@ def get_finance_service(
     from core.features.crm.repository import CrmRepository
     from core.features.finance.repository import FinanceRepository
     from core.features.finance.service import FinanceService
+    from core.features.payroll.repository import PayrollRepository
     from core.features.sales.repository import SalesRepository
 
     correlation_id = getattr(request.state, "request_id", None)
@@ -665,6 +688,9 @@ def get_finance_service(
         customers=crm_repo,
         timeline=crm_repo,
         order_lookup=sales_repo,
+        default_currency=_PayrollDefaultCurrencyPort(
+            PayrollRepository(db, next_sequence=SequenceRepository(db).next_value)
+        ),
     )
 
 
@@ -722,15 +748,26 @@ def get_finance_automation_service_with_ai(
 ) -> FinanceAutomationService:
     """Composition root for finance automation incl. AI account suggestions."""
     from collections.abc import Sequence
+    from decimal import Decimal
 
     from core.core.tenant_resolver import derive_tenant_slug
-    from core.domain.entities import AccountCodeSuggestion, ChartOfAccount, DraftEntry
+    from core.domain.entities import (
+        AccountCodeSuggestion,
+        AnomalyNarration,
+        ChartOfAccount,
+        DraftEntry,
+        InvoiceLineSuggestion,
+        ReminderDraft,
+    )
     from core.features.ai.router import get_ai_client
     from core.features.audit.repository import AuditRepository
     from core.features.crm.repository import CrmRepository
     from core.features.finance.ai_suggester import (
         draft_journal_entry_with_ai,
+        generate_reminder_with_ai,
+        narrate_anomaly_with_ai,
         suggest_account_code_with_ai,
+        suggest_invoice_lines_with_ai,
     )
     from core.features.finance.automation import FinanceAutomationService
     from core.features.finance.repository import FinanceRepository
@@ -738,6 +775,14 @@ def get_finance_automation_service_with_ai(
     client = get_ai_client(request)
     authorization = request.headers.get("authorization")
     tenant_slug = derive_tenant_slug(request)
+
+    async def ai_lines(description: str) -> list[InvoiceLineSuggestion] | None:
+        return await suggest_invoice_lines_with_ai(
+            client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            description=description,
+        )
 
     async def ai_suggest(
         description: str, accounts: Sequence[ChartOfAccount]
@@ -759,12 +804,45 @@ def get_finance_automation_service_with_ai(
             accounts=accounts,
         )
 
+    async def ai_narrate(
+        anomaly_type: str, description: str, severity: str
+    ) -> AnomalyNarration | None:
+        return await narrate_anomaly_with_ai(
+            client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            anomaly_type=anomaly_type,
+            description=description,
+            severity=severity,
+        )
+
+    async def ai_remind(
+        customer_name: str | None,
+        invoice_number: str,
+        amount: Decimal,
+        days_overdue: int,
+        tone: str,
+    ) -> ReminderDraft | None:
+        return await generate_reminder_with_ai(
+            client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            customer_name=customer_name,
+            invoice_number=invoice_number,
+            amount=float(amount),
+            days_overdue=days_overdue,
+            tone=tone,
+        )
+
     return FinanceAutomationService(
         repo=FinanceRepository(db),
         audit=cast("AuditSink", AuditRepository(db)),
         customers=CrmRepository(db),
         ai_suggest=ai_suggest,
         ai_draft=ai_draft,
+        ai_narrate=ai_narrate,
+        ai_remind=ai_remind,
+        ai_lines=ai_lines,
     )
 
 

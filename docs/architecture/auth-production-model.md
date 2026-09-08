@@ -10,13 +10,13 @@ Ship production-grade auth on skyrict: **4 subdomain routes** (marketing, regist
 
 ## URL Architecture (4 subdomain routes)
 
-| # | Surface | Dev | Prod |
-|---|---|---|---|
-| 1 | Marketing | `web.localhost` | `web.skyrict.com` |
-| 2 | Register | `signup.localhost/signup` | `signup.skyrict.com/signup` |
-| 2b | Invite accept | `signup.localhost/invite#t=...` | `signup.skyrict.com/invite#t=...` |
-| 3 | Login | `{slug}.signin.localhost/signin` | `{slug}.signin.skyrict.com/signin` |
-| 4 | Workspace | `{slug}.localhost/dashboard` | `{slug}.skyrict.com/dashboard` |
+| #   | Surface       | Dev                              | Prod                               |
+| --- | ------------- | -------------------------------- | ---------------------------------- |
+| 1   | Marketing     | `web.localhost`                  | `web.skyrict.com`                  |
+| 2   | Register      | `signup.localhost/signup`        | `signup.skyrict.com/signup`        |
+| 2b  | Invite accept | `signup.localhost/invite#t=...`  | `signup.skyrict.com/invite#t=...`  |
+| 3   | Login         | `{slug}.signin.localhost/signin` | `{slug}.signin.skyrict.com/signin` |
+| 4   | Workspace     | `{slug}.localhost/dashboard`     | `{slug}.skyrict.com/dashboard`     |
 
 - No `request_type` param (the path is the mode). Dashboard URL **never contains `signin`**.
 - Dev: one Next app on `:3000`, Host-based routing; `resolveTenantSlug` = `^([a-z0-9-]+)\.(signin\.)?(localhost|skyrict\.com)$`, **no fallback**; `web.*`/`signup.*` → no slug.
@@ -24,12 +24,13 @@ Ship production-grade auth on skyrict: **4 subdomain routes** (marketing, regist
 
 ### Security review - applied to URL architecture
 
-- **Host allowlist (High).** `resolveTenantSlug` derives the slug from `Host`, but the BFF and middleware must also **reject unknown hosts** (DNS-rebinding / host-header injection). Dev: allow `*.localhost` + `localhost` only. Prod: allow `*.skyrict.com`, `*.signin.skyrict.com` + exact apex names. The reverse proxy must also drop unknown `Host` (nginx `default_server` → 444). The regex is a *parser*, the allowlist is the *gate*.
+- **Host allowlist (High).** `resolveTenantSlug` derives the slug from `Host`, but the BFF and middleware must also **reject unknown hosts** (DNS-rebinding / host-header injection). Dev: allow `*.localhost` + `localhost` only. Prod: allow `*.skyrict.com`, `*.signin.skyrict.com` + exact apex names. The reverse proxy must also drop unknown `Host` (nginx `default_server` → 444). The regex is a _parser_, the allowlist is the _gate_.
 - **No env fallback for the slug.** `TENANT_SLUG` / `NEXT_PUBLIC_TENANT_SLUG` are dev-only conveniences and must not exist in the production posture. The slug always comes from the validated `Host`.
 
 ## Flows
 
 ### Register (owner) - marketing is register-only
+
 ```
 web.localhost (no Log in) → Get started → signup.localhost/signup
   Email + Turnstile → "Continue with email" (disabled till Turnstile passes)
@@ -43,6 +44,7 @@ web.localhost (no Log in) → Get started → signup.localhost/signup
 ```
 
 ### Login (owner & member)
+
 ```
 {slug}.signin.localhost/signin
   Email + Password (BOTH required, uniform "check your credentials" errors - no enumeration)
@@ -53,6 +55,7 @@ web.localhost (no Log in) → Get started → signup.localhost/signup
 ```
 
 ### Invite (member)
+
 ```
 Owner (Members page) sends invite → email link signup.localhost/invite#t=<single-use>
   click → JS reads fragment, POSTs token to /api/auth/invite/resolve (body only)
@@ -69,8 +72,8 @@ Owner (Members page) sends invite → email link signup.localhost/invite#t=<sing
 
 - **Server-side password strength (Medium).** Min 12 for both owner (signup) and member (invite) is enforced server-side, plus a strength check (reject password == email / full name / company, common-password list). Client-only validation is decoration.
 - **Reset password: MFA must survive the reset; sessions must not (High).** Password reset **never disables MFA** (otherwise email compromise = account takeover even with MFA enrolled). Reset revokes all sessions/token families, uses the same fragment + POST-body token discipline, and re-login requires MFA again. Rule stated explicitly here so no future change disables MFA on reset.
-- **Invite resolve/accept hardening (Medium).** Rate-limit `/invitations/resolve` + `/accept` per IP *and* per token. `resolve` returns one generic "invalid or expired" - no distinction between "used", "expired", "unknown". Explicit TTL (7 days) + single-use + revoked on membership changes. Role comes from the **stored invite**, never from the client request.
-- **MFA enrollment verification is brute-force guarded (Medium).** `/mfa/verify` (the setup-confirm endpoint) is rate-limited per IP *and* per user, and enforces a Redis-backed failed-attempt lockout (`MFA_ENROLL_MAX_ATTEMPTS=5`, 5-minute window) - repeated wrong codes return 429 and must wait out the window. The attempt counter resets on success and TTL-expires on its own.
+- **Invite resolve/accept hardening (Medium).** Rate-limit `/invitations/resolve` + `/accept` per IP _and_ per token. `resolve` returns one generic "invalid or expired" - no distinction between "used", "expired", "unknown". Explicit TTL (7 days) + single-use + revoked on membership changes. Role comes from the **stored invite**, never from the client request.
+- **MFA enrollment verification is brute-force guarded (Medium).** `/mfa/verify` (the setup-confirm endpoint) is rate-limited per IP _and_ per user, and enforces a Redis-backed failed-attempt lockout (`MFA_ENROLL_MAX_ATTEMPTS=5`, 5-minute window) - repeated wrong codes return 429 and must wait out the window. The attempt counter resets on success and TTL-expires on its own.
 - **Backup codes rotate without touching TOTP (Medium).** `POST /mfa/backup-codes` (rate-limited per IP+user) replaces the stored code set with 10 fresh hashes - the TOTP secret and `mfa_enabled` state are untouched. Rotating is an authenticated, MFA-complete action, so it is gated by the enforcement gate; old codes are rejected immediately at the login challenge. The BFF exposes this as `/api/auth/mfa/backup-codes`, and the setup panel offers Copy all / Download / Regenerate (regenerate swaps the list and requires a fresh acknowledgment).
 
 ## Key Mechanisms
@@ -82,7 +85,7 @@ Owner (Members page) sends invite → email link signup.localhost/invite#t=<sing
 
 - **Handoff is server-committed, not request-driven (High).** `{destination_slug, tenant_id, user_id, redirect}` live **inside the token**; the 307 target is built from the token, never from the request. Prevents request-side steering of the redirect (open-redirect class).
 - **Atomic single-use (High).** Redemption consumes via `GETDEL` (or Lua) so a raced double-submit cannot mint two sessions.
-- **Rate-limited redemption (High).** Rate-limit the handoff *redemption* per IP, in addition to mint-side limits.
+- **Rate-limited redemption (High).** Rate-limit the handoff _redemption_ per IP, in addition to mint-side limits.
 - **Minted only after MFA completes (High).** The handoff token for login/invite is issued only after the MFA challenge (or mandatory-enrollment setup) succeeds - never on password-alone.
 - **`__Host-` cookie prefix in prod (High).** `__Host-skyrict_session` (Secure + Path=/ + no Domain) matches the host-scoped requirement exactly. Dev keeps plain `skyrict_session` (http).
 - **BFF responses are `Cache-Control: no-store` (High).** `login`, `mfa/verify`, `handoff`, `session`, `refresh`, `code/*`, `org`, `invite/*` must not be cached (Next route handlers do not set this by default); add `Vary: Origin` where responses depend on origin.
@@ -107,6 +110,7 @@ Owner (Members page) sends invite → email link signup.localhost/invite#t=<sing
 ## Phases
 
 ### Phase 0 - Pull PR #47 (backend security fixes)
+
 1. Commit current BFF WIP to `feat/bff-session-layer`.
 2. Merge `origin/dev` (at `69c7cfc`) into `dev`; **review the identity backend diff after the merge - do not blind-`-X theirs`** (it can silently drop a security fix or clobber `.env`/keys); keep our web files.
 3. Adapt BFF to new contract: `/api/auth/login` reads `data.mfa_token` → `mfaToken`; `/api/auth/mfa/verify` sends `{mfa_token, code}` + tenant slug.
@@ -114,12 +118,14 @@ Owner (Members page) sends invite → email link signup.localhost/invite#t=<sing
 5. Verify: ruff + full backend pytest (incl. `test_mfa_challenge.py`) + web tsc/eslint/build.
 
 ### Phase 0.5 - Infra & routing
+
 - Hosts: `127.0.0.1 web.localhost`, `signup.localhost`, `tester.localhost`, `tester.signin.localhost` (+ dev slugs); `allowedDevOrigins` wildcards.
 - **Host allowlist** implemented in the BFF + middleware + reverse proxy (unknown hosts → 444) - see security review.
 - `resolveTenantSlug` + `getTenantSlug` regex, **no acme fallback, no env fallback in prod posture** (dev-only opt-in documented).
 - Delete `/api/v1` rewrite; point all client calls through BFF. Add security headers config (posture #7 incl. Turnstile CSP).
 
 ### Phase 1 - Backend (`services/identity`)
+
 - `signup_verify_code`: new → `onboarding` + token; existing → `status:"unavailable"`.
 - Keep `signup_set_password` (owner password set **before** org - gate at `service.py:511`); keep password auth; login = `POST /auth/login` + PR #47 `POST /auth/mfa/verify` (no new passwordless-login endpoint).
 - `signup_create_organization`: create tenant; return owner session/tokens (MFA is mandatory for every account - no tenant-level opt-out flag).
@@ -133,30 +139,34 @@ Owner (Members page) sends invite → email link signup.localhost/invite#t=<sing
 - Tests for all of the above.
 
 ### Phase 2 - Register (`web.localhost` + `signup.localhost`)
+
 - Marketing: remove all Log in links/CTAs; register-only → `signup.localhost/signup`; remove demo copy (`policy-dialog.tsx:57`).
 - `signup.localhost/signup`: email + Turnstile gate; silent OTP; "unavailable" on existing email; wizard: plan → set password → org → `/setup-mfa` → handoff.
 - New BFF: `/api/auth/code/send`, `/api/auth/code/verify`, `/api/auth/org`, `/api/auth/handoff/mint` - all `no-store`, origin-checked, rate-limited.
 
 ### Phase 3 - Login (`{slug}.signin.localhost`)
+
 - `TenantLoginForm`: email + password → inline MFA (`mfa_token`) → handoff; `mfa.setup` → `/setup-mfa`; reset-password on the signin subdomain.
 - BFF: adapt `/api/auth/login` + `/api/auth/mfa/verify`; add `/api/auth/handoff` (tenant origin: Host+tenant check → cookie → 307 → `/dashboard`).
 - **Reset-password flow (High):** fragment + POST token, single-use, MFA survives reset, all sessions revoked, re-login requires MFA.
 - **Unknown-tenant generic page** (Medium).
 
 ### Phase 4 - Workspace (`{slug}.localhost/dashboard`)
+
 - Session carries roles/permissions; sidebar filters: Agents (`agents:read`), ERP (`erp.*`), Intelligence (`intelligence:read`), Members (`users:read`), Settings (`settings:read`); owner (`*`) sees all + owner-only **Sessions & Devices** page (all users' IP, device, last-logged, revoke - PII-protected, audited); Members page for invites.
 - All dashboard APIs enforce permissions **server-side** (sidebar filtering is UI only).
 
 ### Phase 5 - Verify end-to-end
+
 - ruff + pytest; migration + re-seed; web tsc/eslint/build.
 - Browser E2E: owner signup → dashboard URL `tester.localhost/dashboard` (no `signin`); member invite → accept (name/password/confirm) → QR → dashboard; login at `tester.signin.localhost/signin`; existing-email "unavailable"; `/api/v1` unreachable from browser; no acme fallback anywhere.
 - **Security acceptance checklist:**
-  - Logout + password change + MFA disable → existing access tokens immediately rejected (revocation).
-  - Handoff: wrong-tenant Host rejected; replay of a consumed token rejected; >120s old token rejected; redirect target only from token.
-  - Auth pages/BFF responses return `Cache-Control: no-store`.
-  - Unknown `Host` rejected by BFF/middleware/proxy.
-  - Password reset leaves MFA enabled and revokes sessions.
-  - No tokens/emails in query strings or server logs; invite/backup-code storage hash-only.
+    - Logout + password change + MFA disable → existing access tokens immediately rejected (revocation).
+    - Handoff: wrong-tenant Host rejected; replay of a consumed token rejected; >120s old token rejected; redirect target only from token.
+    - Auth pages/BFF responses return `Cache-Control: no-store`.
+    - Unknown `Host` rejected by BFF/middleware/proxy.
+    - Password reset leaves MFA enabled and revokes sessions.
+    - No tokens/emails in query strings or server logs; invite/backup-code storage hash-only.
 
 ## Open items (confirm before execution)
 

@@ -59,7 +59,7 @@ The boundaries are enforced in CI with import-linter (root `pyproject.toml`):
 - **Foundations**: `core`, `db`, `models`, `domain`, `events` never depend on `features` or `api`.
 - **Persistence confinement**: no `identity.features` module may import ORM models or the db layer directly except `*repository.py`, which is the ORM gateway. Services, routers, and schemas only see entities through ports.
 - **Domain purity**: `domain` never imports `models`, `db`, `features`, or `api`.
-- **API hygiene**: no `identity.api` module imports `models` directly (the `deps.py` composition root wires repositories; the db *session* factory is the transaction boundary at `get_db`).
+- **API hygiene**: no `identity.api` module imports `models` directly (the `deps.py` composition root wires repositories; the db _session_ factory is the transaction boundary at `get_db`).
 
 These contracts check direct imports, so the sanctioned `api.deps` composition-root wiring is not misreported as a feature→db coupling.
 

@@ -12,11 +12,11 @@ A beginner-friendly, complete guide to what was built, how it works, which files
 
 This work completed three security features:
 
-| Feature | Ticket | Plain meaning |
-|---|---|---|
-| **RBAC** | AUTH-TASK-030 | Role-based access control - you can only do what your role allows |
+| Feature          | Ticket        | Plain meaning                                                             |
+| ---------------- | ------------- | ------------------------------------------------------------------------- |
+| **RBAC**         | AUTH-TASK-030 | Role-based access control - you can only do what your role allows         |
 | **Role builder** | AUTH-TASK-032 | Admins can create their own custom roles from a fixed menu of permissions |
-| **MFA** | AUTH-TASK-035 | Multi-factor authentication - TOTP app codes + single-use backup codes |
+| **MFA**          | AUTH-TASK-035 | Multi-factor authentication - TOTP app codes + single-use backup codes    |
 
 **Tech stack:** Python · FastAPI · PostgreSQL · Redis · SQLAlchemy (async) · PyJWT (RS256) · Argon2id (passwords) · pyotp (TOTP) · Fernet (secret encryption) · Docker · Postman/Newman (manual testing).
 
@@ -70,12 +70,12 @@ Every protected request must pass **four gates**, in order. Failing any gate sto
                fail → 401          fail → 404         fail → 403       fail → 403
 ```
 
-| Gate | Returns | Example test |
-|---|---|---|
-| ① No/invalid/expired token | **401** | 030.8 (GET /roles with no token) |
-| ② Token from another tenant | **404** | 030.9 (wrong tenant slug) |
+| Gate                             | Returns | Example test                     |
+| -------------------------------- | ------- | -------------------------------- |
+| ① No/invalid/expired token       | **401** | 030.8 (GET /roles with no token) |
+| ② Token from another tenant      | **404** | 030.9 (wrong tenant slug)        |
 | ③ MFA mandatory but not enrolled | **403** | 035.3 (GET /users/me before MFA) |
-| ④ Missing permission key | **403** | 030.7 (member tries POST /roles) |
+| ④ Missing permission key         | **403** | 030.7 (member tries POST /roles) |
 
 > **Why 404 for wrong tenant?** If you could get a 403, you'd learn "this other tenant exists". 404 hides that entirely - one more layer of isolation.
 
@@ -246,48 +246,52 @@ Back to **section 3**: 401 → 404 → 403(MFA) → 403(RBAC) → handler → se
 
 ### 6.1 Core - the shared security foundation
 
-| File | What it does | Why it matters |
-|---|---|---|
-| `src/identity/core/config.py` | Loads all settings from env vars; validates them | New `MFA_ENCRYPTION_KEY` (must be a valid Fernet key) + "production safety" guards that refuse to boot with `DEBUG=true`, wildcard CORS, missing domain, or committed test keys |
-| `src/identity/core/security.py` | The "safe" of the whole service: JWT sign/verify (RS256), Argon2id password hashing, Fernet MFA-secret encryption, and the `mfa_is_required()` rule | Single verification path → no accidental weak spots; MFA secrets are unreadable in the DB; the "who is forced to enroll" rule lives here so login and the request gate can never disagree |
-| `src/identity/core/permissions.py` | The fixed menu of permission keys (`users:write`, `erp.invoice.approve`, … = 19 keys, 10 groups) | The **only** source of truth for what permissions exist - custom roles can't invent keys |
-| `src/identity/core/constants.py` | Magic values: system role definitions, reserved slugs/emails, token expiries, problem-type URIs | One place to change a default without hunting through code |
+| File                               | What it does                                                                                                                                        | Why it matters                                                                                                                                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/identity/core/config.py`      | Loads all settings from env vars; validates them                                                                                                    | New `MFA_ENCRYPTION_KEY` (must be a valid Fernet key) + "production safety" guards that refuse to boot with `DEBUG=true`, wildcard CORS, missing domain, or committed test keys           |
+| `src/identity/core/security.py`    | The "safe" of the whole service: JWT sign/verify (RS256), Argon2id password hashing, Fernet MFA-secret encryption, and the `mfa_is_required()` rule | Single verification path → no accidental weak spots; MFA secrets are unreadable in the DB; the "who is forced to enroll" rule lives here so login and the request gate can never disagree |
+| `src/identity/core/permissions.py` | The fixed menu of permission keys (`users:write`, `erp.invoice.approve`, … = 19 keys, 10 groups)                                                    | The **only** source of truth for what permissions exist - custom roles can't invent keys                                                                                                  |
+| `src/identity/core/constants.py`   | Magic values: system role definitions, reserved slugs/emails, token expiries, problem-type URIs                                                     | One place to change a default without hunting through code                                                                                                                                |
 
 ### 6.2 API layer - the doors into the service
 
-| File | What it does | Why it matters |
-|---|---|---|
-| `src/identity/api/deps.py` | Dependency injection: `get_current_user` (JWT + tenant + MFA gate), `require_permission(...)` (RBAC gate), all repository/service factories | **One place** enforces auth/MFA/RBAC on every route - a new endpoint is secure by default |
-| `src/identity/api/readiness.py` | Startup check: database, Redis, JWT keys, MFA key | Fails fast at boot instead of breaking in production |
-| `src/identity/api/v1/router.py` | Wires every feature's router into `/api/v1` | The single "directory" of all endpoints |
+| File                            | What it does                                                                                                                                | Why it matters                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `src/identity/api/deps.py`      | Dependency injection: `get_current_user` (JWT + tenant + MFA gate), `require_permission(...)` (RBAC gate), all repository/service factories | **One place** enforces auth/MFA/RBAC on every route - a new endpoint is secure by default |
+| `src/identity/api/readiness.py` | Startup check: database, Redis, JWT keys, MFA key                                                                                           | Fails fast at boot instead of breaking in production                                      |
+| `src/identity/api/v1/router.py` | Wires every feature's router into `/api/v1`                                                                                                 | The single "directory" of all endpoints                                                   |
 
 ### 6.3 Features - the business logic
 
 **auth/** (login, register, email verify, tokens)
-| File | What it does | Why it matters |
-|---|---|---|
+
+| File         | What it does                                                                                                                                                                                       | Why it matters                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `service.py` | `AuthenticationService.login` (checks password, computes `mfa_required`/`next_step`), `register` (creates tenant + 5 roles + owner), `verify_email`; `TokenService` (create/refresh/revoke tokens) | The heart of the whole flow - every user journey starts here; refresh-token **rotation + reuse detection** kills stolen tokens |
-| `schemas.py` | The login/register request & response shapes | Adds `mfa_required`/`next_step` to the login response contract |
+| `schemas.py` | The login/register request & response shapes                                                                                                                                                       | Adds `mfa_required`/`next_step` to the login response contract                                                                 |
 
 **mfa/** (the new feature)
-| File | What it does | Why it matters |
-|---|---|---|
-| `router.py` | `POST /mfa/setup`, `/verify`, `/disable`, `/reset` | The four MFA endpoints (disable needs your password; reset needs owner + `mfa:manage`) |
+
+| File         | What it does                                                                                                                                                                   | Why it matters                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `router.py`  | `POST /mfa/setup`, `/verify`, `/disable`, `/reset`                                                                                                                             | The four MFA endpoints (disable needs your password; reset needs owner + `mfa:manage`)                                                           |
 | `service.py` | `setup_totp` (secret + QR + 10 backup codes), `verify_totp` (pyotp, clock-skew tolerant), `redeem_backup_code` (single-use), `enable_mfa`, `disable_mfa`, `reset_mfa_by_owner` | Everything security-critical about MFA; backup codes hashed with the **same Argon2id function** at generation and redemption (a DoD requirement) |
-| `schemas.py` | Setup/verify response schemas | Returns `secret`, `provisioning_uri`, `backup_codes` (shown once) |
+| `schemas.py` | Setup/verify response schemas                                                                                                                                                  | Returns `secret`, `provisioning_uri`, `backup_codes` (shown once)                                                                                |
 
 **roles/** (RBAC + role builder)
-| File | What it does | Why it matters |
-|---|---|---|
-| `router.py` | `GET /permissions` (catalog), `POST/GET/PATCH/DELETE /roles`, `POST /roles/{id}/assign` | The role-builder + RBAC API; strict validation returns 422 for unknown keys / duplicate / reserved names |
-| `service.py` | `AuthorizationService.check_permission` (fail-closed RBAC), `RoleManagementService` (create/list/get/update/delete/assign, system-role protection) | Where access decisions are actually made; defaults to **deny** |
-| `repository.py` | Role queries + grants; explicit `delete(user_role)` on role delete | Fixes the 500 that used to happen when deleting a role that had members |
+
+| File            | What it does                                                                                                                                       | Why it matters                                                                                           |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `router.py`     | `GET /permissions` (catalog), `POST/GET/PATCH/DELETE /roles`, `POST /roles/{id}/assign`                                                            | The role-builder + RBAC API; strict validation returns 422 for unknown keys / duplicate / reserved names |
+| `service.py`    | `AuthorizationService.check_permission` (fail-closed RBAC), `RoleManagementService` (create/list/get/update/delete/assign, system-role protection) | Where access decisions are actually made; defaults to **deny**                                           |
+| `repository.py` | Role queries + grants; explicit `delete(user_role)` on role delete                                                                                 | Fixes the 500 that used to happen when deleting a role that had members                                  |
 
 **organizations/** (tenant + MFA policy)
-| File | What it does | Why it matters |
-|---|---|---|
-| `router.py` | `GET /organizations/me`, `POST /organizations`, and `PATCH /tenants/{id}/settings` | The settings endpoint (requires `tenants:write`) is how an owner flips `mfa_required_for_all_members` on/off |
-| `service.py` / `repository.py` / `schemas.py` / `ports.py` | Tenant logic + settings update | Carries the MFA policy down to the database |
+
+| File                                                       | What it does                                                                       | Why it matters                                                                                               |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `router.py`                                                | `GET /organizations/me`, `POST /organizations`, and `PATCH /tenants/{id}/settings` | The settings endpoint (requires `tenants:write`) is how an owner flips `mfa_required_for_all_members` on/off |
+| `service.py` / `repository.py` / `schemas.py` / `ports.py` | Tenant logic + settings update                                                     | Carries the MFA policy down to the database                                                                  |
 
 **users/** (user data support)
 | `ports.py` / `repository.py` | User queries + `update_mfa`/`disable_mfa` | Persists MFA state and serves the MFA gate's lookups |
@@ -297,29 +301,29 @@ Back to **section 3**: 401 → 404 → 403(MFA) → 403(RBAC) → handler → se
 
 ### 6.4 Models + migration
 
-| File | What it does |
-|---|---|
-| `models/user.py` | SQLAlchemy User model + new `mfa_enabled`, `mfa_secret`, `mfa_backup_codes` |
-| `models/tenant.py` | Tenant model + new `mfa_required_for_all_members` |
-| `domain/entities.py` | Plain-Python domain objects (User, Tenant, Role) - models map to these |
-| `alembic/versions/0005_mfa_enforcement.py` | Schema migration adding the MFA columns |
+| File                                       | What it does                                                                |
+| ------------------------------------------ | --------------------------------------------------------------------------- |
+| `models/user.py`                           | SQLAlchemy User model + new `mfa_enabled`, `mfa_secret`, `mfa_backup_codes` |
+| `models/tenant.py`                         | Tenant model + new `mfa_required_for_all_members`                           |
+| `domain/entities.py`                       | Plain-Python domain objects (User, Tenant, Role) - models map to these      |
+| `alembic/versions/0005_mfa_enforcement.py` | Schema migration adding the MFA columns                                     |
 
 ### 6.5 Tests
 
-| File | What it proves |
-|---|---|
-| `tests/unit/features/test_mfa_service.py` | TOTP + backup-code unit tests - including the DoD test that generation and redemption use **one identical hashing function** |
-| `tests/integration/api/test_mfa.py` | End-to-end MFA: owner forced, policy forces members, gate blocks, backup code single-use, owner reset |
-| `tests/integration/api/mfa_helpers.py` | `enroll_mfa_if_required` helper used by many tests |
-| `tests/unit/features/test_permissions_api.py`, `test_auth_service.py` | Catalog + login posture coverage |
-| `tests/conftest.py` | Test setup: fresh temp RSA keys, `IDENTITY_DEBUG=false` - makes tests hermetic (the 4 "failed" tests now pass) |
+| File                                                                  | What it proves                                                                                                               |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `tests/unit/features/test_mfa_service.py`                             | TOTP + backup-code unit tests - including the DoD test that generation and redemption use **one identical hashing function** |
+| `tests/integration/api/test_mfa.py`                                   | End-to-end MFA: owner forced, policy forces members, gate blocks, backup code single-use, owner reset                        |
+| `tests/integration/api/mfa_helpers.py`                                | `enroll_mfa_if_required` helper used by many tests                                                                           |
+| `tests/unit/features/test_permissions_api.py`, `test_auth_service.py` | Catalog + login posture coverage                                                                                             |
+| `tests/conftest.py`                                                   | Test setup: fresh temp RSA keys, `IDENTITY_DEBUG=false` - makes tests hermetic (the 4 "failed" tests now pass)               |
 
 ### 6.6 Infra / packaging
 
-| File | What it does |
-|---|---|
-| `pyproject.toml` + `uv.lock` | Dependencies - added `pyotp` and `argon2-cffi` for MFA |
-| `.env.example` | Documents the new env vars (`IDENTITY_MFA_ENCRYPTION_KEY`, …) |
+| File                         | What it does                                                  |
+| ---------------------------- | ------------------------------------------------------------- |
+| `pyproject.toml` + `uv.lock` | Dependencies - added `pyotp` and `argon2-cffi` for MFA        |
+| `.env.example`               | Documents the new env vars (`IDENTITY_MFA_ENCRYPTION_KEY`, …) |
 
 ### 6.7 Postman (the manual test deliverable)
 
@@ -349,6 +353,7 @@ Postman run: 40/40 requests green (full flow, folders 00 → 04)
 ```
 
 **To run the tests yourself:**
+
 ```bash
 # inside the running identity container
 docker exec -w /app/services/identity skyrict-identity \
@@ -361,12 +366,12 @@ docker exec -w /app/services/identity skyrict-identity \
 
 ## Appendix - credentials & secrets cheat sheet
 
-| Secret | Where it lives | Protected by |
-|---|---|---|
-| Password | `users.password_hash` | Argon2id (random salt, slow) |
-| TOTP secret | `users.mfa_secret` | Fernet encryption at rest |
-| Backup codes | `users.mfa_backup_codes` | Argon2id hashes, single-use |
-| Access token | client | RS256 signature, 15-minute expiry |
-| Refresh token | client + `sessions.refresh_token_hash` | sha256 hash + rotation + reuse detection |
-| Invite token | `invitations.token` | 32 random bytes, 7-day expiry |
-| MFA encryption key | env `IDENTITY_MFA_ENCRYPTION_KEY` | fail-fast startup validation |
+| Secret             | Where it lives                         | Protected by                             |
+| ------------------ | -------------------------------------- | ---------------------------------------- |
+| Password           | `users.password_hash`                  | Argon2id (random salt, slow)             |
+| TOTP secret        | `users.mfa_secret`                     | Fernet encryption at rest                |
+| Backup codes       | `users.mfa_backup_codes`               | Argon2id hashes, single-use              |
+| Access token       | client                                 | RS256 signature, 15-minute expiry        |
+| Refresh token      | client + `sessions.refresh_token_hash` | sha256 hash + rotation + reuse detection |
+| Invite token       | `invitations.token`                    | 32 random bytes, 7-day expiry            |
+| MFA encryption key | env `IDENTITY_MFA_ENCRYPTION_KEY`      | fail-fast startup validation             |

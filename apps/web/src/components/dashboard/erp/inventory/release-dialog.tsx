@@ -74,12 +74,9 @@ export function ReleaseStockDialog({
 
     const selectedLevel = stockLevels.find(
         (level) =>
-            level.productId === productId &&
-            level.warehouseId === warehouseId,
+            level.productId === productId && level.warehouseId === warehouseId,
     );
-    const reserved = selectedLevel
-        ? Number(selectedLevel.qtyReserved)
-        : 0;
+    const reserved = selectedLevel ? Number(selectedLevel.qtyReserved) : 0;
 
     async function handleSubmit(event: FormEvent) {
         event.preventDefault();
@@ -182,7 +179,11 @@ export function ReleaseStockDialog({
                     </div>
                     {selectedLevel ? (
                         <p className="text-sm text-muted-foreground">
-                            Currently reserved: <span className="font-medium text-foreground">{reserved}</span> unit(s)
+                            Currently reserved:{" "}
+                            <span className="font-medium text-foreground">
+                                {reserved}
+                            </span>{" "}
+                            unit(s)
                         </p>
                     ) : null}
                     <div className="grid gap-1.5">
@@ -195,7 +196,9 @@ export function ReleaseStockDialog({
                             max={reserved || undefined}
                             value={qty}
                             onChange={(event) => setQty(event.target.value)}
-                            placeholder={reserved > 0 ? `Up to ${reserved}` : "0"}
+                            placeholder={
+                                reserved > 0 ? `Up to ${reserved}` : "0"
+                            }
                             required
                         />
                     </div>
@@ -213,7 +216,10 @@ export function ReleaseStockDialog({
                         type="submit"
                         form="inventory-release"
                         disabled={
-                            submitting || !productId || !warehouseId || reserved === 0
+                            submitting ||
+                            !productId ||
+                            !warehouseId ||
+                            reserved === 0
                         }
                     >
                         {submitting ? "Releasing…" : "Release stock"}

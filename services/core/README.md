@@ -9,11 +9,11 @@ object, shared API dependencies (`get_tenant_context`, `get_current_user`,
 
 ## Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/health` | Liveness probe |
-| GET | `/api/v1/ready` | Readiness probe |
-| GET | `/api/v1/me` | Current user (protected - exercises `get_current_user`) |
+| Method | Path             | Description                                             |
+| ------ | ---------------- | ------------------------------------------------------- |
+| GET    | `/api/v1/health` | Liveness probe                                          |
+| GET    | `/api/v1/ready`  | Readiness probe                                         |
+| GET    | `/api/v1/me`     | Current user (protected - exercises `get_current_user`) |
 
 ## Local Development
 

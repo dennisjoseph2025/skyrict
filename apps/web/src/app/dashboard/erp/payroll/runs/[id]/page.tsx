@@ -2,14 +2,14 @@ import { ModuleAccessBoundary } from "@/components/dashboard/shared/module-acces
 import { RunDetailClient } from "./run-detail";
 
 export default async function RunDetailPage({
-  params,
+    params,
 }: {
-  params: Promise<{ id: string }>;
+    params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  return (
-    <ModuleAccessBoundary module="erp" permission="erp.payroll.read">
-      <RunDetailClient runId={id} />
-    </ModuleAccessBoundary>
-  );
+    const { id } = await params;
+    return (
+        <ModuleAccessBoundary module="erp" permission="erp.payroll.read">
+            <RunDetailClient runId={id} />
+        </ModuleAccessBoundary>
+    );
 }

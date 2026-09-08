@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Layers, PackagePlus, Lock, Unlock } from "lucide-react";
+import {
+    ArrowLeftRight,
+    Layers,
+    PackagePlus,
+    Lock,
+    Unlock,
+} from "lucide-react";
 
 import { AdjustStockDialog } from "@/components/dashboard/erp/inventory/adjust-dialog";
 import { InventoryEmpty } from "@/components/dashboard/erp/inventory/inventory-empty";
@@ -427,7 +433,9 @@ export function StockClient() {
                                                                 variant="ghost"
                                                                 size="icon-sm"
                                                                 disabled={
-                                                                    archived || reserved === 0
+                                                                    archived ||
+                                                                    reserved ===
+                                                                        0
                                                                 }
                                                                 onClick={() =>
                                                                     openRelease(
