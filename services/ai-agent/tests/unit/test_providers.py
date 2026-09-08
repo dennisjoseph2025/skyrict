@@ -119,6 +119,56 @@ class TestOpenAiCompatibleProvider:
         assert captured["body"]["stream"] is False
         assert completion.text == "ok"
 
+    async def test_think_false_omitted_from_openai_payload(self) -> None:
+        """``think=False`` must NOT be sent to OpenAI-compatible endpoints.
+
+        Regression: the report builder always sends ``think=False`` (and
+        json_mode=True). Groq's chat-completions API has no ``think`` field
+        and rejects the request with 400 "property 'think' is unsupported",
+        killing the fallback chain when the primary gateway is unreachable.
+        ``think=False`` is the endpoint default anyway (no reasoning), so
+        omitting it is semantically identical and keeps the request portable.
+        """
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "ok"}}], "model": "m"},
+            )
+
+        provider, _ = _make_provider(handler)
+        request = LlmRequest(
+            system_prompt="You are a report spec extractor. Reply in JSON.",
+            user_prompt="sales orders by day for last quarter",
+            temperature=0.0,
+            max_tokens=512,
+            json_mode=True,
+            think=False,
+        )
+        await provider.complete(request)
+
+        body = captured["body"]
+        assert "think" not in body
+        assert body["response_format"] == {"type": "json_object"}
+
+    async def test_think_true_is_forwarded_to_supporting_gateway(self) -> None:
+        """Explicit ``think=True`` is a supported extension (OmniRoute etc.)."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "ok"}}], "model": "m"},
+            )
+
+        captured: dict[str, Any] = {}
+        provider, _ = _make_provider(handler)
+        await provider.complete(LlmRequest(system_prompt="s", user_prompt="u", think=True))
+
+        assert captured["body"]["think"] is True
+
     async def test_http_error_maps_to_unavailable(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(503, json={"error": "overloaded"})
@@ -204,6 +254,24 @@ class TestOpenAiCompatibleProviderStream:
         assert body["stream"] is True
         assert body["model"] == "test-model-1"
         assert body["messages"][1]["content"] == "say hi"
+
+    async def test_stream_omits_think_false_from_payload(self) -> None:
+        """The streaming path must obey the same think portability rule."""
+        captured: dict[str, Any] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = json.loads(request.content)
+            return _sse_stream("ok")
+
+        provider, _ = _make_provider(handler)
+        _ = [
+            c
+            async for c in provider.stream(
+                LlmRequest(system_prompt="s", user_prompt="u", think=False)
+            )
+        ]
+
+        assert "think" not in captured["body"]
 
     async def test_stream_http_error_maps_to_unavailable(self) -> None:
         provider, _ = _make_provider(
