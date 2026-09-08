@@ -59,12 +59,18 @@ services:
       # Security-alert CTAs auto-derive as http://{slug}.localhost:3000 in dev.
     volumes:
       - ../../services/identity/src:/app/services/identity/src
+      - ../../services/identity/alembic:/app/services/identity/alembic
+      - ../../services/identity/alembic.ini:/app/services/identity/alembic.ini:ro
       - ../../libs/skyrict-common/src:/app/libs/skyrict-common/src
       - ../../libs/skyrict-events/src:/app/libs/skyrict-events/src
       # JWT RSA keys (generate with `uv run python -m skyrict_testing.generate_keys`).
       # The dev CMD runs from /app/services/identity, so the relative key
       # paths in services/identity/.env resolve to /app/services/identity/.dev/keys.
       - ../../.dev/keys:/app/services/identity/.dev/keys:ro
+    # Dev boot: migrate the DB before uvicorn starts so the database can never
+    # silently drift behind the code. Production runs migrations out-of-band;
+    # this override is dev-only.
+    command: ["sh", "-c", "uv run --directory services/identity alembic upgrade head && uv run --directory services/identity uvicorn identity.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,6 +114,11 @@ services:
       # Outbound payment-reminder email -> Mailpit container (Web UI: http://localhost:8025).
       CORE_EMAIL_SMTP_HOST: mailpit
       CORE_EMAIL_SMTP_PORT: "1025"
+    # Dev boot: migrate the DB before uvicorn starts so the database can never
+    # silently drift behind the code (a stale upgrade head left the reports
+    # permission and other tables missing, breaking generate/save). Production
+    # runs migrations out-of-band; this override is dev-only.
+    command: ["sh", "-c", "uv run --directory services/core alembic upgrade head && uv run --directory services/core uvicorn core.main:app --reload --host 0.0.0.0 --port 8001"]
     volumes:
       - ../../services/core/src:/app/services/core/src
       - ../../services/core/alembic:/app/services/core/alembic
@@ -186,6 +197,10 @@ services:
       # The dev CMD runs from /app/services/ai-agent, so the relative key path
       # in services/ai-agent/.env resolves to /app/services/ai-agent/.dev/keys.
       - ../../.dev/keys:/app/services/ai-agent/.dev/keys:ro
+    # Dev boot: migrate the DB before uvicorn starts so the database can never
+    # silently drift behind the code. Production runs migrations out-of-band;
+    # this override is dev-only.
+    command: ["sh", "-c", "uv run --directory services/ai-agent alembic upgrade head && uv run --directory services/ai-agent uvicorn ai_agent.main:app --reload --host 0.0.0.0 --port 8000"]
     depends_on:
       postgres:
         condition: service_healthy
