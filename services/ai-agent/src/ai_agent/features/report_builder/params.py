@@ -116,12 +116,20 @@ def build_report_params(
     to raise as a clarification. ``tenant_id`` is intentionally NOT set here -
     the engine adds it from the authenticated request.
     """
+    declared = set(definition.params)
+    # Point-in-time templates (e.g. headcount by department) declare only
+    # tenant_id - a timeframe is NOT meaningful there and must not be
+    # required. The LLM correctly emits timeframe: null for them; demanding a
+    # period would turn a valid prompt into a fake clarification.
+    date_params = declared & {"from_date", "to_date", "as_of_date"}
+    if not date_params:
+        return ParamResolution(params={})
+
     outcome = resolve_timeframe(timeframe, today=today)
     if outcome.kind != "resolved":
         return outcome
 
     params: dict[str, Any] = {}
-    declared = set(definition.params)
     if "from_date" in declared and "to_date" in declared:
         if outcome.from_date is None or outcome.to_date is None:
             return TimeframeOutcome(

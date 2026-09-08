@@ -135,6 +135,32 @@ class TestBuildReportParams:
         assert isinstance(result, ParamResolution)
         assert result.params == {}
 
+    def test_no_date_template_without_timeframe_runs(self) -> None:
+        """Point-in-time templates need no time period at all.
+
+        Regression: 'Headcount by department' emits ``timeframe: null`` (the
+        template declares only tenant_id), yet the resolver demanded a period
+        before checking the template's params, so generate returned "Please
+        provide a time period." with data:null.
+        """
+        result = build_report_params(
+            definition=NO_DATE_DEF,
+            timeframe=None,
+            today=TODAY,
+        )
+        assert isinstance(result, ParamResolution)
+        assert result.params == {}
+
+    def test_range_template_without_timeframe_still_clarifies(self) -> None:
+        """Range templates still must not run on a missing time period."""
+        result = build_report_params(
+            definition=RANGE_DEF,
+            timeframe=None,
+            today=TODAY,
+        )
+        assert isinstance(result, TimeframeOutcome)
+        assert result.kind == "unresolved"
+
     def test_tenant_id_is_never_set_here(self) -> None:
         # The engine adds tenant_id from the authenticated request; this module
         # must not invent it.
