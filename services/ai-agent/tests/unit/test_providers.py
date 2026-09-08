@@ -8,6 +8,7 @@ header and never leaks into results, logs, or exception strings.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -284,9 +285,7 @@ class TestRegistryFactory:
         assert [p.name for p in providers] == ["openrouter", "omniroute"]
         assert providers[0].local_only is False
 
-    def test_compose_llm_chain_contract(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_compose_llm_chain_contract(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """docker-compose.dev.yml keeps env_file providers, corrects two ends.
 
         Value of this test is the CONTRACT, not the providers: the container
@@ -319,3 +318,32 @@ class TestRegistryFactory:
         assert resolve_base_url("groq", "https://api.groq.com/openai/v1") == (
             "https://api.groq.com/openai/v1"
         )
+
+    def test_compose_boot_runs_migrations(self) -> None:
+        """docker-compose.dev.yml must migrate each service's DB before boot.
+
+        Regression for SKY-80: stale dev DBs (core three heads behind, ai-agent
+        three heads behind, identity stamped under a revision the built-in
+        alembic tree could not find) silently broke the NL report builder's
+        generate/save. Each dev service therefore prepends
+        `alembic upgrade head` to its CMD and mounts the `alembic` tree so the
+        container sees the repo's revision scripts. If either half of that
+        contract regresses, the stack can drift again without any CI signal.
+        """
+        import yaml
+
+        repo_root = Path(__file__).resolve().parents[4]
+        compose_file = repo_root / "infra" / "docker" / "docker-compose.dev.yml"
+        compose = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
+
+        for service in ("identity", "core", "ai-agent"):
+            service_def = compose["services"][service]
+            command = " ".join(service_def["command"])
+            assert "alembic upgrade head" in command, (
+                f"{service} dev CMD must migrate before boot: {command}"
+            )
+            assert "uvicorn" in command
+            volume_specs = [str(v) for v in service_def["volumes"]]
+            assert any("alembic" in v for v in volume_specs), (
+                f"{service} dev volumes must mount the alembic tree: {volume_specs}"
+            )
