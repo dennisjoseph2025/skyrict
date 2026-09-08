@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from ai_agent.features.finance_intents.schemas import FinanceIntentId
 
 _INTENT_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("trial_balance", ("trial balance",)),
+    ("trial_balance", ("trial balance", "payable", "payables")),
     (
         "ar_aging",
         ("ar aging", "receivable", "receivables", "owed", "owing", "aging", "outstanding balance"),
@@ -29,6 +29,8 @@ _INTENT_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "p&l",
             "profitability",
             "earnings",
+            "revenue",
+            "expense",
         ),
     ),
     (
