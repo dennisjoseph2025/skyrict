@@ -255,8 +255,10 @@ AI_JWT_PUBLIC_KEY_PATH=./secrets/jwt_public.pem
 AI_JWKS_ISSUER=https://auth.skyrict.io
 AI_JWKS_AUDIENCE=api.skyrict.io
 
-# Core data plane (compose contract: unprefixed INVENTORY_SERVICE_URL)
+# Core data plane (compose contract: unprefixed INVENTORY_SERVICE_URL /
+# REPORT_SERVICE_URL - both APIs live on the core monolith)
 INVENTORY_SERVICE_URL=http://localhost:8001
+REPORT_SERVICE_URL=http://localhost:8001
 
 # Provider (optional at boot)
 AI_PROVIDER=openrouter                          # or groq/openai/omniroute/agentrouter/generic

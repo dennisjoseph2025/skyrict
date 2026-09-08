@@ -159,6 +159,10 @@ services:
       # Core data plane for the inventory AI engines - the core container
       # serves on port 8001 internally.
       INVENTORY_SERVICE_URL: http://skyrict-core:8001
+      # Core reporting data plane for the NL report builder (SKY-80) - same
+      # monolith, same port. Must be set explicitly: the host-friendly default
+      # (http://localhost:8001) would point at this container's own localhost.
+      REPORT_SERVICE_URL: http://skyrict-core:8001
       # Host-run .env uses ../../.dev/keys (host cwd = services/ai-agent); the
       # container mounts the same keys at /app/services/ai-agent/.dev/keys so
       # the path must be container-relative here.
