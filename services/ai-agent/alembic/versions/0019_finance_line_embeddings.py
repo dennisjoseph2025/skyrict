@@ -11,8 +11,8 @@ tenant via ``current_tenant_id()`` - same cross-service snapshot idiom as
 ``embedding_model``/``embedding_dims`` record which model produced the vector
 so future model/dimension upgrades know what must be re-embedded.
 
-Revision ID: 0018
-Revises: 0017
+Revision ID: 0019
+Revises: 0018
 Create Date: 2026-09-07
 """
 
@@ -23,8 +23,8 @@ from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = "0018"
-down_revision = "0017"
+revision = "0019"
+down_revision = "0018"
 branch_labels = None
 depends_on = None
 
