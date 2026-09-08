@@ -45,6 +45,7 @@ type LoadState =
 type BuilderState =
   | { status: "idle" }
   | { status: "generating" }
+  | { status: "clarification"; message: string }
   | { status: "error"; message: string };
 
 /** Example prompts backed verbatim by a seeded, whitelisted template. */
@@ -100,7 +101,14 @@ export function ReportsWorkspace() {
       const response = await generateReport(value);
       setAnswer(response.answer);
       setGenerated(response.data);
-      setBuilderState({ status: "idle" });
+      // data:null is NOT a failure - the builder abstained or is asking for
+      // one missing detail (e.g. a time period). Render it as an actionable
+      // clarification below, never as the error state.
+      setBuilderState(
+        response.data
+          ? { status: "idle" }
+          : { status: "clarification", message: response.answer },
+      );
     } catch (error) {
       setBuilderState({
         status: "error",
@@ -315,12 +323,11 @@ export function ReportsWorkspace() {
               </p>
             ) : null}
 
-            {answer ? (
+            {generated ? (
               <div className="mt-4 space-y-3">
                 <p className="text-sm leading-relaxed text-foreground">{answer}</p>
 
-                {generated ? (
-                  <>
+                <>
                     <div className="overflow-hidden rounded-xl border border-border bg-background/40">
                       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-2">
                         <p className="font-display text-[0.65rem] font-semibold tracking-wider uppercase text-muted-foreground">
@@ -414,7 +421,38 @@ export function ReportsWorkspace() {
                       ) : null}
                     </div>
                   </>
-                ) : null}
+              </div>
+            ) : null}
+
+            {builderState.status === "clarification" ? (
+              <div
+                role="status"
+                className="mt-4 flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3"
+              >
+                <Sparkles
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-primary"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm leading-relaxed text-foreground">
+                    {builderState.message}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Add the missing detail (a time period, an amount, a
+                    customer) and generate again.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleRefine}
+                    disabled={!lastPrompt}
+                    className="mt-2"
+                  >
+                    <PencilLine aria-hidden="true" className="size-3.5" />
+                    Refine prompt
+                  </Button>
+                </div>
               </div>
             ) : null}
           </div>
