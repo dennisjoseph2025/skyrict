@@ -248,9 +248,6 @@ export function ReportsWorkspace() {
                   aria-label="Describe the report you want"
                   className="h-9 flex-1 rounded-lg border-0 bg-transparent px-2 shadow-none focus-visible:border-transparent focus-visible:ring-0"
                 />
-                <span className="hidden shrink-0 items-center rounded-md border border-border bg-muted/60 px-1.5 py-1 font-mono text-[0.625rem] leading-none text-muted-foreground sm:inline-flex">
-                  Enter
-                </span>
                 <Button
                   type="button"
                   onClick={handleGenerate}
@@ -272,7 +269,7 @@ export function ReportsWorkspace() {
                 Try one
               </p>
               <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
-                {SUGGESTED_PROMPTS.map((suggestion, index) => (
+                {SUGGESTED_PROMPTS.map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
@@ -283,12 +280,6 @@ export function ReportsWorkspace() {
                     }}
                     className="group flex items-center gap-2.5 rounded-lg border border-border/80 bg-background/60 px-3 py-2 text-left text-xs text-foreground transition-colors hover:border-ring/60 hover:bg-muted/50 disabled:pointer-events-none disabled:opacity-50"
                   >
-                    <span
-                      aria-hidden="true"
-                      className="flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-muted font-mono text-[0.6rem] text-muted-foreground"
-                    >
-                      {index + 1}
-                    </span>
                     <span className="min-w-0 flex-1 truncate">{suggestion}</span>
                     <ArrowUpRight
                       aria-hidden="true"
