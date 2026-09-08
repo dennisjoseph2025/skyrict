@@ -391,6 +391,7 @@ function LineDescriptionField({
         controllerRef.current?.abort();
         controllerRef.current = controller;
         setLoading(true);
+        setOpen(true);
         const timer = setTimeout(() => {
             void suggestInvoiceLines(text)
                 .then((hits) => {
@@ -408,7 +409,7 @@ function LineDescriptionField({
                 .finally(() => {
                     if (!controller.signal.aborted) setLoading(false);
                 });
-        }, 300);
+        }, 250);
         return () => {
             controller.abort();
             clearTimeout(timer);
@@ -437,34 +438,36 @@ function LineDescriptionField({
                         className="w-full overflow-hidden rounded-md border border-border bg-popover text-sm shadow-lg"
                         onMouseDown={(event) => event.preventDefault()}
                     >
-                        {suggestions.map((suggestion) => (
-                            <li
-                                key={`${suggestion.description}-${suggestion.account_code}`}
-                            >
-                                <button
-                                    type="button"
-                                    className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-accent"
-                                    onClick={() => pick(suggestion)}
-                                >
-                                    <span className="w-full truncate font-medium text-foreground">
-                                        {suggestion.description}
-                                    </span>
-                                    <span className="w-full truncate text-xs text-muted-foreground">
-                                        {suggestion.account_code} ·{" "}
-                                        {suggestion.account_name}
-                                    </span>
-                                </button>
+                        {loading && suggestions.length === 0 ? (
+                            <li>
+                                <span className="block px-3 py-2 text-sm text-muted-foreground">
+                                    Searching…
+                                </span>
                             </li>
-                        ))}
+                        ) : (
+                            suggestions.map((suggestion) => (
+                                <li
+                                    key={`${suggestion.description}-${suggestion.account_code}`}
+                                >
+                                    <button
+                                        type="button"
+                                        className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-accent"
+                                        onClick={() => pick(suggestion)}
+                                    >
+                                        <span className="w-full truncate font-medium text-foreground">
+                                            {suggestion.description}
+                                        </span>
+                                        <span className="w-full truncate text-xs text-muted-foreground">
+                                            {suggestion.account_code} ·{" "}
+                                            {suggestion.account_name}
+                                        </span>
+                                    </button>
+                                </li>
+                            ))
+                        )}
                     </ul>
                 ) : null,
             )}
-            {loading ? (
-                <LoaderCircle
-                    aria-hidden="true"
-                    className="absolute right-2 top-3 size-3.5 animate-spin text-muted-foreground"
-                />
-            ) : null}
         </div>
     );
 }
