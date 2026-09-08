@@ -142,7 +142,11 @@ class TestRunLifecycle:
 
         result = await _compute(client, headers, run_id)
         assert result["run"]["status"] == "computed"
-        assert result["skipped"] == []
+        # The employee is paid; bank details were never seeded, so the only
+        # post-run row is a bank-detail risk ("needs attention"), never a skip.
+        assert [(row["category"], row["reason_code"]) for row in result["skipped"]] == [
+            ("risk", "missing_bank_details")
+        ]
         assert len(result["entries"]) == 1
 
         entry = result["entries"][0]
@@ -313,7 +317,10 @@ class TestRosterScope:
 
         # The excluded employees are not even recorded as skipped (skipped is
         # only for roster employees without effective compensation/pay days).
-        assert result["skipped"] == []
+        # The one computed employee surfaces only a bank-detail risk row.
+        assert [(row["category"], row["reason_code"]) for row in result["skipped"]] == [
+            ("risk", "missing_bank_details")
+        ]
 
 
 class TestRepositoryLevelEntryImmutability:

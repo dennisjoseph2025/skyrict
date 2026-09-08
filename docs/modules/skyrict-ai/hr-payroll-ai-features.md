@@ -36,6 +36,7 @@ own.
 15. [HR-AUT-001 — Payroll automation (batches, schedules, notifications & digests)](#15-hr-aut-001--payroll-automation-batches-schedules-notifications--digests)
 16. [HR-AI-001 Unit B — Payroll anomaly engine (implemented)](#16-hr-ai-001-unit-b--payroll-anomaly-engine-implemented)
 17. [HR-AI-001 Unit C — Compliance engine v1 (implemented)](#17-hr-ai-001-unit-c--compliance-engine-v1-implemented)
+18. [HR-AUT-002 — Wave 2: run predictions, skip taxonomy & void intelligence](#18-hr-aut-002--wave-2-run-predictions-skip-taxonomy--void-intelligence)
 
 ---
 
@@ -836,3 +837,79 @@ unmodified seed. To keep the demo (and the Unit C live gate) reproducible on
 These fixtures are documented here so the live-gate expectations match the seed
 rows exactly; if the seed ever changes, the fixture block
 (`# ── COMPLIANCE FIXTURE` in `seed_demo.py`) must be reviewed with it.
+
+## 18. HR-AUT-002 — Wave 2: run predictions, skip taxonomy & void intelligence
+
+> **Status:** Implemented (HR-AUT-002, Commits 1–4). Prediction + drift gates,
+> the skip-reason taxonomy with bank-detail risk rows, and the void-reason
+> classifier + monthly pattern report all ship with a dry-run contract suite
+> that runs against real Postgres in CI (`.github/workflows/core-tests.yml`).
+
+Extends the HR-AUT-001 payroll automation family (§15) with the *decide-before-
+commit* surface: HR reviews a run's forecast, its skipped employees are
+categorized (never silently dropped), and void causes are classified so
+recurring problems surface in a monthly cross-tab.
+
+### 18.1 Commit 1 — Run predictions & drift gates
+
+- `GET /payroll/runs/{run_id}/prediction` (`erp.payroll.read`) — projected
+  department totals vs the previous period's actuals, per-department drift
+  `%`, and the employees the commit will skip. **Read-only:** prediction
+  writes no entries, no totals, no run transition.
+- `prediction_drift_threshold_pct` on `erp_payroll_settings` (migration
+  `0040_prediction_drift_threshold`) — default `0.10`; a department whose
+  forecast drifts beyond the threshold flags the run and the UI blocks
+  Compute until the drift is acknowledged (client-side gate; the backend
+  never blocks the request).
+
+### 18.2 Commit 2 — Skip-reason taxonomy
+
+- `core.features.payroll.skip_reasons` — `SkipCategory` (`skip | risk`),
+  `SkipReasonCode`, and `classify_skip_reason` over the unified reason strings
+  produced by `compute_single`.
+- Every excluded employee persists as a structured record
+  (`{employee_id, reason, reason_code, category}`) in
+  `run.skipped_employees` (JSONB) — **no silent skips.** Missing bank details
+  are a **risk row**, never a compute skip: the money still moves and the
+  payroll admin sees the employee under "Needs attention" with a fix link.
+- Runs through the SKY-74 batch path too (`finalize_compute`); the run-detail
+  analysis panel groups skips vs risks and links to the employee.
+
+### 18.3 Commit 3 — Void reason intelligence
+
+- `core.features.payroll.void_reasons.classify_void_reason` — deterministic
+  keyword scoring (no LLM; the same seam can feed an ai-agent scribe later).
+  Two or more matching signals in one category → confident (`0.9`); a single
+  weak signal is **below the `0.75` floor** and stays `unclassified` so HR
+  reviews the raw text instead of trusting a guess.
+- `POST /payroll/runs/{id}/void` now accepts `{reason}` (was hardcoded
+  `"voided via API"`); the raw text is stored verbatim on the run.
+- `GET /payroll/void-reasons/report?months=6` (`erp.payroll.approve`) —
+  monthly cross-tab of `duplicate | wrong_period | correction_needed |
+  unclassified` plus the recent unclassified raw reasons for review.
+  Derived at read time; no new table.
+- UI: reason chips in the void dialog, report page at
+  `/dashboard/erp/payroll/void-reasons`, link from the runs list.
+
+### 18.4 Commit 4 — Dry-run contract suite & CI
+
+The dry run **is** the prediction: a read-only rehearsal of what a committed
+compute would pay. The contract suite pins that against real Postgres
+(`services/core/tests/integration/database/test_payroll_dry_run_contract.py`,
+two seed tenants `dry`/`steady`):
+
+1. predicting on a DRAFT run writes nothing — for every tenant;
+2. forecasts are tenant-isolated (a tenant's departments/skips never leak);
+3. the committed compute reproduces the forecast exactly (the rehearsal is
+   faithful and usable as an approval gate).
+
+CI (`.github/workflows/core-tests.yml`):
+
+```sh
+# Locally, with the Postgres service up:
+docker compose -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.dev.yml up -d postgres
+uv run pytest services/core/tests/integration/database/test_payroll_dry_run_contract.py -m integration
+```
+
+The `test-dry-run` job (real Postgres service, ruff + mypy + unit + the
+integration gate) is required for PRs; the `frontend` job runs web tsc/eslint.

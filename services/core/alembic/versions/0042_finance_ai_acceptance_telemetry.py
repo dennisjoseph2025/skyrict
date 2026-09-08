@@ -9,8 +9,8 @@ already documented those three values, but nothing enforced them. New
 the ``GET /suggestions/quality`` endpoint computes (spec: <30% acceptance flags
 low quality so a future review loop can pause/enrich the prompt).
 
-Revision ID: 0040
-Revises: 0039
+Revision ID: 0042
+Revises: 0040
 Create Date: 2026-09-05
 """
 
@@ -19,8 +19,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0040"
-down_revision = "0039"
+revision = "0042"
+down_revision = "0040"
 branch_labels = None
 depends_on = None
 

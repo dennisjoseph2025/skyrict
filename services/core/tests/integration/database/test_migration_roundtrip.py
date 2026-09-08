@@ -206,7 +206,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0041", f"head is {version}, expected 0041"
+            assert version == "0043", f"head is {version}, expected 0043"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -860,6 +860,33 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                 )
             ).scalar_one()
             assert ar_aging_sql == 2, "0039 must ship the canonical ar_aging SQL per tenant"
+
+            # 0040: payroll run predictions (HR-AUT-002) - the drift threshold
+            # on payroll settings, not-null with the default 10% server-side.
+            drift_col = (
+                await conn.execute(
+                    text(
+                        "SELECT column_default FROM information_schema.columns "
+                        "WHERE table_schema = 'public' "
+                        "AND table_name = 'erp_payroll_settings' "
+                        "AND column_name = 'prediction_drift_threshold_pct'"
+                    )
+                )
+            ).scalar_one()
+            assert isinstance(drift_col, str) and "0.1000" in drift_col, (
+                "0040 must add prediction_drift_threshold_pct defaulting to 0.1000"
+            )
+            not_null = (
+                await conn.execute(
+                    text(
+                        "SELECT is_nullable FROM information_schema.columns "
+                        "WHERE table_schema = 'public' "
+                        "AND table_name = 'erp_payroll_settings' "
+                        "AND column_name = 'prediction_drift_threshold_pct'"
+                    )
+                )
+            ).scalar_one()
+            assert not_null == "NO", "0040 drift threshold must be NOT NULL"
     finally:
         await engine.dispose()
 

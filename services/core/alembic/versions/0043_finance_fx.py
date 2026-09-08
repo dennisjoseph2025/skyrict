@@ -8,8 +8,8 @@ migration adds the per-tenant rate store and the two invoice columns; the FX
 permissions seed ``core_permissions`` so tenants can be granted
 ``core.fx.read``/``core.fx.write``.
 
-Revision ID: 0041
-Revises: 0040
+Revision ID: 0043
+Revises: 0042
 Create Date: 2026-09-05
 """
 
@@ -18,8 +18,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0041"
-down_revision = "0040"
+revision = "0043"
+down_revision = "0042"
 branch_labels = None
 depends_on = None
 
