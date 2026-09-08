@@ -104,7 +104,6 @@ function SummaryCards({ summary }: { summary: HrComplianceSummary }) {
   const severityEntries = SEVERITY_ORDER.map(
     (severity) => [severity, summary.bySeverity[severity] ?? 0] as const,
   );
-  const severityMax = Math.max(1, ...severityEntries.map(([, count]) => count));
   const typeEntries = Object.entries(summary.byType).sort((a, b) => b[1] - a[1]);
   const typeMax = Math.max(1, ...typeEntries.map(([, count]) => count));
   return (

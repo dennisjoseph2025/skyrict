@@ -10,7 +10,6 @@ import { FilterChipGroup } from "@/components/dashboard/shared/filter-chip-group
 import { StatCard } from "@/components/dashboard/shared/stat-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TruncatedTooltip } from "@/components/ui/truncated-tooltip";
 import {
   getQualityOrgKpi,
   listQualityScores,
@@ -328,7 +327,7 @@ export function DataQualityClient() {
     );
   }
 
-  const { kpi, scores, totalPages } = status;
+  const { kpi, totalPages } = status;
   const needsAttention = kpi
     ? (kpi.gradeDistribution["D"] ?? 0) + (kpi.gradeDistribution["F"] ?? 0)
     : 0;
