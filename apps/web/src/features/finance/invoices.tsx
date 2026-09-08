@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -25,6 +24,7 @@ import {
 
 import { PageHeader } from "@/components/dashboard/shared/page-header";
 import { Button } from "@/components/ui/button";
+import { useDialogDropdown } from "@/components/ui/dialog-dropdown";
 import {
     Dialog,
     DialogContent,
@@ -109,15 +109,15 @@ function CustomerCombobox({
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const [highlighted, setHighlighted] = useState(0);
-    const [dropdownPos, setDropdownPos] = useState<{
-        top: number;
-        left: number;
-        width: number;
-    }>({
-        top: 0,
-        left: 0,
-        width: 0,
-    });
+    const { anchorRef, popoverRef, render } = useDialogDropdown(open);
+
+    const setTrigger = useCallback(
+        (el: HTMLDivElement | null) => {
+            triggerRef.current = el;
+            anchorRef.current = el;
+        },
+        [anchorRef],
+    );
 
     const selected = useMemo(
         () => customers.find((c) => c.id === value) ?? null,
@@ -147,39 +147,6 @@ function CustomerCombobox({
         item?.scrollIntoView({ block: "nearest" });
     }, [highlighted, open]);
 
-    // Capture-phase listener on window (fires before document-level Radix listener).
-    // stopImmediatePropagation prevents ALL subsequent listeners from firing.
-    useEffect(() => {
-        if (!open) return;
-        const list = listRef.current;
-        if (!list) return;
-
-        function handlePointerDownCapture(event: PointerEvent) {
-            if (list && list.contains(event.target as Node)) {
-                event.stopImmediatePropagation();
-            }
-        }
-
-        window.addEventListener("pointerdown", handlePointerDownCapture, true);
-        return () =>
-            window.removeEventListener(
-                "pointerdown",
-                handlePointerDownCapture,
-                true,
-            );
-    }, [open]);
-
-    const updatePosition = useCallback(() => {
-        const el = triggerRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
-        setDropdownPos({
-            top: rect.bottom + 4,
-            left: rect.left,
-            width: rect.width,
-        });
-    }, []);
-
     const select = useCallback(
         (customer: Customer) => {
             justSelectedRef.current = true;
@@ -192,30 +159,21 @@ function CustomerCombobox({
 
     useEffect(() => {
         if (!open) return;
-        updatePosition();
         function handleClickOutside(event: MouseEvent) {
             const target = event.target as Node;
             if (
                 triggerRef.current &&
                 !triggerRef.current.contains(target) &&
-                listRef.current &&
-                !listRef.current.contains(target)
+                !popoverRef.current?.contains(target)
             ) {
                 setOpen(false);
             }
         }
-        function handleScroll() {
-            updatePosition();
-        }
         document.addEventListener("mousedown", handleClickOutside);
-        window.addEventListener("scroll", handleScroll, true);
-        window.addEventListener("resize", updatePosition);
         return () => {
             document.removeEventListener("mousedown", handleClickOutside);
-            window.removeEventListener("scroll", handleScroll, true);
-            window.removeEventListener("resize", updatePosition);
         };
-    }, [open, updatePosition]);
+    }, [open, popoverRef]);
 
     function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
         if (event.key === "ArrowDown") {
@@ -255,7 +213,7 @@ function CustomerCombobox({
 
     return (
         <>
-            <div ref={triggerRef} className="relative">
+            <div ref={setTrigger} className="relative">
                 <Input
                     value={query}
                     aria-invalid={invalid || undefined}
@@ -267,8 +225,7 @@ function CustomerCombobox({
                         setHighlighted(0);
                         setOpen(true);
                     }}
-                    onFocus={() => {
-                        updatePosition();
+                    onMouseDown={() => {
                         setOpen(true);
                     }}
                     onKeyDown={handleKeyDown}
@@ -280,69 +237,59 @@ function CustomerCombobox({
                     className="pointer-events-none absolute top-1/2 right-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
                 />
             </div>
-            {open
-                ? createPortal(
-                      <div
-                          ref={listRef}
-                          role="listbox"
-                          style={{
-                              position: "fixed",
-                              top: dropdownPos.top,
-                              left: dropdownPos.left,
-                              width: dropdownPos.width,
-                              zIndex: 9999,
-                          }}
-                          className="max-h-56 min-w-64 overflow-y-auto rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground shadow-md outline-none"
-                      >
-                          {filtered.length === 0 ? (
-                              <p className="px-2 py-3 text-center text-sm text-muted-foreground">
-                                  No matching customers
-                              </p>
-                          ) : (
-                              filtered.map((customer, index) => (
-                                  <button
-                                      key={customer.id}
-                                      type="button"
-                                      role="option"
-                                      aria-selected={customer.id === value}
-                                      onMouseEnter={() => setHighlighted(index)}
-                                      onMouseDown={(event) => {
-                                          event.preventDefault();
-                                          select(customer);
-                                      }}
-                                      className={cn(
-                                          "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                                          index === highlighted
-                                              ? "bg-muted"
-                                              : "hover:bg-muted",
-                                      )}
-                                  >
-                                      <span className="min-w-0 truncate">
-                                          <span className="font-medium">
-                                              {customer.name}
-                                          </span>
-                                          <span className="ml-1 text-muted-foreground">
-                                              ({customer.customer_code})
-                                          </span>
-                                          {customer.email ? (
-                                              <span className="ml-1 text-xs text-muted-foreground">
-                                                  · {customer.email}
-                                              </span>
-                                          ) : null}
-                                      </span>
-                                      {customer.id === value ? (
-                                          <Check
-                                              aria-hidden="true"
-                                              className="size-3.5 shrink-0 text-primary"
-                                          />
-                                      ) : null}
-                                  </button>
-                              ))
-                          )}
-                      </div>,
-                      document.body,
-                  )
-                : null}
+            {render(
+                <div
+                    ref={listRef}
+                    role="listbox"
+                    className="max-h-56 min-w-64 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground shadow-md outline-none"
+                >
+                    {filtered.length === 0 ? (
+                        <p className="px-2 py-3 text-center text-sm text-muted-foreground">
+                            No matching customers
+                        </p>
+                    ) : (
+                        filtered.map((customer, index) => (
+                            <button
+                                key={customer.id}
+                                type="button"
+                                role="option"
+                                aria-selected={customer.id === value}
+                                onMouseEnter={() => setHighlighted(index)}
+                                onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    select(customer);
+                                }}
+                                className={cn(
+                                    "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                                    index === highlighted
+                                        ? "bg-muted"
+                                        : "hover:bg-muted",
+                                )}
+                            >
+                                <span className="min-w-0 truncate">
+                                    <span className="font-medium">
+                                        {customer.name}
+                                    </span>
+                                    <span className="ml-1 text-muted-foreground">
+                                        ({customer.customer_code})
+                                    </span>
+                                    {customer.email ? (
+                                        <span className="ml-1 text-xs text-muted-foreground">
+                                            · {customer.email}
+                                        </span>
+                                    ) : null}
+                                </span>
+                                {customer.id === value ? (
+                                    <Check
+                                        aria-hidden="true"
+                                        className="size-3.5 shrink-0 text-primary"
+                                    />
+                                ) : null}
+                            </button>
+                        ))
+                    )}
+                </div>,
+            )}
         </>
     );
 }
@@ -421,6 +368,16 @@ function LineDescriptionField({
     const [loading, setLoading] = useState(false);
     const controllerRef = useRef<AbortController | null>(null);
     const justPickedRef = useRef(false);
+    const wrapperRef = useRef<HTMLDivElement | null>(null);
+    const { anchorRef, render } = useDialogDropdown(open);
+
+    const setWrapper = useCallback(
+        (el: HTMLDivElement | null) => {
+            wrapperRef.current = el;
+            anchorRef.current = el;
+        },
+        [anchorRef],
+    );
 
     useEffect(() => {
         const text = value.trim();
@@ -466,7 +423,7 @@ function LineDescriptionField({
     }
 
     return (
-        <div className="relative">
+        <div ref={setWrapper} className="relative">
             <Input
                 placeholder="Description"
                 aria-invalid={invalid}
@@ -474,32 +431,34 @@ function LineDescriptionField({
                 value={value}
                 onChange={(event) => onChange(null, event.target.value)}
             />
-            {open ? (
-                <ul
-                    className="absolute left-0 top-[calc(100%+4px)] z-30 w-full overflow-hidden rounded-md border border-border bg-popover text-sm shadow-lg"
-                    onMouseDown={(event) => event.preventDefault()}
-                >
-                    {suggestions.map((suggestion) => (
-                        <li
-                            key={`${suggestion.description}-${suggestion.account_code}`}
-                        >
-                            <button
-                                type="button"
-                                className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-accent"
-                                onClick={() => pick(suggestion)}
+            {render(
+                open ? (
+                    <ul
+                        className="w-full overflow-hidden rounded-md border border-border bg-popover text-sm shadow-lg"
+                        onMouseDown={(event) => event.preventDefault()}
+                    >
+                        {suggestions.map((suggestion) => (
+                            <li
+                                key={`${suggestion.description}-${suggestion.account_code}`}
                             >
-                                <span className="w-full truncate font-medium text-foreground">
-                                    {suggestion.description}
-                                </span>
-                                <span className="w-full truncate text-xs text-muted-foreground">
-                                    {suggestion.account_code} ·{" "}
-                                    {suggestion.account_name}
-                                </span>
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            ) : null}
+                                <button
+                                    type="button"
+                                    className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-accent"
+                                    onClick={() => pick(suggestion)}
+                                >
+                                    <span className="w-full truncate font-medium text-foreground">
+                                        {suggestion.description}
+                                    </span>
+                                    <span className="w-full truncate text-xs text-muted-foreground">
+                                        {suggestion.account_code} ·{" "}
+                                        {suggestion.account_name}
+                                    </span>
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                ) : null,
+            )}
             {loading ? (
                 <LoaderCircle
                     aria-hidden="true"
