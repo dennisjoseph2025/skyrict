@@ -252,6 +252,35 @@ class Settings(BaseSettings):
             "Machine-to-machine only; never logged."
         ),
     )
+    DOCUMENT_SYNC_TOKEN: str = Field(
+        default="",
+        description=(
+            "shared secret that core's post-commit document OCR dispatch "
+            "presents to POST /ai/documents/process - must match core's "
+            "CORE_AI_SYNC_TOKEN. Empty disables the document process endpoint (503). "
+            "Machine-to-machine only; never logged."
+        ),
+    )
+    CORE_DOCUMENT_URL: str = Field(
+        default="http://localhost:8001",
+        description=(
+            "base URL of the core monolith for document storage reads. "
+            "ai-agent fetches document bytes from core's GET /documents/{id}/download "
+            "endpoint to perform OCR + tagging + embedding. In docker networks "
+            "set CORE_DOCUMENT_URL=http://skyrict-core:8001."
+        ),
+    )
+    CORE_DOCUMENT_TIMEOUT_SECONDS: float = Field(
+        default=30.0,
+        gt=0,
+        description="per-call timeout for core document byte-stream fetches",
+    )
+    DOCUMENT_EMBEDDING_MODEL: str = Field(
+        default="",
+        description=(
+            "model used for document chunk embeddings. Falls back to EMBEDDING_MODEL when empty."
+        ),
+    )
 
     # --- RAG configuration (SKY-58) ---
     RAG_CHUNK_CHILD_TOKENS: int = Field(
