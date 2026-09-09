@@ -930,6 +930,10 @@ export function searchAuditLog(
 export interface RevenueForecastPoint {
     month: string;
     predicted: number;
+    // Per-point decomposition: baseline = trend + seasonal projection alone,
+    // pipeline = weighted open-deal uplift blended in (predicted == baseline + pipeline).
+    baseline: number | null;
+    pipeline: number | null;
     lower_bound: number | null;
     upper_bound: number | null;
 }

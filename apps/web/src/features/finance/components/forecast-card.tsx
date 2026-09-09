@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { Info, Loader2, RefreshCw, TrendingUp } from "lucide-react";
 import {
     Area,
@@ -40,6 +41,7 @@ type Status =
 
 const PREDICTED_COLOR = "#0ea5e9";
 const BAND_COLOR = "#0ea5e9";
+const BASELINE_COLOR = "#64748b";
 const ACTUAL_COLOR = "#f59e0b";
 
 const chartPanel =
@@ -75,7 +77,7 @@ function LegendChip({
     color,
     label,
 }: {
-    swatch: "dot" | "band";
+    swatch: "dot" | "dash" | "band";
     color: string;
     label: string;
 }) {
@@ -86,6 +88,14 @@ function LegendChip({
                     aria-hidden="true"
                     className="size-2 rounded-full"
                     style={{ background: color }}
+                />
+            ) : swatch === "dash" ? (
+                <span
+                    aria-hidden="true"
+                    className="h-0.5 w-3.5"
+                    style={{
+                        background: `repeating-linear-gradient(90deg, ${color} 0 3px, transparent 3px 5px)`,
+                    }}
                 />
             ) : (
                 <span
@@ -109,10 +119,15 @@ function ChartTooltipContent({
         name?: string;
         value?: number | [number, number];
         color?: string;
+        payload?: { baseline?: number | null; pipeline?: number | null };
     }>;
     label?: string;
 }) {
     if (!active || !payload || payload.length === 0) return null;
+    const datum = payload[0]?.payload;
+    const hasBreakdown =
+        datum?.baseline != null && datum?.pipeline != null;
+    const predictedEntry = payload.find((entry) => entry.name === "Predicted");
     return (
         <div className="rounded-lg border border-border bg-popover px-3 py-2 shadow-md">
             {label ? (
@@ -142,6 +157,18 @@ function ChartTooltipContent({
                     </li>
                 ))}
             </ul>
+            {hasBreakdown ? (
+                <p className="mt-2 border-t border-border/60 pt-1.5 text-xs tabular-nums text-muted-foreground">
+                    {formatMoney(datum!.baseline!)} trend+seasonal
+                    {datum!.pipeline! > 0 ? (
+                        <>
+                            {" "}
+                            + {formatMoney(datum!.pipeline!)} pipeline
+                        </>
+                    ) : null}{" "}
+                    = {formatMoney((predictedEntry?.value as number) ?? 0)}
+                </p>
+            ) : null}
         </div>
     );
 }
@@ -163,6 +190,10 @@ function AssumptionsDrawer({ forecast }: { forecast: RevenueForecast | null }) {
             "No forecast when there are fewer than 3 months of history",
         ],
         [
+            "Formula",
+            "Predicted = baseline (trend + seasonal echo) + pipeline uplift (weighted open CRM deals). Each forecast comes back with both components shown per month.",
+        ],
+        [
             "Confidence band",
             forecast?.sigma != null
                 ? `Predicted ±1.5σ of walk-forward error (σ ${formatMoney(Math.abs(forecast.sigma))})`
@@ -181,6 +212,16 @@ function AssumptionsDrawer({ forecast }: { forecast: RevenueForecast | null }) {
                 : "Open CRM deals weighted by conversion probability (probability × amount, bucketed by expected close month) are added to forecast months. Not fed when the forecast abstains.",
         ],
     ];
+    const decomposition =
+        forecast?.points?.filter(
+            (point) => point.baseline != null && point.pipeline != null,
+        ) ?? [];
+    const hasDecomposition = decomposition.length > 0;
+    const monthOf = (value: string) =>
+        new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
+            month: "short",
+            year: "2-digit",
+        });
     return (
         <Dialog>
             <DialogTrigger asChild>
@@ -216,6 +257,62 @@ function AssumptionsDrawer({ forecast }: { forecast: RevenueForecast | null }) {
                         </div>
                     ))}
                 </dl>
+                {hasDecomposition ? (
+                    <div className="mt-2">
+                        <h4 className="mb-2 text-sm font-semibold text-foreground">
+                            Month-by-month breakdown
+                        </h4>
+                        <div className="max-h-64 overflow-y-auto rounded-lg border border-border/70">
+                            <table className="w-full text-right text-sm tabular-nums">
+                                <thead className="sticky top-0 bg-muted text-xs text-muted-foreground uppercase">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left font-medium">
+                                            Month
+                                        </th>
+                                        <th className="px-3 py-2 font-medium">
+                                            Baseline
+                                        </th>
+                                        <th className="px-3 py-2 font-medium">
+                                            Pipeline
+                                        </th>
+                                        <th className="px-3 py-2 font-medium">
+                                            Predicted
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {decomposition.map((point) => (
+                                        <tr
+                                            key={point.month}
+                                            className="border-t border-border/50"
+                                        >
+                                            <td className="px-3 py-1.5 text-left font-medium text-foreground">
+                                                {monthOf(point.month)}
+                                            </td>
+                                            <td className="px-3 py-1.5 text-muted-foreground">
+                                                {formatMoney(point.baseline!)}
+                                            </td>
+                                            <td
+                                                className={
+                                                    point.pipeline! > 0
+                                                        ? "px-3 py-1.5 font-semibold text-foreground"
+                                                        : "px-3 py-1.5 text-muted-foreground"
+                                                }
+                                            >
+                                                {point.pipeline! > 0
+                                                    ? `+${formatMoney(point.pipeline!)}`
+                                                    : "—"}
+                                            </td>
+                                            <td className="px-3 py-1.5 font-semibold text-foreground">
+                                                {formatMoney(point.predicted)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                ) : null}
             </DialogContent>
         </Dialog>
     );
@@ -318,11 +415,14 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
     const data = (forecast?.points ?? []).map((point) => ({
         label: monthLabel(point.month),
         predicted: point.predicted,
+        baseline: point.baseline,
+        pipeline: point.pipeline,
         band:
             point.lower_bound !== null && point.upper_bound !== null
                 ? ([point.lower_bound, point.upper_bound] as [number, number])
                 : null,
     }));
+    const hasDecomposition = data.some((point) => point.baseline != null);
     const historyData = (forecast?.history ?? []).map((point) => ({
         label: monthLabel(point.month),
         actual: point.actual,
@@ -387,6 +487,13 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                                 color={PREDICTED_COLOR}
                                 label="Predicted"
                             />
+                            {hasDecomposition ? (
+                                <LegendChip
+                                    swatch="dash"
+                                    color={BASELINE_COLOR}
+                                    label="Baseline (trend + seasonal)"
+                                />
+                            ) : null}
                             <LegendChip
                                 swatch="band"
                                 color="color-mix(in srgb, #0ea5e9 22%, transparent)"
@@ -486,6 +593,19 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                                         }}
                                         legendType="none"
                                     />
+                                    {hasDecomposition ? (
+                                        <Line
+                                            type="monotone"
+                                            dataKey="baseline"
+                                            name="Baseline"
+                                            stroke={BASELINE_COLOR}
+                                            strokeWidth={1.5}
+                                            strokeDasharray="4 4"
+                                            dot={false}
+                                            activeDot={false}
+                                            legendType="none"
+                                        />
+                                    ) : null}
                                 </ComposedChart>
                             </ResponsiveContainer>
                         </div>
@@ -493,7 +613,13 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                     <p className="mt-3 text-xs text-muted-foreground">
                         {forecast?.model_version} · 12-month forecast, band =
                         ±1.5σ of walk-forward error. Model inputs and weights are
-                        listed in Assumptions.
+                        listed in Assumptions.{" "}
+                        <Link
+                            href="/dashboard/erp/finance/model"
+                            className="font-medium text-primary hover:underline"
+                        >
+                            See how this is computed →
+                        </Link>
                     </p>
                 </>
             )}
