@@ -97,14 +97,20 @@ class RevenueForecastRepository:
         sigma: Decimal | None,
         backtest_mape: Decimal | None,
         pipeline_value: Decimal | None = None,
+        baselines: list[Decimal | None] | None = None,
+        pipeline_uplifts: list[Decimal | None] | None = None,
     ) -> None:
         """Upsert the full forecast horizon for a tenant (recompute guard).
 
         ``pipeline_value`` is the run-level total of weighted expected pipeline
         added to the horizon (``None`` when the forecast abstained); it applies
-        to every row written by this recompute.
+        to every row written by this recompute. ``baselines`` / ``pipeline_uplifts``
+        are the per-month decomposition (``predicted == baseline + pipeline_uplift``)
+        aligned with ``months``; ``None`` means decomposition is not stored.
         """
         if months:
+            baselines = baselines or [None] * len(months)
+            pipeline_uplifts = pipeline_uplifts or [None] * len(months)
             stmt = insert(ErpRevenueForecastModel).values(
                 [
                     {
@@ -117,9 +123,17 @@ class RevenueForecastRepository:
                         "backtest_mape": backtest_mape,
                         "model_version": model_version,
                         "pipeline_value": pipeline_value,
+                        "baseline": b,
+                        "pipeline_uplift": pu,
                     }
-                    for m, p, lo, hi in zip(
-                        months, predicted, lower_bounds, upper_bounds, strict=True
+                    for m, p, lo, hi, b, pu in zip(
+                        months,
+                        predicted,
+                        lower_bounds,
+                        upper_bounds,
+                        baselines,
+                        pipeline_uplifts,
+                        strict=True,
                     )
                 ]
             )
@@ -133,6 +147,8 @@ class RevenueForecastRepository:
                     "backtest_mape": stmt.excluded.backtest_mape,
                     "model_version": stmt.excluded.model_version,
                     "pipeline_value": stmt.excluded.pipeline_value,
+                    "baseline": stmt.excluded.baseline,
+                    "pipeline_uplift": stmt.excluded.pipeline_uplift,
                     "updated_at": func.now(),
                 },
             )

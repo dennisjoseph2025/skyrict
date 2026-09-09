@@ -42,6 +42,11 @@ class ErpRevenueForecastModel(Base):
     # open CRM deals) blended into this horizon; NULL when the forecast abstained
     # or the model ran before pipeline weighting existed.
     pipeline_value: Mapped[Decimal | None] = mapped_column(Numeric(19, 4), nullable=True)
+    # Per-month decomposition of ``predicted``: the trend + seasonal baseline
+    # and the CRM pipeline uplift blended in (predicted == baseline + uplift).
+    # NULL on rows persisted before migration 0045 (predates decomposition).
+    baseline: Mapped[Decimal | None] = mapped_column(Numeric(19, 4), nullable=True)
+    pipeline_uplift: Mapped[Decimal | None] = mapped_column(Numeric(19, 4), nullable=True)
     model_version: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text("'sma-6'")
     )

@@ -59,7 +59,9 @@ class MonthlyRevenue:
 @dataclass(frozen=True)
 class ForecastPoint:
     month: date
-    predicted: Decimal
+    baseline: Decimal  # damped trend + seasonal echo (invoice-based projection)
+    pipeline: Decimal  # weighted CRM pipeline uplift blended into this month
+    predicted: Decimal  # == baseline + pipeline
     lower_bound: Decimal | None
     upper_bound: Decimal | None
 
@@ -181,6 +183,11 @@ def compute_forecast(
     month's prediction on top of the trend + seasonal baseline. The backtest,
     MAPE, and sigma band are computed over historical months only, so pipeline
     input never influences the reported accuracy.
+
+    Each point carries its decomposition: ``baseline`` (the trend + seasonal
+    projection alone) and ``pipeline`` (the uplift blended in), with
+    ``predicted == baseline + pipeline`` exactly - so callers can show *why* a
+    month is high.
     """
     if len(monthly) < MIN_HISTORY_MONTHS:
         return Forecast(points=(), backtest=None)
@@ -204,11 +211,11 @@ def compute_forecast(
     for offset in range(1, horizon + 1):
         forecast_month = month_step(last_month, offset)
         drift = slope * _damping_factor(offset)
-        predicted = _quantize(
-            Decimal(str(base + drift))
-            + seasonal.get(forecast_month.month, Decimal("0"))
-            + pipeline.get(forecast_month, Decimal("0"))
+        baseline_value = _quantize(
+            Decimal(str(base + drift)) + seasonal.get(forecast_month.month, Decimal("0"))
         )
+        pipe = _quantize(pipeline.get(forecast_month, Decimal("0")))
+        predicted = _quantize(baseline_value + pipe)
         lower: Decimal | None
         upper: Decimal | None
         if backtest is not None:
@@ -221,6 +228,8 @@ def compute_forecast(
         points.append(
             ForecastPoint(
                 month=forecast_month,
+                baseline=baseline_value,
+                pipeline=pipe,
                 predicted=predicted,
                 lower_bound=_quantize(lower) if lower is not None else None,
                 upper_bound=_quantize(upper) if upper is not None else None,

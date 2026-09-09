@@ -164,6 +164,40 @@ def test_pipeline_uplift_is_additive_only_on_forecast_months() -> None:
     assert forecast.backtest.mape == Decimal("0.0000")
 
 
+def test_pipeline_breakdown_exposes_baseline_and_uplift_per_point() -> None:
+    monthly = _flat_series(6)  # horizon 2026-07..2027-06
+    pipeline = {date(2026, 7, 1): Decimal("5000"), date(2027, 1, 1): Decimal("2500")}
+    forecast = compute_forecast(monthly, pipeline=pipeline)
+
+    uplifted = forecast.points[0]
+    assert uplifted.month == date(2026, 7, 1)
+    assert uplifted.baseline == Decimal("10000")
+    assert uplifted.pipeline == Decimal("5000")
+    assert uplifted.predicted == uplifted.baseline + uplifted.pipeline == Decimal("15000")
+
+    plain = forecast.points[1]
+    assert plain.baseline == Decimal("10000")
+    assert plain.pipeline == Decimal("0")
+    assert plain.predicted == plain.baseline
+
+    wrapped = forecast.points[6]
+    assert wrapped.month == date(2027, 1, 1)
+    assert wrapped.baseline == Decimal("10000")
+    assert wrapped.pipeline == Decimal("2500")
+    assert wrapped.predicted == wrapped.baseline + wrapped.pipeline
+
+    # Every point carries the invariant predicted == baseline + pipeline.
+    for point in forecast.points:
+        assert point.predicted == point.baseline + point.pipeline
+
+
+def test_baseline_and_pipeline_present_without_pipeline_input() -> None:
+    forecast = compute_forecast(_flat_series(6))
+    for point in forecast.points:
+        assert point.baseline == Decimal("10000")
+        assert point.pipeline == Decimal("0")
+
+
 def test_pipeline_ignored_when_forecast_abstains() -> None:
     forecast = compute_forecast([], pipeline={date(2026, 7, 1): Decimal("5000")})
     assert forecast.points == ()

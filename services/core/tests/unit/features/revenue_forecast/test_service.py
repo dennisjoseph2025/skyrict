@@ -47,6 +47,8 @@ class FakeRepository:
         sigma: Decimal | None,
         backtest_mape: Decimal | None,
         pipeline_value: Decimal | None = None,
+        baselines: list[Decimal | None] | None = None,
+        pipeline_uplifts: list[Decimal | None] | None = None,
     ) -> None:
         self.replace_calls.append(
             {
@@ -56,6 +58,8 @@ class FakeRepository:
                 "sigma": sigma,
                 "backtest_mape": backtest_mape,
                 "pipeline_value": pipeline_value,
+                "baselines": baselines,
+                "pipeline_uplifts": pipeline_uplifts,
             }
         )
 
@@ -71,7 +75,11 @@ def _flat_monthly(months: int) -> list[MonthlyRevenue]:
 
 
 def _stored_row(
-    month: date, predicted: str, pipeline_value: Decimal | None = None
+    month: date,
+    predicted: str,
+    pipeline_value: Decimal | None = None,
+    baseline: str | None = None,
+    pipeline_uplift: Decimal | None = None,
 ) -> ErpRevenueForecastModel:
     row = ErpRevenueForecastModel(
         tenant_id=TENANT,
@@ -80,6 +88,8 @@ def _stored_row(
         predicted=Decimal(predicted),
         model_version="trend-seasonal",
         pipeline_value=pipeline_value,
+        baseline=Decimal(baseline) if baseline is not None else None,
+        pipeline_uplift=pipeline_uplift,
     )
     row.created_at = datetime(2026, 9, 8, tzinfo=UTC)
     row.updated_at = datetime(2026, 9, 8, tzinfo=UTC)
@@ -117,6 +127,50 @@ async def test_refresh_blends_pipeline_into_forecast() -> None:
     assert response.points[0].predicted == Decimal("15000")  # 10000 baseline + 5000
     assert response.points[1].predicted == Decimal("10000")  # untouched month
     assert repo.replace_calls[0]["pipeline_value"] == Decimal("5000.0000")
+
+
+async def test_refresh_persists_per_month_decomposition() -> None:
+    repo = FakeRepository(_flat_monthly(9), pipeline={date(2026, 10, 1): Decimal("5000")})
+    svc = RevenueForecastService(repo)
+    response = await svc.refresh(TENANT)
+
+    uplifted = response.points[0]
+    assert uplifted.month == date(2026, 10, 1)
+    assert uplifted.baseline == Decimal("10000")
+    assert uplifted.pipeline == Decimal("5000")
+    assert uplifted.predicted == uplifted.baseline + uplifted.pipeline
+
+    plain = response.points[1]
+    assert plain.baseline == Decimal("10000")
+    assert plain.pipeline == Decimal("0")
+    assert plain.predicted == plain.baseline
+
+    for point in response.points:
+        assert point.predicted == point.baseline + point.pipeline
+
+    call = repo.replace_calls[0]
+    assert call["baselines"] == [Decimal("10000")] * 12
+    assert call["pipeline_uplifts"] == [Decimal("5000"), *[Decimal("0")] * 11]
+
+
+async def test_read_returns_stored_decomposition() -> None:
+    repo = FakeRepository([])
+    repo.stored = [
+        _stored_row(
+            date(2026, 10, 1),
+            "15000",
+            pipeline_value=Decimal("5000.0000"),
+            baseline="10000",
+            pipeline_uplift=Decimal("5000.0000"),
+        ),
+    ]
+    svc = RevenueForecastService(repo)
+    response = await svc.read(TENANT)
+
+    assert response.pipeline_value == Decimal("5000.0000")
+    assert response.points[0].baseline == Decimal("10000")
+    assert response.points[0].pipeline == Decimal("5000.0000")
+    assert response.points[0].predicted == Decimal("15000")
 
 
 async def test_refresh_without_pipeline_stores_zero() -> None:

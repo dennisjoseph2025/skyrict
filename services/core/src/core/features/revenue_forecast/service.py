@@ -85,6 +85,8 @@ class RevenueForecastService:
             sigma=forecast.backtest.sigma if forecast.backtest is not None else None,
             backtest_mape=forecast.backtest.mape if forecast.backtest is not None else None,
             pipeline_value=pipeline_value,
+            baselines=[p.baseline for p in forecast.points],
+            pipeline_uplifts=[p.pipeline for p in forecast.points],
         )
         return RevenueForecastResponse(
             model_version=forecast.model_version,
@@ -94,6 +96,8 @@ class RevenueForecastService:
                 ForecastPointResponse(
                     month=p.month,
                     predicted=p.predicted,
+                    baseline=p.baseline,
+                    pipeline=p.pipeline,
                     lower_bound=p.lower_bound,
                     upper_bound=p.upper_bound,
                 )
@@ -125,6 +129,8 @@ class RevenueForecastService:
                 ForecastPointResponse(
                     month=row.month,
                     predicted=row.predicted,
+                    baseline=row.baseline,
+                    pipeline=row.pipeline_uplift,
                     lower_bound=row.lower_bound,
                     upper_bound=row.upper_bound,
                 )

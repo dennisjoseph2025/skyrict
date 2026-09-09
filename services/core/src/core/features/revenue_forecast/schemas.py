@@ -21,6 +21,10 @@ from skyrict_common.schemas import ResponseEnvelope
 class ForecastPointResponse(BaseModel):
     month: date
     predicted: Decimal
+    # Per-month decomposition: the trend + seasonal baseline and the CRM
+    # pipeline uplift blended in (predicted == baseline + pipeline).
+    baseline: Decimal | None = None
+    pipeline: Decimal | None = None
     lower_bound: Decimal | None
     upper_bound: Decimal | None
 
