@@ -26,6 +26,8 @@ from ai_agent.core.audit_events import (
     AI_NARRATOR_GENERATED,
     AI_NARRATOR_REFRESHED,
     AI_QUERY_EXECUTED,
+    AI_REPORT_GENERATED,
+    AI_REPORT_SAVED,
     AI_SUGGESTION_APPROVED,
     AI_SUGGESTION_CREATED,
     AI_SUGGESTION_REJECTED,
@@ -60,6 +62,9 @@ class TestAppendixBVocabulary:
         assert AI_FOLLOW_UP_GENERATED == "ai.crm.follow_up.generated"
         assert AI_FOLLOW_UP_APPLIED == "ai.crm.follow_up.applied"
         assert AI_FOLLOW_UP_DISMISSED == "ai.crm.follow_up.dismissed"
+        # SKY-80 NL report builder events.
+        assert AI_REPORT_GENERATED == "ai.report.generated"
+        assert AI_REPORT_SAVED == "ai.report.saved"
 
     def test_all_events_covers_exactly_the_documented_constants(self) -> None:
         expected = {
@@ -82,6 +87,8 @@ class TestAppendixBVocabulary:
             audit_events.AI_FOLLOW_UP_GENERATED,
             audit_events.AI_FOLLOW_UP_APPLIED,
             audit_events.AI_FOLLOW_UP_DISMISSED,
+            audit_events.AI_REPORT_GENERATED,
+            audit_events.AI_REPORT_SAVED,
         }
         assert set(ALL_AI_AUDIT_EVENTS) == expected
 
