@@ -14,8 +14,8 @@ of silently double-counting a month in the UI series.
 Table follows the ``ai_``-style conventions from 0033: tenant-scoped, RLS
 enabled, composite ``(tenant_id, id)`` primary key.
 
-Revision ID: 0041
-Revises: 0040
+Revision ID: 0045
+Revises: 0044
 Create Date: 2026-09-08
 """
 
@@ -24,8 +24,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0041"
-down_revision = "0040"
+revision = "0045"
+down_revision = "0044"
 branch_labels = None
 depends_on = None
 

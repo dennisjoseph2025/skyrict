@@ -207,7 +207,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-assert version == "0045", f"head is {version}, expected 0045"
+assert version == "0047", f"head is {version}, expected 0047"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -889,7 +889,7 @@ assert version == "0045", f"head is {version}, expected 0045"
             ).scalar_one()
             assert not_null == "NO", "0040 drift threshold must be NOT NULL"
 
-            # 0041: revenue forecasts (SKY-82 A4) - one row per (tenant, month),
+            # 0045: revenue forecasts (SKY-82 A4) - one row per (tenant, month),
             # RLS enabled, and a unique guard so a recompute can never double-
             # count a month in the UI series.
             tenant_id = uuid.UUID(tenant_ids[0])
@@ -920,7 +920,7 @@ assert version == "0045", f"head is {version}, expected 0045"
                     {"tenant": tenant_id},
                 )
             ).scalar_one()
-            assert forecast_count == 2, "0041 must accept one row per (tenant, month)"
+            assert forecast_count == 2, "0045 must accept one row per (tenant, month)"
 
             dup_rejected = False
             try:
@@ -936,7 +936,7 @@ assert version == "0045", f"head is {version}, expected 0045"
             except IntegrityError:
                 dup_rejected = True
                 await conn.rollback()
-            assert dup_rejected, "0041 unique (tenant_id, month) must reject duplicates"
+            assert dup_rejected, "0045 unique (tenant_id, month) must reject duplicates"
 
             forecast_policy = (
                 await conn.execute(
@@ -947,7 +947,7 @@ assert version == "0045", f"head is {version}, expected 0045"
                     )
                 )
             ).scalar_one()
-            assert forecast_policy == 1, "0041 must enable RLS on erp_revenue_forecast"
+            assert forecast_policy == 1, "0045 must enable RLS on erp_revenue_forecast"
 
             pipeline_column = (
                 await conn.execute(
@@ -958,7 +958,7 @@ assert version == "0045", f"head is {version}, expected 0045"
                     )
                 )
             ).scalar_one()
-            assert pipeline_column == 1, "0044 must add pipeline_value to erp_revenue_forecast"
+            assert pipeline_column == 1, "0046 must add pipeline_value to erp_revenue_forecast"
 
             baseline_column = (
                 await conn.execute(
@@ -969,7 +969,7 @@ assert version == "0045", f"head is {version}, expected 0045"
                     )
                 )
             ).scalar_one()
-            assert baseline_column == 1, "0045 must add baseline to erp_revenue_forecast"
+            assert baseline_column == 1, "0047 must add baseline to erp_revenue_forecast"
 
             uplift_column = (
                 await conn.execute(
@@ -980,7 +980,7 @@ assert version == "0045", f"head is {version}, expected 0045"
                     )
                 )
             ).scalar_one()
-            assert uplift_column == 1, "0045 must add pipeline_uplift to erp_revenue_forecast"
+            assert uplift_column == 1, "0047 must add pipeline_uplift to erp_revenue_forecast"
             await conn.execute(
                 text("DELETE FROM erp_revenue_forecast WHERE tenant_id = :tenant"),
                 {"tenant": tenant_id},

@@ -7,8 +7,8 @@ into the forecast horizon. ``NULL`` means the forecast abstained or predates
 this feature; a recompute overwrites it alongside the horizon via the existing
 ``UNIQUE (tenant_id, month)`` upsert.
 
-Revision ID: 0044
-Revises: 0043
+Revision ID: 0046
+Revises: 0045
 Create Date: 2026-09-09
 """
 
@@ -17,8 +17,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0044"
-down_revision = "0043"
+revision = "0046"
+down_revision = "0045"
 branch_labels = None
 depends_on = None
 
