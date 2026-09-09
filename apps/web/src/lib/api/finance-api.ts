@@ -934,11 +934,18 @@ export interface RevenueForecastPoint {
     upper_bound: number | null;
 }
 
+export interface RevenueForecastActual {
+    month: string;
+    actual: number;
+}
+
 export interface RevenueForecast {
     model_version: string;
     backtest_mape: number | null;
     sigma: number | null;
     points: RevenueForecastPoint[];
+    history: RevenueForecastActual[];
+    pipeline_value: number | null;
 }
 
 export function getRevenueForecast(): Promise<RevenueForecast> {
