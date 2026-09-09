@@ -354,6 +354,12 @@ export const erpNavGroups: NavGroup[] = [
                         permission: "erp.finance.read",
                     },
                     {
+                        href: "/dashboard/erp/finance/model",
+                        label: "Forecast Model",
+                        icon: TrendingUp,
+                        permission: "erp.finance.read",
+                    },
+                    {
                         href: "/dashboard/erp/finance/audit-log",
                         label: "Audit Log",
                         icon: ScrollText,
