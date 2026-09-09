@@ -178,10 +178,7 @@ export function FinanceOverview() {
         setStartingChat(true);
         setChatError(null);
         try {
-            const conversation = await createConversation({
-                first_prompt:
-                    "Open the Finance Advisor. What is our net income this quarter?",
-            });
+            const conversation = await createConversation({});
             router.push(`/dashboard/agents/c/${conversation.id}`);
         } catch (error) {
             setChatError(
