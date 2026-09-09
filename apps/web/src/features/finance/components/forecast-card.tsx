@@ -32,6 +32,7 @@ import {
 } from "@/lib/api/finance-api";
 import { formatMoney } from "@/lib/finance/format";
 import { WidgetCard } from "@/features/finance/components/automation-widgets";
+import { listOpportunities } from "@/lib/api/crm-api";
 
 type Status =
     | { state: "loading" }
@@ -51,6 +52,69 @@ function monthLabel(value: string): string {
         month: "short",
         year: "2-digit",
     });
+}
+
+function dateLabel(value: string): string {
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+    });
+}
+
+interface ForecastDeal {
+    id: string;
+    name: string;
+    amount: number;
+    probability: number;
+    expectedClose: string;
+    weighted: number;
+}
+
+const OPEN_STAGES = new Set([
+    "prospecting",
+    "qualified",
+    "proposal",
+    "negotiation",
+]);
+
+// Mirrors the core forecast rule: an open deal with an amount and an expected
+// close date contributes probability/100 x amount to its closing month.
+// Deals without those fields are ignored.
+function groupDealsByMonth(
+    opportunities: {
+        id: string;
+        name: string;
+        stage: string;
+        amount: string | null;
+        probability: number;
+        expectedCloseDate: string | null;
+    }[],
+): Map<string, ForecastDeal[]> {
+    const byMonth = new Map<string, ForecastDeal[]>();
+    for (const opportunity of opportunities) {
+        if (
+            !OPEN_STAGES.has(opportunity.stage) ||
+            opportunity.amount == null ||
+            opportunity.expectedCloseDate == null
+        )
+            continue;
+        const amount = Number(opportunity.amount);
+        if (!Number.isFinite(amount)) continue;
+        const key = opportunity.expectedCloseDate.slice(0, 7);
+        const deals = byMonth.get(key);
+        const deal = {
+            id: opportunity.id,
+            name: opportunity.name,
+            amount,
+            probability: opportunity.probability,
+            expectedClose: opportunity.expectedCloseDate,
+            weighted: (amount * opportunity.probability) / 100,
+        };
+        if (deals) deals.push(deal);
+        else byMonth.set(key, [deal]);
+    }
+    return byMonth;
 }
 
 const axisTick = {
@@ -229,11 +293,31 @@ function ForecastExplainerDialog({
         null,
     );
     const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+    const [dealsByMonth, setDealsByMonth] = useState<
+        Map<string, ForecastDeal[]>
+    >(new Map());
+
+    useEffect(() => {
+        let cancelled = false;
+        listOpportunities({ limit: 200 })
+            .then(({ data }) => {
+                if (cancelled) return;
+                setDealsByMonth(groupDealsByMonth(data));
+            })
+            .catch(() => undefined);
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     const active =
         points.find((point) => point.month === selectedMonth) ??
         biggest ??
         points[0] ??
         null;
+    const activeDeals = active
+        ? (dealsByMonth.get(active.month.slice(0, 7)) ?? [])
+        : [];
 
     const mape =
         forecast?.backtest_mape != null ? Number(forecast.backtest_mape) : null;
@@ -336,6 +420,46 @@ function ForecastExplainerDialog({
                                     </span>
                                 </div>
                             </div>
+                            {activeDeals.length > 0 ? (
+                                <div className="mt-3 border-t border-border/70 pt-3">
+                                    <h5 className="mb-2 text-xs font-semibold text-foreground uppercase">
+                                        Which deals, and when
+                                    </h5>
+                                    <ul className="space-y-2">
+                                        {activeDeals.map((deal) => (
+                                            <li
+                                                key={deal.id}
+                                                className="flex items-baseline justify-between gap-3 text-sm"
+                                            >
+                                                <span className="min-w-0">
+                                                    <span className="block truncate font-medium text-foreground">
+                                                        {deal.name}
+                                                    </span>
+                                                    <span className="block text-xs text-muted-foreground">
+                                                        Expected{" "}
+                                                        {dateLabel(
+                                                            deal.expectedClose,
+                                                        )}{" "}
+                                                        ·{" "}
+                                                        {formatMoney(
+                                                            deal.amount,
+                                                        )}{" "}
+                                                        × {deal.probability}%
+                                                    </span>
+                                                </span>
+                                                <span className="shrink-0 font-semibold text-foreground tabular-nums">
+                                                    +
+                                                    {formatMoney(deal.weighted)}
+                                                </span>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <p className="mt-2 text-xs text-muted-foreground">
+                                        These {activeDeals.length} deals add up
+                                        to +{formatMoney(active.pipeline)}.
+                                    </p>
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
 

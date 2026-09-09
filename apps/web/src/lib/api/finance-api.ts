@@ -952,10 +952,45 @@ export interface RevenueForecast {
     pipeline_value: number | null;
 }
 
+function asNumber(value: string | number | null | undefined): number | null {
+    if (value === null || value === undefined || value === "") return null;
+    const n = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+// Core serializes Decimal keys as strings; coerce every numeric field once so
+// downstream consumers get real numbers (string compares were sorting money
+// lexicographically, e.g. "71927" > "573221").
+export function mapRevenueForecast(payload: RevenueForecast): RevenueForecast {
+    return {
+        ...payload,
+        backtest_mape: asNumber(payload.backtest_mape),
+        sigma: asNumber(payload.sigma),
+        pipeline_value: asNumber(payload.pipeline_value),
+        points: (payload.points ?? []).map((point) => ({
+            ...point,
+            predicted: asNumber(point.predicted) ?? 0,
+            baseline: asNumber(point.baseline),
+            pipeline: asNumber(point.pipeline),
+            lower_bound: asNumber(point.lower_bound),
+            upper_bound: asNumber(point.upper_bound),
+        })),
+        history: (payload.history ?? []).map((actual) => ({
+            ...actual,
+            actual: asNumber(actual.actual) ?? 0,
+        })),
+    };
+}
+
 export function getRevenueForecast(): Promise<RevenueForecast> {
-    return apiFetch<RevenueForecast>(`${FINANCE}/forecast/revenue`);
+    return apiFetch<RevenueForecast>(`${FINANCE}/forecast/revenue`).then(
+        mapRevenueForecast,
+    );
 }
 
 export function refreshRevenueForecast(): Promise<RevenueForecast> {
-    return apiPost<RevenueForecast>(`${FINANCE}/forecast/revenue/refresh`, {});
+    return apiPost<RevenueForecast>(
+        `${FINANCE}/forecast/revenue/refresh`,
+        {},
+    ).then(mapRevenueForecast);
 }
