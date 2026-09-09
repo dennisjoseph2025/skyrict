@@ -38,6 +38,10 @@ class ErpRevenueForecastModel(Base):
     upper_bound: Mapped[Decimal | None] = mapped_column(Numeric(19, 4), nullable=True)
     sigma: Mapped[Decimal | None] = mapped_column(Numeric(19, 4), nullable=True)
     backtest_mape: Mapped[Decimal | None] = mapped_column(Numeric(9, 6), nullable=True)
+    # Run-level total weighted expected pipeline (probability/100 x amount of
+    # open CRM deals) blended into this horizon; NULL when the forecast abstained
+    # or the model ran before pipeline weighting existed.
+    pipeline_value: Mapped[Decimal | None] = mapped_column(Numeric(19, 4), nullable=True)
     model_version: Mapped[str] = mapped_column(
         String(32), nullable=False, server_default=text("'sma-6'")
     )

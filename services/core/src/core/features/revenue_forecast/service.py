@@ -1,23 +1,32 @@
 """Revenue-forecast service (SKY-82 A4).
 
-``refresh`` computes and persists a 12-month SMA-6 forecast from the last 24
-months of recognized revenue (abstaining - persisting nothing - when there
-is under 6 months of history); ``read`` returns whatever is currently stored
-(weekly recompute and manual refresh keep it fresh). CRM pipeline conversion
-weighting from deal health is a cross-module (CRM) dependency, documented in
-the eval note rather than implemented here.
+``refresh`` computes and persists a 12-month forecast (damped trend +
+seasonal echo, plus an additive CRM pipeline uplift) from the last 24 months
+of recognized revenue (abstaining - persisting nothing - when there is under
+3 months of history); ``read`` returns whatever is currently stored (weekly
+recompute and manual refresh keep it fresh). The pipeline uplift weights the
+tenant's open CRM opportunities at their conversion probability
+(``probability/100 x amount`` per closing month) and only shifts projected
+months - the backtest/MAPE/band stay invoice-based. Deal-health modulation
+remains an ai-agent cross-module dependency (no finance-consumable feed yet).
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 
 from core.features.revenue_forecast.calculator import (
+    HORIZON_MONTHS,
+    MIN_HISTORY_MONTHS,
+    MonthlyRevenue,
     compute_forecast,
+    month_step,
 )
 from core.features.revenue_forecast.repository import RevenueForecastRepository
 from core.features.revenue_forecast.schemas import (
+    ActualPointResponse,
     ForecastPointResponse,
     RevenueForecastResponse,
 )
@@ -35,12 +44,36 @@ class RevenueForecastService:
         month = (as_of.month - 1 - (_HISTORY_MONTHS - 1)) % 12 + 1
         return date(year, month, 1)
 
+    @staticmethod
+    def _history_response(monthly: list[MonthlyRevenue]) -> list[ActualPointResponse]:
+        return [ActualPointResponse(month=row.month, actual=row.revenue) for row in monthly]
+
     async def refresh(
         self, tenant_id: uuid.UUID, as_of: date | None = None
     ) -> RevenueForecastResponse:
         as_of = as_of or date.today()
         monthly = await self._repo.monthly_revenue(tenant_id, self._history_from_month(as_of))
-        forecast = compute_forecast(monthly)
+
+        pipeline_value: Decimal | None = None
+        if len(monthly) >= MIN_HISTORY_MONTHS:
+            last_month = monthly[-1].month
+            horizon_months = [
+                month_step(last_month, offset) for offset in range(1, HORIZON_MONTHS + 1)
+            ]
+            pipeline = await self._repo.pipeline_by_month(
+                tenant_id, horizon_months[0], horizon_months[-1]
+            )
+            pipeline_value = (
+                sum(pipeline.values(), Decimal("0")).quantize(
+                    Decimal("0.0001"), rounding=ROUND_HALF_UP
+                )
+                if pipeline
+                else Decimal("0")
+            )
+        else:
+            pipeline = {}
+
+        forecast = compute_forecast(monthly, pipeline=pipeline)
         months = [p.month for p in forecast.points]
         await self._repo.replace_forecast(
             tenant_id,
@@ -51,6 +84,7 @@ class RevenueForecastService:
             upper_bounds=[p.upper_bound for p in forecast.points],
             sigma=forecast.backtest.sigma if forecast.backtest is not None else None,
             backtest_mape=forecast.backtest.mape if forecast.backtest is not None else None,
+            pipeline_value=pipeline_value,
         )
         return RevenueForecastResponse(
             model_version=forecast.model_version,
@@ -65,13 +99,23 @@ class RevenueForecastService:
                 )
                 for p in forecast.points
             ],
+            history=self._history_response(monthly),
+            pipeline_value=pipeline_value,
         )
 
     async def read(self, tenant_id: uuid.UUID) -> RevenueForecastResponse:
         rows = await self._repo.get_forecast(tenant_id)
+        history = self._history_response(
+            await self._repo.monthly_revenue(tenant_id, self._history_from_month(date.today()))
+        )
         if not rows:
             return RevenueForecastResponse(
-                model_version="", backtest_mape=None, sigma=None, points=[]
+                model_version="",
+                backtest_mape=None,
+                sigma=None,
+                points=[],
+                history=history,
+                pipeline_value=None,
             )
         return RevenueForecastResponse(
             model_version=rows[0].model_version,
@@ -86,4 +130,6 @@ class RevenueForecastService:
                 )
                 for row in rows
             ],
+            history=history,
+            pipeline_value=rows[0].pipeline_value,
         )

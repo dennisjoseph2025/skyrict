@@ -207,7 +207,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0043", f"head is {version}, expected 0043"
+            assert version == "0044", f"head is {version}, expected 0044"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -916,10 +916,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             await conn.commit()
             forecast_count = (
                 await conn.execute(
-                    text(
-                        "SELECT count(*) FROM erp_revenue_forecast "
-                        "WHERE tenant_id = :tenant"
-                    ),
+                    text("SELECT count(*) FROM erp_revenue_forecast WHERE tenant_id = :tenant"),
                     {"tenant": tenant_id},
                 )
             ).scalar_one()
@@ -951,6 +948,17 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                 )
             ).scalar_one()
             assert forecast_policy == 1, "0041 must enable RLS on erp_revenue_forecast"
+
+            pipeline_column = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM information_schema.columns "
+                        "WHERE table_name = 'erp_revenue_forecast' "
+                        "AND column_name = 'pipeline_value'"
+                    )
+                )
+            ).scalar_one()
+            assert pipeline_column == 1, "0044 must add pipeline_value to erp_revenue_forecast"
             await conn.execute(
                 text("DELETE FROM erp_revenue_forecast WHERE tenant_id = :tenant"),
                 {"tenant": tenant_id},
