@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { Info, Loader2, RefreshCw, TrendingUp } from "lucide-react";
 import {
     Area,
@@ -44,8 +43,7 @@ const BAND_COLOR = "#0ea5e9";
 const BASELINE_COLOR = "#64748b";
 const ACTUAL_COLOR = "#f59e0b";
 
-const chartPanel =
-    "rounded-xl border border-border/70 bg-muted/30 p-3 sm:p-4";
+const chartPanel = "rounded-xl border border-border/70 bg-muted/30 p-3 sm:p-4";
 
 function monthLabel(value: string): string {
     const date = new Date(`${value}T00:00:00`);
@@ -125,9 +123,8 @@ function ChartTooltipContent({
 }) {
     if (!active || !payload || payload.length === 0) return null;
     const datum = payload[0]?.payload;
-    const hasBreakdown =
-        datum?.baseline != null && datum?.pipeline != null;
-    const predictedEntry = payload.find((entry) => entry.name === "Predicted");
+    const hasBreakdown = datum?.baseline != null && datum?.pipeline != null;
+    const predictedEntry = payload.find((entry) => entry.name === "Forecast");
     return (
         <div className="rounded-lg border border-border bg-popover px-3 py-2 shadow-md">
             {label ? (
@@ -159,12 +156,9 @@ function ChartTooltipContent({
             </ul>
             {hasBreakdown ? (
                 <p className="mt-2 border-t border-border/60 pt-1.5 text-xs tabular-nums text-muted-foreground">
-                    {formatMoney(datum!.baseline!)} trend+seasonal
+                    {formatMoney(datum!.baseline!)} usual revenue
                     {datum!.pipeline! > 0 ? (
-                        <>
-                            {" "}
-                            + {formatMoney(datum!.pipeline!)} pipeline
-                        </>
+                        <> + {formatMoney(datum!.pipeline!)} deals closing</>
                     ) : null}{" "}
                     = {formatMoney((predictedEntry?.value as number) ?? 0)}
                 </p>
@@ -173,96 +167,201 @@ function ChartTooltipContent({
     );
 }
 
-function AssumptionsDrawer({ forecast }: { forecast: RevenueForecast | null }) {
-    const rows = [
-        [
-            "Input source",
-            "Approved invoices (recognized revenue), bucketed by month",
-        ],
-        [
-            "Model",
-            "Damped trend + monthly seasonal echo (repeats the observed ups/downs of each calendar month)",
-        ],
-        ["Horizon", "12 months"],
-        ["History window", "Last 24 months of revenue lookback"],
-        [
-            "Abstention",
-            "No forecast when there are fewer than 3 months of history",
-        ],
-        [
-            "Formula",
-            "Predicted = baseline (trend + seasonal echo) + pipeline uplift (weighted open CRM deals). Each forecast comes back with both components shown per month.",
-        ],
-        [
-            "Confidence band",
-            forecast?.sigma != null
-                ? `Predicted ±1.5σ of walk-forward error (σ ${formatMoney(Math.abs(forecast.sigma))})`
-                : "Omitted until walk-forward errors are available",
-        ],
-        [
-            "Backtest",
-            forecast?.backtest_mape != null
-                ? `Walk-forward MAPE ${Number(forecast.backtest_mape).toFixed(1)}%`
-                : "Insufficient history to validate yet",
-        ],
-        [
-            "Pipeline weighting",
-            forecast?.pipeline_value != null
-                ? `Open CRM deals weighted by conversion probability (probability × amount, bucketed by expected close month) are added to each affected forecast month. Weighted pipeline in the horizon: ${formatMoney(forecast.pipeline_value)}.`
-                : "Open CRM deals weighted by conversion probability (probability × amount, bucketed by expected close month) are added to forecast months. Not fed when the forecast abstains.",
-        ],
-    ];
-    const decomposition =
-        forecast?.points?.filter(
-            (point) => point.baseline != null && point.pipeline != null,
-        ) ?? [];
-    const hasDecomposition = decomposition.length > 0;
-    const monthOf = (value: string) =>
-        new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
-            month: "short",
-            year: "2-digit",
-        });
+type BreakdownPoint = NonNullable<RevenueForecast["points"]>[number] & {
+    baseline: number;
+    pipeline: number;
+};
+
+function breakdownPoints(forecast: RevenueForecast | null): BreakdownPoint[] {
+    return (forecast?.points ?? []).filter(
+        (point): point is BreakdownPoint =>
+            point.baseline != null && point.pipeline != null,
+    );
+}
+
+function IngredientCard({
+    swatchClass,
+    title,
+    children,
+}: {
+    swatchClass: string;
+    title: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+            <div className="mb-1.5 flex items-center gap-2">
+                <span aria-hidden="true" className={swatchClass} />
+                <h4 className="font-display text-sm font-semibold text-foreground">
+                    {title}
+                </h4>
+            </div>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+                {children}
+            </p>
+        </div>
+    );
+}
+
+function ForecastExplainerDialog({
+    forecast,
+}: {
+    forecast: RevenueForecast | null;
+}) {
+    const points = breakdownPoints(forecast);
+    const biggest = points.reduce<BreakdownPoint | null>(
+        (best, point) =>
+            !best || point.pipeline > best.pipeline ? point : best,
+        null,
+    );
+    const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+    const active =
+        points.find((point) => point.month === selectedMonth) ??
+        biggest ??
+        points[0] ??
+        null;
+
+    const mape =
+        forecast?.backtest_mape != null ? Number(forecast.backtest_mape) : null;
+    const sigma = forecast?.sigma != null ? Number(forecast.sigma) : null;
+
+    let takeaway: string;
+    if (!forecast) {
+        takeaway =
+            "The forecast isn't available yet — it needs at least 3 months of approved invoices before we can predict.";
+    } else if (!biggest || biggest.pipeline === 0) {
+        takeaway =
+            "Right now the forecast is built only from your usual monthly revenue — no deals are expected to close in the next 12 months.";
+    } else {
+        takeaway = `${monthLabel(biggest.month)} is your biggest month: we expect ${formatMoney(biggest.predicted)}, and ${formatMoney(biggest.pipeline)} of that comes from deals expected to close that month.`;
+    }
+
     return (
         <Dialog>
             <DialogTrigger asChild>
                 <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    aria-label="View forecast assumptions"
+                    aria-label="How is this forecast made"
                 >
                     <Info aria-hidden="true" className="mr-1.5 size-3.5" />
-                    Assumptions
+                    How is this forecast made?
                 </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="flex max-h-[85dvh] overflow-hidden flex-col sm:max-w-xl">
                 <DialogHeader>
-                    <DialogTitle>Revenue forecast assumptions</DialogTitle>
+                    <DialogTitle>How this forecast works</DialogTitle>
                     <DialogDescription>
-                        Model inputs and weights used for the 12-month revenue
-                        forecast.
+                        What the number means and how it was calculated — in
+                        plain language.
                     </DialogDescription>
                 </DialogHeader>
-                <dl className="space-y-3 pt-1">
-                    {rows.map(([term, detail]) => (
-                        <div
-                            key={term}
-                            className="flex flex-col gap-0.5 border-b border-border/60 pb-3 last:border-b-0 last:pb-0"
+
+                <div className="min-h-0 space-y-4 overflow-y-auto p-1 pr-3 pt-1">
+                    <p className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm font-medium leading-relaxed text-foreground">
+                        {takeaway}
+                    </p>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <IngredientCard
+                            swatchClass="h-0.5 w-6 rounded-full bg-slate-500"
+                            title="Your usual revenue"
                         >
-                            <dt className="text-sm font-medium text-foreground">
-                                {term}
-                            </dt>
-                            <dd className="text-sm text-muted-foreground">
-                                {detail}
-                            </dd>
+                            What you typically earn in a month, worked out from
+                            your last 24 months of approved invoices. Big months
+                            and slow months from past years are carried forward.
+                            This is the grey dashed line.
+                        </IngredientCard>
+                        <IngredientCard
+                            swatchClass="size-2 rounded-full bg-sky-500"
+                            title="Deals expected to close (the “pipeline”)"
+                        >
+                            Deals your team is still working on — before they’ve
+                            been won or lost. Each deal counts at its chance of
+                            closing: a $100,000 deal with a 60% chance adds
+                            $60,000. Deals without an amount or a closing date
+                            are left out.
+                        </IngredientCard>
+                    </div>
+
+                    {active ? (
+                        <div className="rounded-xl border border-border/70 p-4">
+                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                <h4 className="font-display text-sm font-semibold text-foreground">
+                                    So the {monthLabel(active.month)} forecast
+                                    is
+                                </h4>
+                                <select
+                                    value={active.month}
+                                    onChange={(event) =>
+                                        setSelectedMonth(event.target.value)
+                                    }
+                                    aria-label="Choose a month"
+                                    className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                                >
+                                    {points.map((point) => (
+                                        <option
+                                            key={point.month}
+                                            value={point.month}
+                                        >
+                                            {monthLabel(point.month)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1.5 text-sm tabular-nums">
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-muted-foreground">
+                                        Your usual revenue
+                                    </span>
+                                    <span className="font-semibold text-foreground">
+                                        {formatMoney(active.baseline)}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3">
+                                    <span className="text-muted-foreground">
+                                        + Deals expected to close
+                                    </span>
+                                    <span className="font-semibold text-foreground">
+                                        {active.pipeline > 0
+                                            ? `+ ${formatMoney(active.pipeline)}`
+                                            : "None expected"}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-3 border-t border-border/70 pt-1.5">
+                                    <span className="font-medium text-foreground">
+                                        = Forecast
+                                    </span>
+                                    <span className="font-semibold text-sky-600 dark:text-sky-400">
+                                        {formatMoney(active.predicted)}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
-                    ))}
-                </dl>
-                {hasDecomposition ? (
-                    <div className="mt-2">
-                        <h4 className="mb-2 text-sm font-semibold text-foreground">
-                            Month-by-month breakdown
+                    ) : null}
+
+                    {sigma != null ? (
+                        <div className="rounded-xl border border-border/70 p-4">
+                            <h4 className="mb-1.5 font-display text-sm font-semibold text-foreground">
+                                How much can you trust it?
+                            </h4>
+                            <p className="text-sm leading-relaxed text-muted-foreground">
+                                We checked the model against your past months.
+                                It was usually within ±
+                                {formatMoney(Math.abs(sigma))} of the real
+                                number — that’s the grey band around the line.
+                                The average miss was about{" "}
+                                {mape != null ? mape.toFixed(0) : "—"}%. That’s
+                                normal for revenue forecasts.
+                            </p>
+                        </div>
+                    ) : null}
+
+                    <div>
+                        <h4 className="mb-2 font-display text-sm font-semibold text-foreground">
+                            Month by month
                         </h4>
-                        <div className="max-h-64 overflow-y-auto rounded-lg border border-border/70">
+                        <div className="overflow-hidden rounded-lg border border-border/70">
                             <table className="w-full text-right text-sm tabular-nums">
                                 <thead className="sticky top-0 bg-muted text-xs text-muted-foreground uppercase">
                                     <tr>
@@ -270,37 +369,42 @@ function AssumptionsDrawer({ forecast }: { forecast: RevenueForecast | null }) {
                                             Month
                                         </th>
                                         <th className="px-3 py-2 font-medium">
-                                            Baseline
+                                            Usual revenue
                                         </th>
                                         <th className="px-3 py-2 font-medium">
-                                            Pipeline
+                                            Deals closing
                                         </th>
                                         <th className="px-3 py-2 font-medium">
-                                            Predicted
+                                            Forecast
                                         </th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {decomposition.map((point) => (
+                                    {points.map((point) => (
                                         <tr
                                             key={point.month}
                                             className="border-t border-border/50"
                                         >
                                             <td className="px-3 py-1.5 text-left font-medium text-foreground">
-                                                {monthOf(point.month)}
+                                                {monthLabel(point.month)}
+                                                {point.pipeline > 0 ? (
+                                                    <span className="ml-2 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-sky-600 uppercase dark:text-sky-400">
+                                                        deals
+                                                    </span>
+                                                ) : null}
                                             </td>
                                             <td className="px-3 py-1.5 text-muted-foreground">
-                                                {formatMoney(point.baseline!)}
+                                                {formatMoney(point.baseline)}
                                             </td>
                                             <td
                                                 className={
-                                                    point.pipeline! > 0
+                                                    point.pipeline > 0
                                                         ? "px-3 py-1.5 font-semibold text-foreground"
                                                         : "px-3 py-1.5 text-muted-foreground"
                                                 }
                                             >
-                                                {point.pipeline! > 0
-                                                    ? `+${formatMoney(point.pipeline!)}`
+                                                {point.pipeline > 0
+                                                    ? `+ ${formatMoney(point.pipeline)}`
                                                     : "—"}
                                             </td>
                                             <td className="px-3 py-1.5 font-semibold text-foreground">
@@ -312,20 +416,21 @@ function AssumptionsDrawer({ forecast }: { forecast: RevenueForecast | null }) {
                             </table>
                         </div>
                     </div>
-                ) : null}
+                </div>
             </DialogContent>
         </Dialog>
     );
 }
 
 function AccuracySummary({ forecast }: { forecast: RevenueForecast | null }) {
-    const mape = forecast?.backtest_mape != null ? Number(forecast.backtest_mape) : null;
+    const mape =
+        forecast?.backtest_mape != null ? Number(forecast.backtest_mape) : null;
     const sigma = forecast?.sigma != null ? Number(forecast.sigma) : null;
     if (mape === null || sigma === null) {
         return (
             <p className="text-xs text-muted-foreground">
-                Accuracy not yet known — the backtest needs at least 4 months of
-                history to score the model.
+                Accuracy not yet known — the forecast needs at least 4 months of
+                history before we can score it.
             </p>
         );
     }
@@ -336,30 +441,32 @@ function AccuracySummary({ forecast }: { forecast: RevenueForecast | null }) {
                     Forecast accuracy
                 </div>
                 <div className="text-sm font-semibold text-foreground">
-                    MAPE {mape.toFixed(1)}%
+                    {mape.toFixed(1)}%
                     <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        avg error vs history
+                        average miss vs history
                     </span>
                 </div>
             </div>
             <div>
-                <div className="text-xs text-muted-foreground">Typical error</div>
+                <div className="text-xs text-muted-foreground">
+                    Typical error
+                </div>
                 <div className="text-sm font-semibold text-foreground">
                     ±{formatMoney(sigma)}
                     <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        1σ of walk-forward error
+                        how far off past forecasts were
                     </span>
                 </div>
             </div>
             {forecast?.pipeline_value != null ? (
                 <div>
                     <div className="text-xs text-muted-foreground">
-                        Pipeline input
+                        Deals expected to close
                     </div>
                     <div className="text-sm font-semibold text-foreground">
                         +{formatMoney(forecast.pipeline_value)}
                         <span className="ml-2 text-xs font-normal text-muted-foreground">
-                            weighted open deals in horizon
+                            across the next 12 months
                         </span>
                     </div>
                 </div>
@@ -439,7 +546,7 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
             }
             action={
                 <div className="flex items-center gap-1">
-                    <AssumptionsDrawer forecast={forecast} />
+                    <ForecastExplainerDialog forecast={forecast} />
                     {canRefresh ? (
                         <Button
                             variant="outline"
@@ -473,8 +580,8 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                 </div>
             ) : data.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                    Not enough history to forecast yet — the model needs
-                    at least 3 months of approved invoices. Record invoices, then
+                    Not enough history to forecast yet — the model needs at
+                    least 3 months of approved invoices. Record invoices, then
                     refresh to generate a forecast.
                 </p>
             ) : (
@@ -485,19 +592,19 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                             <LegendChip
                                 swatch="dot"
                                 color={PREDICTED_COLOR}
-                                label="Predicted"
+                                label="Forecast"
                             />
                             {hasDecomposition ? (
                                 <LegendChip
                                     swatch="dash"
                                     color={BASELINE_COLOR}
-                                    label="Baseline (trend + seasonal)"
+                                    label="Usual revenue"
                                 />
                             ) : null}
                             <LegendChip
                                 swatch="band"
                                 color="color-mix(in srgb, #0ea5e9 22%, transparent)"
-                                label="±1.5σ range"
+                                label="Expected range"
                             />
                         </div>
                         <div className="h-56">
@@ -557,23 +664,31 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                                             stroke: "var(--border)",
                                             strokeOpacity: 0.9,
                                         }}
-                                        content={({ active, payload, label }) => (
+                                        content={({
+                                            active,
+                                            payload,
+                                            label,
+                                        }) => (
                                             <ChartTooltipContent
                                                 active={Boolean(active)}
                                                 payload={
                                                     payload as ReadonlyArray<{
                                                         name?: string;
-                                                        value?: number | [number, number];
+                                                        value?:
+                                                            | number
+                                                            | [number, number];
                                                         color?: string;
                                                     }>
                                                 }
-                                                label={label as string | undefined}
+                                                label={
+                                                    label as string | undefined
+                                                }
                                             />
                                         )}
                                     />
                                     <Area
                                         dataKey="band"
-                                        name="±1.5σ range"
+                                        name="Expected range"
                                         stroke="none"
                                         fill="url(#forecastBand)"
                                         activeDot={false}
@@ -582,7 +697,7 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                                     <Line
                                         type="monotone"
                                         dataKey="predicted"
-                                        name="Predicted"
+                                        name="Forecast"
                                         stroke={PREDICTED_COLOR}
                                         strokeWidth={2.5}
                                         dot={false}
@@ -597,7 +712,7 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                                         <Line
                                             type="monotone"
                                             dataKey="baseline"
-                                            name="Baseline"
+                                            name="Usual revenue"
                                             stroke={BASELINE_COLOR}
                                             strokeWidth={1.5}
                                             strokeDasharray="4 4"
@@ -611,15 +726,8 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                         </div>
                     </div>
                     <p className="mt-3 text-xs text-muted-foreground">
-                        {forecast?.model_version} · 12-month forecast, band =
-                        ±1.5σ of walk-forward error. Model inputs and weights are
-                        listed in Assumptions.{" "}
-                        <Link
-                            href="/dashboard/erp/finance/model"
-                            className="font-medium text-primary hover:underline"
-                        >
-                            See how this is computed →
-                        </Link>
+                        Forecast = usual revenue + deals expected to close · the
+                        grey band is the expected range.
                     </p>
                 </>
             )}
@@ -630,8 +738,8 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                             Revenue history
                         </h4>
                         <p className="text-xs text-muted-foreground">
-                            Actual recognized revenue by month (approved
-                            invoices) — the input to the forecast above
+                            Actual money earned by month (approved invoices) —
+                            this is what the forecast above is based on
                         </p>
                     </div>
                     <div className={chartPanel}>
@@ -679,17 +787,25 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
                                             fill: "var(--card)",
                                             fillOpacity: 0.55,
                                         }}
-                                        content={({ active, payload, label }) => (
+                                        content={({
+                                            active,
+                                            payload,
+                                            label,
+                                        }) => (
                                             <ChartTooltipContent
                                                 active={Boolean(active)}
                                                 payload={
                                                     payload as ReadonlyArray<{
                                                         name?: string;
-                                                        value?: number | [number, number];
+                                                        value?:
+                                                            | number
+                                                            | [number, number];
                                                         color?: string;
                                                     }>
                                                 }
-                                                label={label as string | undefined}
+                                                label={
+                                                    label as string | undefined
+                                                }
                                             />
                                         )}
                                     />
