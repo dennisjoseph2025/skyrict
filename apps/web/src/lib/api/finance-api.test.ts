@@ -82,7 +82,7 @@ describe("getRevenueForecast", () => {
         expect(biggestForecast.predicted).toBe(573221.4286);
 
         const biggestPipeline = points.reduce((best, point) =>
-            point.pipeline > best.pipeline ? point : best,
+            Number(point.pipeline) > Number(best.pipeline) ? point : best,
         );
         expect(biggestPipeline.month).toBe("2026-09-01");
         expect(biggestPipeline.pipeline).toBe(518800);

@@ -50,12 +50,27 @@ _AR = {
 _TB = {
     "as_of": "2026-08-31",
     "rows": [
-        {"code": "1000", "name": "Cash", "account_type": "asset",
-         "debit": "42000.0000", "credit": "0.0000"},
-        {"code": "2000", "name": "Accounts Payable", "account_type": "liability",
-         "debit": "0.0000", "credit": "21000.0000"},
-        {"code": "4000", "name": "Revenue", "account_type": "revenue",
-         "debit": "0.0000", "credit": "21000.0000"},
+        {
+            "code": "1000",
+            "name": "Cash",
+            "account_type": "asset",
+            "debit": "42000.0000",
+            "credit": "0.0000",
+        },
+        {
+            "code": "2000",
+            "name": "Accounts Payable",
+            "account_type": "liability",
+            "debit": "0.0000",
+            "credit": "21000.0000",
+        },
+        {
+            "code": "4000",
+            "name": "Revenue",
+            "account_type": "revenue",
+            "debit": "0.0000",
+            "credit": "21000.0000",
+        },
     ],
     "total_debit": "42000.0000",
     "total_credit": "42000.0000",
@@ -63,8 +78,13 @@ _TB = {
 
 _CF = {
     "positions": [
-        {"month": "2026-09", "opening": "10000.0000", "inflows": "15000.0000",
-         "outflows": "9000.0000", "closing": "16000.0000"},
+        {
+            "month": "2026-09",
+            "opening": "10000.0000",
+            "inflows": "15000.0000",
+            "outflows": "9000.0000",
+            "closing": "16000.0000",
+        },
     ],
 }
 
@@ -114,7 +134,11 @@ def _envelope(data: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _list_envelope(data: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"success": True, "data": data, "meta": {"total": len(data), "page": 1, "page_size": 100}}
+    return {
+        "success": True,
+        "data": data,
+        "meta": {"total": len(data), "page": 1, "page_size": 100},
+    }
 
 
 def _handler(request: httpx.Request) -> httpx.Response:

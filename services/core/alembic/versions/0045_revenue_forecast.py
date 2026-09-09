@@ -61,7 +61,9 @@ def upgrade() -> None:
         sa.Column("upper_bound", sa.Numeric(19, 4), nullable=True),
         sa.Column("sigma", sa.Numeric(19, 4), nullable=True),
         sa.Column("backtest_mape", sa.Numeric(9, 6), nullable=True),
-        sa.Column("model_version", sa.String(32), nullable=False, server_default=sa.text("'sma-6'")),
+        sa.Column(
+            "model_version", sa.String(32), nullable=False, server_default=sa.text("'sma-6'")
+        ),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
