@@ -34,7 +34,7 @@ class IntentMeta:
     """One intent's report anchor: its answer must reconcile to this endpoint.
 
     ``requires_history`` marks intents that surface *period/balance money
-    figures*; they abstain when the tenant is under 6 months of invoicing
+    figures*; they abstain when the tenant is under 3 months of invoicing
     history (A3 guardrail). Snapshot catalog reads (e.g. invoice counts) set it
     ``False`` so they answer regardless.
     """

@@ -595,7 +595,7 @@ class FinanceDelegator:
       * Ask the intent engine FIRST: a question inside the whitelist is answered
         by the exact gateway call that backs the matching dashboard report, with
         a citation to that report (``citations`` out-param).
-      * Abstract when the tenant's invoicing history is under 6 months (distinct
+      * Abstract when the tenant's invoicing history is under 3 months (distinct
         calendar months across invoices) - before any report figure is produced.
       * Every read forwards the caller's JWT + tenant slug, so core enforces
         ``erp.finance.read`` + tenant isolation. The context handed to the LLM
@@ -782,19 +782,19 @@ class FinanceDelegator:
         return None
 
     async def _has_sufficient_history(self, gateway: FinanceGatewayPort) -> bool:
-        """A3 guardrail: abstain from report figures under 6 months of history.
+        """A3 guardrail: abstain from report figures under 3 months of history.
 
         History depth = distinct calendar months across invoices. Using
         invoicing activity (instead of closed fiscal periods) keeps the read
         on one already-fetched-and-permissioned endpoint and stays lenient for
-        tenants that leave fiscal periods unclosed.
+        tenants that leave fiscal periods unclosed. Mirrors the 3-month floor
+        of the revenue forecast (FIN-AI-003 A4), validated to not be less
+        accurate than a 6-month floor.
         """
         invoices = await gateway.list_invoices()
         if not invoices:
             return False
-        months = {
-            (invoice.invoice_date.year, invoice.invoice_date.month) for invoice in invoices
-        }
+        months = {(invoice.invoice_date.year, invoice.invoice_date.month) for invoice in invoices}
         return len(months) >= _MIN_HISTORY_MONTHS
 
 
@@ -805,7 +805,9 @@ _OPEN_STATUSES = frozenset({"draft", "issued", "approved"})
 
 # A3 guardrail: minimum distinct invoice months before any report figure may
 # be surfaced to the chat. Below this the delegator streams the abstention.
-_MIN_HISTORY_MONTHS = 6
+# Mirrors the revenue-forecast floor (FIN-AI-003); validated to not reduce
+# forecast accuracy vs a 6-month floor.
+_MIN_HISTORY_MONTHS = 3
 
 
 def _count_by_status(invoices: Sequence[object]) -> dict[str, int]:

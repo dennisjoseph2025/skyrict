@@ -151,5 +151,5 @@ I couldn't find an answer to that finance question. Try asking about invoices, r
 
 
 FINANCE_HISTORY_ABSTENTION = """
-I don't have enough finance history to answer that reliably yet. This workspace needs at least 6 months of invoicing history before I can report figures like profit, receivables, or cash flow. Check back once more history has accrued.
+I don't have enough finance history to answer that reliably yet. This workspace needs at least 3 months of invoicing history before I can report figures like profit, receivables, or cash flow. Check back once more history has accrued.
 """.strip()

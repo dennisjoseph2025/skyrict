@@ -138,7 +138,7 @@ def _invoice(status: str = "issued", total: str = "100.0000", month: int = 8) ->
 
 
 def _history_invoices(months: list[int] | None = None) -> list[InvoiceRef]:
-    """>= 6 distinct invoice months so the delegator's history guard passes."""
+    """>= 3 distinct invoice months so the delegator's history guard passes."""
     return [_invoice(month=month) for month in (months or [1, 2, 3, 4, 5, 6])]
 
 
@@ -221,9 +221,7 @@ class TestDeterministic:
         """Snapshot catalog reads are exempt from the history guardrail."""
         router = FakeLlmRouter()
         gateway = FakeFinanceGateway(invoices=[_invoice("issued", month=8)])
-        text = await collect(
-            make_delegator(router, gateway), "How many invoices do we have?"
-        )
+        text = await collect(make_delegator(router, gateway), "How many invoices do we have?")
 
         assert "1 invoices" in text
         assert "issued 1" in text
@@ -251,9 +249,7 @@ class TestDeterministic:
 class TestIntents:
     async def test_trial_balance_answer(self) -> None:
         router = FakeLlmRouter()
-        gateway = FakeFinanceGateway(
-            invoices=_history_invoices(), trial_balance=_trial_balance()
-        )
+        gateway = FakeFinanceGateway(invoices=_history_invoices(), trial_balance=_trial_balance())
         text = await collect(make_delegator(router, gateway), "Show me the trial balance.")
 
         assert "total debits 21000" in text
@@ -264,9 +260,7 @@ class TestIntents:
     async def test_cashflow_projection_answer(self) -> None:
         router = FakeLlmRouter()
         gateway = FakeFinanceGateway(invoices=_history_invoices(), cashflow=_cashflow())
-        text = await collect(
-            make_delegator(router, gateway), "How much cash do we have coming in?"
-        )
+        text = await collect(make_delegator(router, gateway), "How much cash do we have coming in?")
 
         assert "Cash flow projection" in text
         assert "opening 10000" in text
@@ -275,9 +269,7 @@ class TestIntents:
 
     async def test_insufficient_history_abstains(self) -> None:
         router = FakeLlmRouter()
-        gateway = FakeFinanceGateway(
-            invoices=[_invoice(month=8)], pnl=_pnl(), ar=_ar()
-        )
+        gateway = FakeFinanceGateway(invoices=[_invoice(month=8)], pnl=_pnl(), ar=_ar())
         text = await collect(make_delegator(router, gateway), "What is our net income?")
 
         assert "history" in text.casefold()
