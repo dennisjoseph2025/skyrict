@@ -179,6 +179,20 @@ function breakdownPoints(forecast: RevenueForecast | null): BreakdownPoint[] {
     );
 }
 
+function biggestMonth(forecast: RevenueForecast | null): BreakdownPoint | null {
+    const points = breakdownPoints(forecast);
+    if (points.length === 0) return null;
+    return points.reduce((best, point) =>
+        point.predicted > best.predicted ? point : best,
+    );
+}
+
+function biggestMonthCallout(forecast: RevenueForecast | null): string | null {
+    const biggest = biggestMonth(forecast);
+    if (!biggest || biggest.pipeline === 0) return null;
+    return `${monthLabel(biggest.month)} is your biggest month: we expect ${formatMoney(biggest.predicted)}, and ${formatMoney(biggest.pipeline)} of that comes from deals expected to close that month.`;
+}
+
 function IngredientCard({
     swatchClass,
     title,
@@ -225,17 +239,6 @@ function ForecastExplainerDialog({
         forecast?.backtest_mape != null ? Number(forecast.backtest_mape) : null;
     const sigma = forecast?.sigma != null ? Number(forecast.sigma) : null;
 
-    let takeaway: string;
-    if (!forecast) {
-        takeaway =
-            "The forecast isn't available yet — it needs at least 3 months of approved invoices before we can predict.";
-    } else if (!biggest || biggest.pipeline === 0) {
-        takeaway =
-            "Right now the forecast is built only from your usual monthly revenue — no deals are expected to close in the next 12 months.";
-    } else {
-        takeaway = `${monthLabel(biggest.month)} is your biggest month: we expect ${formatMoney(biggest.predicted)}, and ${formatMoney(biggest.pipeline)} of that comes from deals expected to close that month.`;
-    }
-
     return (
         <Dialog>
             <DialogTrigger asChild>
@@ -258,10 +261,6 @@ function ForecastExplainerDialog({
                 </DialogHeader>
 
                 <div className="min-h-0 space-y-4 overflow-y-auto p-1 pr-3 pt-1">
-                    <p className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm font-medium leading-relaxed text-foreground">
-                        {takeaway}
-                    </p>
-
                     <div className="grid gap-3 sm:grid-cols-2">
                         <IngredientCard
                             swatchClass="h-0.5 w-6 rounded-full bg-slate-500"
@@ -587,6 +586,11 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
             ) : (
                 <>
                     <AccuracySummary forecast={forecast} />
+                    {biggestMonthCallout(forecast) ? (
+                        <p className="mb-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm font-medium leading-relaxed text-foreground">
+                            {biggestMonthCallout(forecast)}
+                        </p>
+                    ) : null}
                     <div className={chartPanel}>
                         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
                             <LegendChip
