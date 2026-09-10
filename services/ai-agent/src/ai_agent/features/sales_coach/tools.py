@@ -68,8 +68,8 @@ async def analyze_rep_activity(
                         "opportunity_id": str(opp.id),
                     }
                 )
-        except Exception:
-            continue  # best-effort per opportunity
+        except Exception:  # nosec B112 - best-effort per opportunity
+            continue
 
     # Also gather activities for leads owned by this rep.
     try:
@@ -94,7 +94,7 @@ async def analyze_rep_activity(
                         "lead_id": str(lead.id),
                     }
                 )
-        except Exception:
+        except Exception:  # nosec B112 - best-effort per lead
             continue
 
     # Sort activities by recency (newest first).
