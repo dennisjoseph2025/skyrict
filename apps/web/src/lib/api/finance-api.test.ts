@@ -28,6 +28,32 @@ const WIRE_PAYLOAD = {
             pipeline: "518800.0000",
             lower_bound: null,
             upper_bound: null,
+            deals: [
+                {
+                    id: "deal-1000",
+                    name: "Big Co",
+                    amount: "1000000.0000",
+                    probability: 60,
+                    expected_close_date: "2026-09-15",
+                    weighted: "600000.0000",
+                    health: "green",
+                    confidence: "0.9",
+                    factor: "1.0000",
+                    adjusted: "600000.0000",
+                },
+                {
+                    id: "deal-2000",
+                    name: "Wobble Co",
+                    amount: "80000.0000",
+                    probability: 30,
+                    expected_close_date: "2026-09-22",
+                    weighted: "24000.0000",
+                    health: "red",
+                    confidence: "1.0",
+                    factor: "0.3500",
+                    adjusted: "8400.0000",
+                },
+            ],
         },
         {
             month: "2026-10-01",
@@ -36,6 +62,7 @@ const WIRE_PAYLOAD = {
             pipeline: "75275.0000",
             lower_bound: null,
             upper_bound: null,
+            deals: [],
         },
         {
             month: "2026-11-01",
@@ -44,6 +71,7 @@ const WIRE_PAYLOAD = {
             pipeline: "10800.0000",
             lower_bound: null,
             upper_bound: null,
+            deals: [],
         },
     ],
     history: [{ month: "2026-08-01", actual: "38000.0000" }],
@@ -69,6 +97,19 @@ describe("getRevenueForecast", () => {
         expect(forecast.sigma).toBe(27257.58);
         expect(forecast.pipeline_value).toBe(604875);
         expect(forecast.history[0].actual).toBe(38000);
+    });
+
+    it("coerces per-deal health fields and normalizes months without deals", async () => {
+        const forecast = await getRevenueForecast();
+
+        const deals = forecast.points[0].deals;
+        expect(deals.map((deal) => deal.adjusted)).toEqual([600000, 8400]);
+        expect(deals[0].health).toBe("green");
+        expect(deals[0].factor).toBe(1);
+        expect(deals[1].health).toBe("red");
+        expect(deals[1].factor).toBe(0.35);
+        expect(forecast.points[1].deals).toEqual([]);
+        expect(forecast.points[2].deals).toEqual([]);
     });
 
     it("picks the true largest forecast and pipeline months after coercion", async () => {

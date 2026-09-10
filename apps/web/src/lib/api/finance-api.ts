@@ -927,6 +927,21 @@ export function searchAuditLog(
 // SKY-82 A4: revenue forecasting
 // ---------------------------------------------------------------------------
 
+export interface RevenueForecastDeal {
+    id: string;
+    name: string;
+    amount: number | null;
+    probability: number;
+    expected_close_date: string;
+    // Raw conversion value (probability/100 x amount) vs the health-adjusted
+    // value actually blended into the month's pipeline.
+    weighted: number;
+    health: string | null;
+    confidence: number | null;
+    factor: number;
+    adjusted: number;
+}
+
 export interface RevenueForecastPoint {
     month: string;
     predicted: number;
@@ -936,6 +951,8 @@ export interface RevenueForecastPoint {
     pipeline: number | null;
     lower_bound: number | null;
     upper_bound: number | null;
+    // The deals behind this month's pipeline, health-adjusted value each.
+    deals: RevenueForecastDeal[];
 }
 
 export interface RevenueForecastActual {
@@ -974,6 +991,14 @@ export function mapRevenueForecast(payload: RevenueForecast): RevenueForecast {
             pipeline: asNumber(point.pipeline),
             lower_bound: asNumber(point.lower_bound),
             upper_bound: asNumber(point.upper_bound),
+            deals: (point.deals ?? []).map((deal) => ({
+                ...deal,
+                amount: asNumber(deal.amount),
+                weighted: asNumber(deal.weighted) ?? 0,
+                factor: asNumber(deal.factor) ?? 1,
+                adjusted: asNumber(deal.adjusted) ?? 0,
+                confidence: asNumber(deal.confidence),
+            })),
         })),
         history: (payload.history ?? []).map((actual) => ({
             ...actual,
