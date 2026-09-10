@@ -147,10 +147,20 @@ def watch_bulk_reads(
             window_end = start + _BULK_READ_WINDOW
             count = sum(1 for ts in timestamps[i:] if ts <= window_end)
             if count >= _BULK_READ_THRESHOLD:
+                # source_id stays the FIRST audit row's id in the window - the
+                # originating event the operator can open for evidence; the
+                # flagged user rides in evidence.
+                first_id = _first_id_in_window(
+                    events,
+                    window_start=start,
+                    window_end=window_end,
+                    match_action=None,
+                    match_user=user_id,
+                )
                 flagged.append(
                     FlaggedEvent(
                         source_table=source_table,
-                        source_id=user_id,
+                        source_id=first_id,
                         event_action="bulk_read_detected",
                         severity="medium",
                         reason=(
@@ -196,10 +206,19 @@ def watch_auth_bursts(
             window_end = start + _AUTH_BURST_WINDOW
             count = sum(1 for ts in timestamps[i:] if ts <= window_end)
             if count >= _AUTH_BURST_THRESHOLD:
+                # source_id stays the FIRST audit row's id in the window (the
+                # originating event for evidence); the source rides in evidence.
+                first_id = _first_id_in_window(
+                    events,
+                    window_start=start,
+                    window_end=window_end,
+                    match_action=_FAILED_AUTH_ACTIONS,
+                    match_user=None,
+                )
                 flagged.append(
                     FlaggedEvent(
                         source_table=source_table,
-                        source_id=source_key,
+                        source_id=first_id,
                         event_action="auth_burst_detected",
                         severity="high",
                         reason=(
@@ -246,3 +265,28 @@ def _parse_timestamp(raw: Any) -> datetime | None:
     if isinstance(raw, datetime):
         return raw
     return None
+
+
+def _first_id_in_window(
+    events: list[dict[str, Any]],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    match_action: frozenset[str] | None,
+    match_user: str | None,
+) -> str:
+    """The first event id inside the window matching the given filters.
+
+    ``source_id`` in the DB is the originating audit row's id (UUID); the
+    fallback keeps the aggregation key only when no row id is available.
+    """
+    for event in events:
+        if match_action is not None and str(event.get("action", "")) not in match_action:
+            continue
+        if match_user is not None and str(event.get("user_id", "")) != match_user:
+            continue
+        ts = _parse_timestamp(event.get("created_at"))
+        if ts is None or ts < window_start or ts > window_end:
+            continue
+        return str(event.get("id", ""))
+    return match_user or next(iter(match_action or ()), "")
