@@ -10,6 +10,7 @@ import {
     Pencil,
     Pin,
     PinOff,
+    ShieldCheck,
     Sparkles,
     SquarePen,
     Trash2,
@@ -382,6 +383,32 @@ export function AgentsChatSidebar({
                                     className="size-4"
                                 />
                             </button>
+                            <button
+                                type="button"
+                                title="Audit Guardian"
+                                onClick={() => {
+                                    onCloseMobile();
+                                    router.push("/dashboard/agents/guardian");
+                                }}
+                                aria-current={
+                                    pathname ===
+                                    "/dashboard/agents/guardian"
+                                        ? "page"
+                                        : undefined
+                                }
+                                className={cn(
+                                    "flex w-full items-center justify-center rounded-lg px-0 py-2 transition-colors hover:bg-muted/60",
+                                    pathname ===
+                                        "/dashboard/agents/guardian"
+                                        ? "text-foreground"
+                                        : "text-muted-foreground hover:text-foreground",
+                                )}
+                            >
+                                <ShieldCheck
+                                    aria-hidden="true"
+                                    className="size-4"
+                                />
+                            </button>
                         </nav>
                     ) : (
                         /* Expanded sidebar: AI feature links */
@@ -410,6 +437,28 @@ export function AgentsChatSidebar({
                                     className="size-4 shrink-0"
                                 />
                                 Sales Coach
+                            </Link>
+                            <Link
+                                href="/dashboard/agents/guardian"
+                                onClick={onCloseMobile}
+                                aria-current={
+                                    pathname ===
+                                    "/dashboard/agents/guardian"
+                                        ? "page"
+                                        : undefined
+                                }
+                                className={cn(
+                                    "flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-foreground transition-colors hover:bg-muted/60",
+                                    pathname ===
+                                        "/dashboard/agents/guardian" &&
+                                        "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+                                )}
+                            >
+                                <ShieldCheck
+                                    aria-hidden="true"
+                                    className="size-4 shrink-0"
+                                />
+                                Audit Guardian
                             </Link>
                         </nav>
                     )}
