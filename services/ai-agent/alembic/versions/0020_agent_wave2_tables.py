@@ -201,11 +201,16 @@ def upgrade() -> None:
     )
 
     # --- agent_registry seeds -----------------------------------------------
+    # sales_coach is a LangGraph module agent (runtime invokes its graph).
+    # audit_guardian is a scheduled + supervisor-delegate agent; its module
+    # records the owning feature package for operator visibility (it is never
+    # invoked through the checkpointed runtime - same convention as the
+    # streaming leaves in 0009).
     op.execute(
         "INSERT INTO agent_registry (name, module, graph_id, enabled, tools) VALUES "
         "('sales_coach', 'ai_agent.features.sales_coach.graph', "
         "'sales_coach', true, '[]'::jsonb), "
-        "('audit_guardian', 'ai_agent.features.audit_guardian.graph', "
+        "('audit_guardian', 'ai_agent.features.audit_guardian.service', "
         "'audit_guardian', true, '[]'::jsonb) "
         "ON CONFLICT (name) DO NOTHING"
     )
