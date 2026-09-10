@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from core.features.payroll.service import PayrollService
     from core.features.payroll_automation.service import PayrollAutomationService
     from core.features.reporting.service import DashboardService, ReportService
+    from core.features.revenue_forecast.service import RevenueForecastService
     from core.features.sales.service import SalesService
 
 logger = get_logger("core.deps")
@@ -692,6 +693,16 @@ def get_finance_service(
             PayrollRepository(db, next_sequence=SequenceRepository(db).next_value)
         ),
     )
+
+
+def get_revenue_forecast_service(
+    db: AsyncSession = Depends(get_db),
+) -> RevenueForecastService:
+    """Composition root for the finance revenue-forecast feature (SKY-82 A4)."""
+    from core.features.revenue_forecast.repository import RevenueForecastRepository
+    from core.features.revenue_forecast.service import RevenueForecastService
+
+    return RevenueForecastService(repo=RevenueForecastRepository(db))
 
 
 def get_payroll_service(

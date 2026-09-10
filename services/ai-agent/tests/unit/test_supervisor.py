@@ -39,17 +39,23 @@ class FakeLlmRouter:
         self,
         *,
         has_providers: bool = True,
-        completion_text: str | Exception = "",
+        completion_text: str | Exception | list[str] = "",
         stream_tokens: list[str] | None = None,
     ) -> None:
         self.has_providers = has_providers
         self._completion_text = completion_text
+        self._completion_pool = list(completion_text) if isinstance(completion_text, list) else None
         self._stream_tokens = stream_tokens or ["hello ", "world "]
         self.complete_calls = 0
         self.stream_calls = 0
 
     async def complete(self, request: LlmRequest) -> LlmCompletion:
         self.complete_calls += 1
+        if self._completion_pool is not None:
+            text = self._completion_pool.pop(0) if self._completion_pool else self._completion_text
+            if isinstance(text, Exception):
+                raise text
+            return LlmCompletion(text=text, model_used="fake-model", latency_ms=1)
         if isinstance(self._completion_text, Exception):
             raise self._completion_text
         return LlmCompletion(text=self._completion_text, model_used="fake-model", latency_ms=1)
@@ -230,10 +236,41 @@ async def test_classify_abstains_unparseable_output() -> None:
     router = FakeLlmRouter(has_providers=True, completion_text="sorry, I can't")
     service = make_service(router=router)
 
-    decision = await service.classify("What stock is low?")
+    decision = await service.classify("blah blah")
 
     assert decision.abstain is True
     assert decision.reason == "unparseable_classifier_output"
+    assert router.complete_calls == 2
+
+
+async def test_classify_keyword_fallback_after_unparseable_output() -> None:
+    router = FakeLlmRouter(has_providers=True, completion_text="sorry, I can't")
+    service = make_service(router=router)
+
+    decision = await service.classify("What stock is below reorder point?")
+
+    assert decision.agents == ("inventory_monitor",)
+    assert decision.abstain is False
+    assert decision.reason == "keyword_fallback"
+    assert router.complete_calls == 2
+
+
+async def test_classify_recovers_after_truncated_completion() -> None:
+    router = FakeLlmRouter(
+        has_providers=True,
+        completion_text=[
+            '{"',
+            json.dumps({"agents": ["finance_assistant"], "confidence": 0.9}),
+        ],
+    )
+    service = make_service(router=router)
+
+    decision = await service.classify("What is our net income this quarter?")
+
+    assert decision.agents == ("finance_assistant",)
+    assert decision.abstain is False
+    assert decision.reason == "routed"
+    assert router.complete_calls == 2
 
 
 async def test_classify_keyword_fallback_without_providers() -> None:
@@ -272,6 +309,34 @@ async def test_classify_strips_markdown_fences() -> None:
 
     assert decision.agents == ("finance_assistant",)
     assert decision.abstain is False
+
+
+async def test_classify_recovers_fence_and_prose_wrapped_json() -> None:
+    router = FakeLlmRouter(
+        has_providers=True,
+        completion_text="\n```json\n"
+        + json.dumps({"agents": ["finance_assistant"], "confidence": 0.9})
+        + "\n```\nnothing else",
+    )
+    service = make_service(router=router)
+
+    decision = await service.classify("What is our net income this quarter?")
+
+    assert decision.agents == ("finance_assistant",)
+    assert decision.abstain is False
+    assert decision.reason == "routed"
+
+
+async def test_classify_finance_keyword_fallback_covers_net_income() -> None:
+    router = FakeLlmRouter(has_providers=False)
+    service = make_service(router=router)
+
+    decision = await service.classify("What is our net income this quarter?")
+
+    assert decision.agents == ("finance_assistant",)
+    assert decision.abstain is False
+    assert decision.reason == "keyword_fallback"
+    assert router.complete_calls == 0
 
 
 # --- streaming ---------------------------------------------------------------

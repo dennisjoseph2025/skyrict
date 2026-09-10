@@ -51,6 +51,7 @@ def _app_with_recorder(seen: list[httpx.Request]) -> TestClient:
     app.dependency_overrides[ai_router._require_narrator_refresh] = lambda: {"sub": "u1"}
     app.dependency_overrides[ai_router._require_reports_read] = lambda: {"sub": "u1"}
     app.dependency_overrides[ai_router._require_reports_create] = lambda: {"sub": "u1"}
+    app.dependency_overrides[ai_router._require_crm_read] = lambda: {"sub": "u1"}
     client_factory = lambda: httpx.AsyncClient(  # noqa: E731
         transport=httpx.MockTransport(handler), base_url="http://ai.test"
     )
@@ -162,6 +163,20 @@ class TestSupplierRiskForwarding:
 
         assert response.status_code == 200
         assert seen[0].url.path == "/api/v1/ai/supplier-risk"
+
+
+class TestCrmDealHealthSweepForwarding:
+    def test_sweep_post_forwards(self) -> None:
+        seen: list[httpx.Request] = []
+        client = _app_with_recorder(seen)
+
+        response = client.post(
+            "/api/v1/ai/crm/opportunities/sweep",
+            headers={"authorization": "Bearer tok"},
+        )
+
+        assert response.status_code == 200
+        assert seen[0].url.path == "/api/v1/ai/crm/opportunities/sweep"
 
 
 class TestNarratorPermissionGate:

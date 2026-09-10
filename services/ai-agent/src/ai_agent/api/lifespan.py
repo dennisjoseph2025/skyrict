@@ -123,10 +123,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.exception("narrator.agent_registration_failed")
 
+    # Weekly revenue-forecast refresh (SKY-82 A4): optional cron calling the
+    # core finance-forecast recompute. Disabled by default; tenant enumeration
+    # is a placeholder like the narrator's, so the cron runs but refreshes
+    # nothing until a tenant provider lands.
+    forecast_scheduler: object | None = None
+    if settings.FORECAST_SCHEDULER_ENABLED:
+        from ai_agent.features.revenue_forecast.scheduler import RevenueForecastScheduler
+
+        async def _forecast_tenants() -> list[tuple[uuid.UUID, str]]:
+            return []
+
+        async def _refresh_factory(tenant_id: uuid.UUID, slug: str) -> object:
+            from ai_agent.features.revenue_forecast.client import CoreForecastRefreshClient
+
+            return CoreForecastRefreshClient(
+                base_url=str(settings.INVENTORY_SERVICE_URL),
+                bearer_token="",  # nosec B106 - system-agent wiring; token lands with tenant provider
+                tenant_slug=slug,
+            )
+
+        forecast_scheduler = RevenueForecastScheduler(
+            tenant_provider=_forecast_tenants,
+            refresh_factory=_refresh_factory,  # type: ignore[arg-type]
+            day_of_week=settings.FORECAST_SCHEDULER_DAY_OF_WEEK,
+            hour=settings.FORECAST_SCHEDULER_HOUR,
+            minute=settings.FORECAST_SCHEDULER_MINUTE,
+            timezone=settings.FORECAST_SCHEDULER_TIMEZONE,
+        )
+        forecast_scheduler.start()
+
     # --- Background jobs (SKY-68) -----------------------------------------
     bg_tasks: list[asyncio.Task[None]] = []
     from ai_agent.api.scheduled.anomaly_scan import run_scheduled_anomaly_scan
     from ai_agent.api.scheduled.crm_follow_up_scan import run_crm_follow_up_scan
+    from ai_agent.api.scheduled.deal_health_sweep import run_deal_health_sweep
     from ai_agent.core.jobs.anomaly_autoclose import run_anomaly_autoclose_job
     from ai_agent.core.jobs.suggestion_expiry import run_suggestion_expiry_job
 
@@ -134,6 +165,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     bg_tasks.append(asyncio.create_task(run_anomaly_autoclose_job()))
     bg_tasks.append(asyncio.create_task(run_scheduled_anomaly_scan()))
     bg_tasks.append(asyncio.create_task(run_crm_follow_up_scan()))
+    bg_tasks.append(asyncio.create_task(run_deal_health_sweep()))
     logger.info("background_jobs.started", count=len(bg_tasks))
 
     # Graceful shutdown: uvicorn owns SIGTERM/SIGINT handling; on signal it
@@ -143,6 +175,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if narrator_scheduler is not None:
         narrator_scheduler.stop()  # type: ignore[attr-defined]
+
+    if forecast_scheduler is not None:
+        forecast_scheduler.stop()  # type: ignore[attr-defined]
 
     # Cancel background jobs before disposing resources.
     for task in bg_tasks:
