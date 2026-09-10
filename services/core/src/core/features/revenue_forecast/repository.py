@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import Column, DateTime, Float, MetaData, String, Table, func, select
 from sqlalchemy.dialects.postgresql import UUID, insert
@@ -53,6 +54,30 @@ _ai_deal_health = Table(
 )
 
 
+@dataclass(frozen=True)
+class PipelineDeal:
+    """One open CRM deal weighted into a forecast month.
+
+    ``weighted`` is the raw conversion value (``probability/100 x amount``);
+    ``adjusted`` applies the latest deal-health factor (green keeps the full
+    weight, yellow/red discount it, blended toward neutral by confidence)
+    and is what month totals are built from - so per-deal detail always sums
+    to the month's pipeline.
+    """
+
+    id: uuid.UUID
+    name: str
+    amount: Decimal | None
+    probability: int
+    expected_close_date: date
+    month: date
+    weighted: Decimal
+    health: str | None
+    confidence: float | None
+    factor: Decimal
+    adjusted: Decimal
+
+
 class RevenueForecastRepository:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
@@ -77,10 +102,10 @@ class RevenueForecastRepository:
             for row in result.all()
         ]
 
-    async def pipeline_by_month(
+    async def pipeline_deals(
         self, tenant_id: uuid.UUID, from_month: date, to_month: date
-    ) -> dict[date, Decimal]:
-        """Weighted expected pipeline value per closing month in the horizon.
+    ) -> list[PipelineDeal]:
+        """Weighted expected pipeline deals per closing month in the horizon.
 
         Every open (non-terminal) opportunity with an amount and an
         ``expected_close_date`` inside ``[from_month, to_month]`` contributes
@@ -95,6 +120,10 @@ class RevenueForecastRepository:
         result = await self._db.execute(
             select(
                 ErpCrmOpportunityModel.id,
+                ErpCrmOpportunityModel.name,
+                ErpCrmOpportunityModel.amount,
+                ErpCrmOpportunityModel.probability,
+                ErpCrmOpportunityModel.expected_close_date,
                 func.date_trunc("month", ErpCrmOpportunityModel.expected_close_date).label("month"),
                 (ErpCrmOpportunityModel.amount * ErpCrmOpportunityModel.probability / 100).label(
                     "weighted"
@@ -110,20 +139,45 @@ class RevenueForecastRepository:
         )
         rows = result.all()
         if not rows:
-            return {}
-        factors = await self._deal_health_factors(tenant_id, [row.id for row in rows])
-        pipeline: dict[date, Decimal] = {}
+            return []
+        assessments = await self._deal_health_assessments(tenant_id, [row.id for row in rows])
+        deals: list[PipelineDeal] = []
         for row in rows:
-            month = row.month.date()
-            pipeline[month] = pipeline.get(month, Decimal("0")) + Decimal(
-                row.weighted
-            ) * factors.get(row.id, Decimal("1.0000"))
+            health, confidence = assessments.get(row.id, (None, None))
+            factor = deal_health_factor(health, confidence)
+            weighted = Decimal(row.weighted)
+            deals.append(
+                PipelineDeal(
+                    id=row.id,
+                    name=row.name,
+                    amount=row.amount,
+                    probability=row.probability,
+                    expected_close_date=row.expected_close_date,
+                    month=row.month.date(),
+                    weighted=weighted,
+                    health=health,
+                    confidence=confidence,
+                    factor=factor,
+                    adjusted=(weighted * factor).quantize(
+                        Decimal("0.0001"), rounding=ROUND_HALF_UP
+                    ),
+                )
+            )
+        return deals
+
+    async def pipeline_by_month(
+        self, tenant_id: uuid.UUID, from_month: date, to_month: date
+    ) -> dict[date, Decimal]:
+        """Weighted expected pipeline value per closing month in the horizon."""
+        pipeline: dict[date, Decimal] = {}
+        for deal in await self.pipeline_deals(tenant_id, from_month, to_month):
+            pipeline[deal.month] = pipeline.get(deal.month, Decimal("0")) + deal.adjusted
         return pipeline
 
-    async def _deal_health_factors(
+    async def _deal_health_assessments(
         self, tenant_id: uuid.UUID, opportunity_ids: list[uuid.UUID]
-    ) -> dict[uuid.UUID, Decimal]:
-        """Latest health conversion factor per opportunity (missing -> full weight).
+    ) -> dict[uuid.UUID, tuple[str | None, float | None]]:
+        """Latest health band + confidence per opportunity (missing -> unassessed).
 
         Reads the ai-agent-owned ``ai_deal_health`` table read-only, tenant-
         scoped (explicit filter + the same RLS GUC core's session sets). For
@@ -152,10 +206,10 @@ class RevenueForecastRepository:
                 exc,
             )
             return {}
-        latest: dict[uuid.UUID, Decimal] = {}
+        latest: dict[uuid.UUID, tuple[str | None, float | None]] = {}
         for row in result.all():
             if row.opportunity_id not in latest:
-                latest[row.opportunity_id] = deal_health_factor(row.health, row.confidence)
+                latest[row.opportunity_id] = (row.health, row.confidence)
         return latest
 
     async def replace_forecast(

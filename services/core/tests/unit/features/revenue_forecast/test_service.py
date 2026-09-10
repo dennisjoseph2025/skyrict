@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
-from core.features.revenue_forecast.calculator import MonthlyRevenue
+from core.features.revenue_forecast.calculator import MonthlyRevenue, deal_health_factor
 from core.features.revenue_forecast.models.forecast import ErpRevenueForecastModel
+from core.features.revenue_forecast.repository import PipelineDeal
 from core.features.revenue_forecast.service import RevenueForecastService
 
 TENANT = uuid.UUID("11111111-1111-1111-1111-111111111111")
@@ -20,10 +21,14 @@ TENANT = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 class FakeRepository:
     def __init__(
-        self, monthly: list[MonthlyRevenue], pipeline: dict[date, Decimal] | None = None
+        self,
+        monthly: list[MonthlyRevenue],
+        pipeline: dict[date, Decimal] | None = None,
+        deals: list[PipelineDeal] | None = None,
     ) -> None:
         self.monthly = monthly
         self.pipeline = pipeline or {}
+        self.deals = deals or []
         self.replace_calls: list[dict] = []
         self.stored: list[ErpRevenueForecastModel] = []
 
@@ -34,6 +39,11 @@ class FakeRepository:
         self, tenant_id: uuid.UUID, from_month: date, to_month: date
     ) -> dict[date, Decimal]:
         return self.pipeline
+
+    async def pipeline_deals(
+        self, tenant_id: uuid.UUID, from_month: date, to_month: date
+    ) -> list[PipelineDeal]:
+        return self.deals
 
     async def replace_forecast(
         self,
@@ -96,6 +106,33 @@ def _stored_row(
     return row
 
 
+def _deal(
+    month: date,
+    *,
+    name: str,
+    probability: int,
+    amount: Decimal,
+    health: str | None = None,
+    confidence: float | None = None,
+) -> PipelineDeal:
+    weighted = (amount * Decimal(probability)) / Decimal(100)
+    return PipelineDeal(
+        id=uuid.uuid4(),
+        name=name,
+        amount=amount,
+        probability=probability,
+        expected_close_date=date(month.year, month.month, 15),
+        month=month,
+        weighted=weighted,
+        health=health,
+        confidence=confidence,
+        factor=deal_health_factor(health, confidence),
+        adjusted=(weighted * deal_health_factor(health, confidence)).quantize(
+            Decimal("0.0001"), rounding=ROUND_HALF_UP
+        ),
+    )
+
+
 async def test_refresh_persists_twelve_month_horizon() -> None:
     repo = FakeRepository(_flat_monthly(9))
     svc = RevenueForecastService(repo)
@@ -119,7 +156,10 @@ async def test_refresh_persists_twelve_month_horizon() -> None:
 
 
 async def test_refresh_blends_pipeline_into_forecast() -> None:
-    repo = FakeRepository(_flat_monthly(9), pipeline={date(2026, 10, 1): Decimal("5000")})
+    repo = FakeRepository(
+        _flat_monthly(9),
+        deals=[_deal(date(2026, 10, 1), name="Oct Deal", probability=50, amount=Decimal("10000"))],
+    )
     svc = RevenueForecastService(repo)
     response = await svc.refresh(TENANT)
 
@@ -130,7 +170,10 @@ async def test_refresh_blends_pipeline_into_forecast() -> None:
 
 
 async def test_refresh_persists_per_month_decomposition() -> None:
-    repo = FakeRepository(_flat_monthly(9), pipeline={date(2026, 10, 1): Decimal("5000")})
+    repo = FakeRepository(
+        _flat_monthly(9),
+        deals=[_deal(date(2026, 10, 1), name="Oct Deal", probability=50, amount=Decimal("10000"))],
+    )
     svc = RevenueForecastService(repo)
     response = await svc.refresh(TENANT)
 
@@ -151,6 +194,69 @@ async def test_refresh_persists_per_month_decomposition() -> None:
     call = repo.replace_calls[0]
     assert call["baselines"] == [Decimal("10000")] * 12
     assert call["pipeline_uplifts"] == [Decimal("5000"), *[Decimal("0")] * 11]
+
+
+async def test_refresh_attaches_health_adjusted_deals() -> None:
+    repo = FakeRepository(
+        _flat_monthly(9),
+        deals=[
+            _deal(
+                date(2026, 10, 1),
+                name="Healthy Co",
+                probability=60,
+                amount=Decimal("10000"),
+                health="green",
+                confidence=0.9,
+            ),
+            _deal(
+                date(2026, 10, 1),
+                name="At Risk Co",
+                probability=20,
+                amount=Decimal("10000"),
+                health="yellow",
+                confidence=0.8,
+            ),
+            _deal(
+                date(2026, 11, 1),
+                name="Later Co",
+                probability=50,
+                amount=Decimal("20000"),
+                health="red",
+                confidence=1.0,
+            ),
+        ],
+    )
+    svc = RevenueForecastService(repo)
+    response = await svc.refresh(TENANT)
+
+    oct_point = response.points[0]
+    # 6000 healthy (green = full weight) + 1520 at risk (yellow, confidence 0.8 -> 0.76x of 2000).
+    assert oct_point.pipeline == Decimal("7520.0000")
+    assert oct_point.predicted == oct_point.baseline + oct_point.pipeline
+    assert [deal.name for deal in oct_point.deals] == ["Healthy Co", "At Risk Co"]
+
+    healthy = oct_point.deals[0]
+    assert healthy.health == "green"
+    assert healthy.factor == Decimal("1.0000")
+    assert healthy.adjusted == Decimal("6000.0000")
+
+    at_risk = oct_point.deals[1]
+    assert at_risk.health == "yellow"
+    assert at_risk.confidence == 0.8
+    assert at_risk.factor < Decimal("1.0000")
+    assert at_risk.adjusted == Decimal("1520.0000")
+
+    nov_point = response.points[1]
+    assert [deal.name for deal in nov_point.deals] == ["Later Co"]
+    assert nov_point.deals[0].health == "red"
+    assert nov_point.deals[0].adjusted == Decimal("3500.0000")  # red = 0.35 x full weight
+
+    # Every month's pipeline is exactly the sum of its deals' adjusted values.
+    for point in response.points:
+        assert point.pipeline == sum(
+            (deal.adjusted for deal in point.deals), Decimal("0")
+        ).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        assert point.predicted == point.baseline + point.pipeline
 
 
 async def test_read_returns_stored_decomposition() -> None:
@@ -205,6 +311,39 @@ async def test_read_returns_stored_pipeline_value() -> None:
 
     assert response.pipeline_value == Decimal("5000.0000")
     assert response.points[0].predicted == Decimal("15000")
+
+
+async def test_read_attaches_live_health_adjusted_deals() -> None:
+    repo = FakeRepository([])
+    repo.stored = [
+        _stored_row(
+            date(2026, 10, 1),
+            "15000",
+            pipeline_value=Decimal("5000.0000"),
+            baseline="10000",
+            pipeline_uplift=Decimal("5000.0000"),
+        ),
+    ]
+    repo.deals = [
+        _deal(
+            date(2026, 10, 1),
+            name="Pipe Deal",
+            probability=50,
+            amount=Decimal("10000"),
+            health="red",
+            confidence=1.0,
+        ),
+    ]
+    svc = RevenueForecastService(repo)
+    response = await svc.read(TENANT)
+
+    # Stored aggregates are preserved; the live per-deal detail is attached.
+    assert response.pipeline_value == Decimal("5000.0000")
+    assert response.points[0].predicted == Decimal("15000")
+    assert [deal.name for deal in response.points[0].deals] == ["Pipe Deal"]
+    assert response.points[0].deals[0].health == "red"
+    assert response.points[0].deals[0].factor == Decimal("0.3500")
+    assert response.points[0].deals[0].adjusted == Decimal("1750.0000")
 
 
 async def test_refresh_abstains_below_three_months_history() -> None:

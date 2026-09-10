@@ -24,14 +24,22 @@ from core.features.revenue_forecast.calculator import (
     compute_forecast,
     month_step,
 )
-from core.features.revenue_forecast.repository import RevenueForecastRepository
+from core.features.revenue_forecast.repository import PipelineDeal, RevenueForecastRepository
 from core.features.revenue_forecast.schemas import (
     ActualPointResponse,
+    ForecastDealResponse,
     ForecastPointResponse,
     RevenueForecastResponse,
 )
 
 _HISTORY_MONTHS = 24
+
+
+def _deal_list_by_month(deals: list[PipelineDeal]) -> dict[date, list[PipelineDeal]]:
+    by_month: dict[date, list[PipelineDeal]] = {}
+    for deal in deals:
+        by_month.setdefault(deal.month, []).append(deal)
+    return by_month
 
 
 class RevenueForecastService:
@@ -48,6 +56,21 @@ class RevenueForecastService:
     def _history_response(monthly: list[MonthlyRevenue]) -> list[ActualPointResponse]:
         return [ActualPointResponse(month=row.month, actual=row.revenue) for row in monthly]
 
+    @staticmethod
+    def _deal_response(deal: PipelineDeal) -> ForecastDealResponse:
+        return ForecastDealResponse(
+            id=deal.id,
+            name=deal.name,
+            amount=deal.amount,
+            probability=deal.probability,
+            expected_close_date=deal.expected_close_date,
+            weighted=deal.weighted,
+            health=deal.health,
+            confidence=deal.confidence,
+            factor=deal.factor,
+            adjusted=deal.adjusted,
+        )
+
     async def refresh(
         self, tenant_id: uuid.UUID, as_of: date | None = None
     ) -> RevenueForecastResponse:
@@ -55,14 +78,18 @@ class RevenueForecastService:
         monthly = await self._repo.monthly_revenue(tenant_id, self._history_from_month(as_of))
 
         pipeline_value: Decimal | None = None
+        deals: list[PipelineDeal] = []
         if len(monthly) >= MIN_HISTORY_MONTHS:
             last_month = monthly[-1].month
             horizon_months = [
                 month_step(last_month, offset) for offset in range(1, HORIZON_MONTHS + 1)
             ]
-            pipeline = await self._repo.pipeline_by_month(
+            deals = await self._repo.pipeline_deals(
                 tenant_id, horizon_months[0], horizon_months[-1]
             )
+            pipeline: dict[date, Decimal] = {}
+            for deal in deals:
+                pipeline[deal.month] = pipeline.get(deal.month, Decimal("0")) + deal.adjusted
             pipeline_value = (
                 sum(pipeline.values(), Decimal("0")).quantize(
                     Decimal("0.0001"), rounding=ROUND_HALF_UP
@@ -72,6 +99,7 @@ class RevenueForecastService:
             )
         else:
             pipeline = {}
+        deals_by_month = _deal_list_by_month(deals)
 
         forecast = compute_forecast(monthly, pipeline=pipeline)
         months = [p.month for p in forecast.points]
@@ -100,6 +128,7 @@ class RevenueForecastService:
                     pipeline=p.pipeline,
                     lower_bound=p.lower_bound,
                     upper_bound=p.upper_bound,
+                    deals=[self._deal_response(deal) for deal in deals_by_month.get(p.month, [])],
                 )
                 for p in forecast.points
             ],
@@ -121,6 +150,14 @@ class RevenueForecastService:
                 history=history,
                 pipeline_value=None,
             )
+        # The per-deal decomposition is live (computed but not persisted): the
+        # stored aggregates are kept as-is, while the deals behind each month's
+        # pipeline uplift are re-read so the UI can show them.
+        deals_by_month = {}
+        if rows:
+            deals_by_month = _deal_list_by_month(
+                await self._repo.pipeline_deals(tenant_id, rows[0].month, rows[-1].month)
+            )
         return RevenueForecastResponse(
             model_version=rows[0].model_version,
             backtest_mape=rows[0].backtest_mape,
@@ -133,6 +170,7 @@ class RevenueForecastService:
                     pipeline=row.pipeline_uplift,
                     lower_bound=row.lower_bound,
                     upper_bound=row.upper_bound,
+                    deals=[self._deal_response(deal) for deal in deals_by_month.get(row.month, [])],
                 )
                 for row in rows
             ],
