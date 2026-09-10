@@ -6,9 +6,9 @@ of recognized revenue (abstaining - persisting nothing - when there is under
 3 months of history); ``read`` returns whatever is currently stored (weekly
 recompute and manual refresh keep it fresh). The pipeline uplift weights the
 tenant's open CRM opportunities at their conversion probability
-(``probability/100 x amount`` per closing month) and only shifts projected
-months - the backtest/MAPE/band stay invoice-based. Deal-health modulation
-remains an ai-agent cross-module dependency (no finance-consumable feed yet).
+(``probability/100 x amount`` per closing month, modulated by each deal's
+latest ai-agent deal-health rating) and only shifts projected months - the
+backtest/MAPE/band stay invoice-based.
 """
 
 from __future__ import annotations

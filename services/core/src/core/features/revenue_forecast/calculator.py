@@ -25,10 +25,11 @@ forecast-month -> expected revenue from open deals (weighted conversion value
 = per-deal ``probability/100 x amount``, bucketed by ``expected_close_date``).
 The uplift only touches the projected months - the backtest, MAPE, and sigma
 band are computed over historical months only, so pipeline data can never
-inflate the model's reported accuracy. Deal-health modulation (a
-green/yellow/red factor from the ai-agent's deal-health engine) remains a
-cross-module dependency: it needs a finance-consumable feed, which is not
-built yet.
+inflate the model's reported accuracy. The per-deal conversion weight may be
+modulated by the ai-agent's deal-health engine (:func:`deal_health_factor`):
+a green deal keeps its full weight, a yellow or red deal is discounted to its
+band factor, and the discount is blended toward neutral by low confidence (a
+cautious assessment never cuts a deal as hard as a confident one).
 All arithmetic is :class:`decimal.Decimal` so figures round-trip exactly
 through the SQL ``Numeric`` columns and the web UI.
 """
@@ -46,6 +47,15 @@ BACKTEST_MIN_POINTS = 3
 MIN_HISTORY_MONTHS = 3
 HORIZON_MONTHS = 12
 BAND_SIGMA_MULTIPLIER = Decimal("1.5")
+
+# Conversion-weight discount per deal-health band (SKY-82 A4): healthy deals
+# keep full weight; flagged deals are discounted by their band.
+# ``ai_deal_health.health`` is ``green | yellow | red`` (ai-agent schema).
+DEAL_HEALTH_FACTORS: dict[str, Decimal] = {
+    "green": Decimal("1.0000"),
+    "yellow": Decimal("0.7000"),
+    "red": Decimal("0.3500"),
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +91,25 @@ class Forecast:
 
 def _quantize(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def deal_health_factor(health: str | None, confidence: float | None) -> Decimal:
+    """Conversion-weight multiplier for one deal from its latest health rating.
+
+    A deal's weighted pipeline value is its conversion probability scaled by
+    this factor: green keeps the full weight (1.0), yellow is discounted to
+    ``DEAL_HEALTH_FACTORS`` and red further still. The band factor is blended
+    toward neutral by ``confidence`` - a rating the engine is unsure about
+    (low confidence) moves the multiplier back toward 1.0, so a cautious
+    assessment never cuts a deal as hard as a confident one. Deals with no
+    assessment yet keep their full weight.
+    """
+    band = DEAL_HEALTH_FACTORS.get(health or "", Decimal("1.0000"))
+    if confidence is None:
+        return band
+    clamped = max(0.0, min(1.0, confidence))
+    blended = 1 - (1 - float(band)) * clamped
+    return _quantize(Decimal(str(blended)))
 
 
 def month_step(month: date, offset_months: int) -> date:

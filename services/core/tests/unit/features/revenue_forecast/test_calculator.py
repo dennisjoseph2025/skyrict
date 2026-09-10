@@ -3,7 +3,8 @@
 The calculator is pure Decimal math - no DB. These pin the damped-trend +
 seasonal-echo model, the ±1.5 sigma band from walk-forward error, MAPE
 aggregation, the month-shift bookkeeping (including the calendar-year wrap),
-and the additive CRM pipeline uplift (SKY-82).
+the additive CRM pipeline uplift (SKY-82), and its per-deal health modulation
+(green/yellow/red band blended with the assessment's confidence).
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from core.features.revenue_forecast.calculator import (
     Backtest,
     MonthlyRevenue,
     compute_forecast,
+    deal_health_factor,
 )
 
 
@@ -213,3 +215,31 @@ def test_walk_forward_sample_grows_with_history() -> None:
     eight = compute_forecast(_flat_series(8))
     assert eight.backtest is not None
     assert eight.backtest.mape == Decimal("0.0000")
+
+
+def test_deal_health_factor_missing_or_unknown_keeps_full_weight() -> None:
+    assert deal_health_factor(None, None) == Decimal("1.0000")
+    assert deal_health_factor("green", None) == Decimal("1.0000")
+    assert deal_health_factor("turbo", 0.9) == Decimal("1.0000")
+
+
+def test_deal_health_factor_green_ignores_confidence() -> None:
+    assert deal_health_factor("green", 0.9) == Decimal("1.0000")
+    assert deal_health_factor("green", 0.0) == Decimal("1.0000")
+
+
+def test_deal_health_factor_yellow_and_red_blend_on_confidence() -> None:
+    # Full confidence -> the band discount applies as-is.
+    assert deal_health_factor("yellow", 1.0) == Decimal("0.7000")
+    assert deal_health_factor("red", 1.0) == Decimal("0.3500")
+    # Zero confidence -> treated as a cautious guess, keep full weight.
+    assert deal_health_factor("yellow", 0.0) == Decimal("1.0000")
+    assert deal_health_factor("red", 0.0) == Decimal("1.0000")
+    # Half confidence -> halfway between full weight and the band discount.
+    assert deal_health_factor("yellow", 0.5) == Decimal("0.8500")
+    assert deal_health_factor("red", 0.5) == Decimal("0.6750")
+
+
+def test_deal_health_factor_clamps_confidence_out_of_range() -> None:
+    assert deal_health_factor("red", 2.0) == Decimal("0.3500")
+    assert deal_health_factor("red", -1.0) == Decimal("1.0000")

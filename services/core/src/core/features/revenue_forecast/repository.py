@@ -7,24 +7,50 @@ forecast rows keyed on ``UNIQUE (tenant_id, month)`` - the recompute guard.
 Pipeline weighting reads the tenant's open CRM opportunities (same shared
 database, tenant-scoped) - weighted conversion value per closing month is
 ``probability/100 x amount`` of every non-terminal deal whose
-``expected_close_date`` lands in the forecast horizon.
+``expected_close_date`` lands in the forecast horizon, modulated by the deal's
+latest health assessment. ``ai_deal_health`` is owned by the ai-agent service
+but lives in the same shared database, so core reads it read-only (tenant-
+scoped by the same RLS GUC) and blends its green/yellow/red band with the
+assessment's confidence into the per-deal conversion weight. Deals the health
+engine has never assessed keep their full weight. If the table is absent (e.g.
+an environment where the ai-agent chain has not migrated yet), weighting
+degrades to the unmodulated ``probability/100 x amount`` baseline.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Column, DateTime, Float, MetaData, String, Table, func, select
+from sqlalchemy.dialects.postgresql import UUID, insert
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.domain.value_objects import InvoiceStatus, OpportunityStage
 from core.features.crm.models.opportunity import ErpCrmOpportunityModel
 from core.features.finance.models.invoice import ErpInvoiceModel
-from core.features.revenue_forecast.calculator import MonthlyRevenue
+from core.features.revenue_forecast.calculator import (
+    MonthlyRevenue,
+    deal_health_factor,
+)
 from core.features.revenue_forecast.models.forecast import ErpRevenueForecastModel
+
+logger = logging.getLogger(__name__)
+
+# ai-agent-owned deal-health feed (same shared DB, read-only in core). Read via
+# a local table definition so core never owns or migrates the table.
+_ai_deal_health = Table(
+    "ai_deal_health",
+    MetaData(),
+    Column("tenant_id", UUID(as_uuid=True)),
+    Column("opportunity_id", UUID(as_uuid=True)),
+    Column("health", String(16)),
+    Column("confidence", Float),
+    Column("computed_at", DateTime(timezone=True)),
+)
 
 
 class RevenueForecastRepository:
@@ -58,21 +84,22 @@ class RevenueForecastRepository:
 
         Every open (non-terminal) opportunity with an amount and an
         ``expected_close_date`` inside ``[from_month, to_month]`` contributes
-        ``probability/100 x amount`` to its closing month. Deals without an
-        amount or without an expected close date are ignored (they cannot be
-        value-weighted or bucketed honestly).
+        ``probability/100 x amount`` to its closing month, scaled by the deal's
+        latest health rating (:func:`deal_health_factor`): green keeps the full
+        weight, yellow/red discounts it, and the discount is blended toward
+        neutral by low assessment confidence. Deals without an amount or
+        without an expected close date are ignored (they cannot be
+        value-weighted or bucketed honestly). If the ai-agent's ``ai_deal_health``
+        table is unavailable, deals keep their unmodulated weight.
         """
         result = await self._db.execute(
             select(
+                ErpCrmOpportunityModel.id,
                 func.date_trunc("month", ErpCrmOpportunityModel.expected_close_date).label("month"),
-                func.coalesce(
-                    func.sum(
-                        ErpCrmOpportunityModel.amount * ErpCrmOpportunityModel.probability / 100
-                    ),
-                    0,
-                ).label("weighted"),
-            )
-            .where(
+                (ErpCrmOpportunityModel.amount * ErpCrmOpportunityModel.probability / 100).label(
+                    "weighted"
+                ),
+            ).where(
                 ErpCrmOpportunityModel.tenant_id == tenant_id,
                 ErpCrmOpportunityModel.stage.not_in((OpportunityStage.WON, OpportunityStage.LOST)),
                 ErpCrmOpportunityModel.amount.is_not(None),
@@ -80,10 +107,56 @@ class RevenueForecastRepository:
                 ErpCrmOpportunityModel.expected_close_date >= from_month,
                 ErpCrmOpportunityModel.expected_close_date <= to_month,
             )
-            .group_by("month")
-            .order_by("month")
         )
-        return {row.month.date(): Decimal(row.weighted) for row in result.all()}
+        rows = result.all()
+        if not rows:
+            return {}
+        factors = await self._deal_health_factors(tenant_id, [row.id for row in rows])
+        pipeline: dict[date, Decimal] = {}
+        for row in rows:
+            month = row.month.date()
+            pipeline[month] = pipeline.get(month, Decimal("0")) + Decimal(
+                row.weighted
+            ) * factors.get(row.id, Decimal("1.0000"))
+        return pipeline
+
+    async def _deal_health_factors(
+        self, tenant_id: uuid.UUID, opportunity_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, Decimal]:
+        """Latest health conversion factor per opportunity (missing -> full weight).
+
+        Reads the ai-agent-owned ``ai_deal_health`` table read-only, tenant-
+        scoped (explicit filter + the same RLS GUC core's session sets). For
+        each opportunity the most recently computed assessment wins. When the
+        table is absent (ai-agent chain not yet migrated in this environment),
+        every deal keeps its full weight and the forecast still computes.
+        """
+        if not opportunity_ids:
+            return {}
+        try:
+            result = await self._db.execute(
+                select(
+                    _ai_deal_health.c.opportunity_id,
+                    _ai_deal_health.c.health,
+                    _ai_deal_health.c.confidence,
+                )
+                .where(
+                    _ai_deal_health.c.tenant_id == tenant_id,
+                    _ai_deal_health.c.opportunity_id.in_(opportunity_ids),
+                )
+                .order_by(_ai_deal_health.c.computed_at.desc())
+            )
+        except ProgrammingError as exc:
+            logger.warning(
+                "revenue_forecast.pipeline.deal_health_unavailable: %s",
+                exc,
+            )
+            return {}
+        latest: dict[uuid.UUID, Decimal] = {}
+        for row in result.all():
+            if row.opportunity_id not in latest:
+                latest[row.opportunity_id] = deal_health_factor(row.health, row.confidence)
+        return latest
 
     async def replace_forecast(
         self,
