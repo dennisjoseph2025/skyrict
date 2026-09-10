@@ -74,6 +74,19 @@ class CoachingSuggestionRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_suggestion(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        suggestion_id: uuid.UUID,
+    ) -> AiCoachingSuggestionModel | None:
+        stmt = select(AiCoachingSuggestionModel).where(
+            AiCoachingSuggestionModel.tenant_id == tenant_id,
+            AiCoachingSuggestionModel.id == suggestion_id,
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_all_pending(
         self,
         *,
