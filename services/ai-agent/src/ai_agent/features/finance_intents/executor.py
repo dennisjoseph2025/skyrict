@@ -74,10 +74,7 @@ async def _ar_aging(*, gateway: FinanceGatewayPort, as_of: date) -> FinanceInten
     buckets = "; ".join(f"{bucket.bucket} {bucket.amount}" for bucket in ar.buckets)
     return FinanceIntentResult(
         intent="ar_aging",
-        answer=(
-            f"Accounts receivable total {ar.total_ar} as of {ar.as_of}. "
-            f"Buckets: {buckets}."
-        ),
+        answer=(f"Accounts receivable total {ar.total_ar} as of {ar.as_of}. Buckets: {buckets}."),
         endpoint=meta.endpoint,
         title=meta.title,
         rows=tuple(
@@ -110,16 +107,12 @@ async def _invoice_summary(
     )
 
 
-async def _trial_balance(
-    *, gateway: FinanceGatewayPort, as_of: date
-) -> FinanceIntentResult | None:
+async def _trial_balance(*, gateway: FinanceGatewayPort, as_of: date) -> FinanceIntentResult | None:
     tb = await gateway.get_trial_balance(as_of=as_of)
     if tb is None:
         return None
     meta = INTENT_META["trial_balance"]
-    lines = "; ".join(
-        f"{row.code} {row.name} {row.debit or row.credit}" for row in tb.rows[:5]
-    )
+    lines = "; ".join(f"{row.code} {row.name} {row.debit or row.credit}" for row in tb.rows[:5])
     answer = (
         f"Trial balance as of {tb.as_of}: total debits {tb.total_debit}, "
         f"total credits {tb.total_credit}."
