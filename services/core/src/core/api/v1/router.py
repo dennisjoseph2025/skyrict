@@ -18,6 +18,7 @@ from core.api.v1.routers.payroll_automation import router as payroll_automation_
 from core.api.v1.routers.portal import router as portal_router
 from core.features.ai.router import router as ai_router
 from core.features.ai_agents.router import router as ai_agents_router
+from core.features.ai_docs.router import router as ai_docs_router
 from core.features.ai_hr.router import router as ai_hr_router
 from core.features.crm.router import router as crm_router
 from core.features.crm.workspace_router import router as crm_workspace_router
@@ -49,3 +50,4 @@ api_router.include_router(sales_router)
 api_router.include_router(ai_router)
 api_router.include_router(ai_agents_router)
 api_router.include_router(ai_hr_router)
+api_router.include_router(ai_docs_router)

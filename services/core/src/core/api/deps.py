@@ -30,6 +30,7 @@ from skyrict_common.exceptions import AuthenticationError, PermissionDeniedError
 
 if TYPE_CHECKING:
     from core.core.audit_service import AuditService as CoreAuditService
+    from core.features.ai_docs.service import AiDocService
     from core.features.ai_hr.anomaly_service import AnomalyService
     from core.features.ai_hr.compliance_service import ComplianceService
     from core.features.ai_hr.eval_repository import EvalRunRepository
@@ -751,6 +752,22 @@ def get_finance_automation_service(
         audit=cast("AuditSink", AuditRepository(db)),
         customers=CrmRepository(db),
     )
+
+
+def get_ai_docs_service(
+    db: AsyncSession = Depends(get_db),
+    audit: CoreAuditService = Depends(get_core_audit_service),
+) -> AiDocService:
+    """Composition root for the AI document & tax suite (FIN-AI-004).
+
+    Shares the request-scoped session across the feature's repository and the
+    audit service so a generate + audit-log lands atomically in one
+    transaction.
+    """
+    from core.features.ai_docs.repository import AiDocRepository
+    from core.features.ai_docs.service import AiDocService
+
+    return AiDocService(repo=AiDocRepository(db), audit=audit)
 
 
 def get_finance_automation_service_with_ai(
