@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects.postgresql import UUID, VECTOR
+from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects.postgresql import UUID
 
 revision = "0018"
 down_revision = "0017"
@@ -54,7 +55,7 @@ def upgrade() -> None:
         ),
         sa.Column("extracted_text", sa.Text, nullable=True),
         sa.Column("ai_tags", sa.Text, nullable=True),
-        sa.Column("embedding", VECTOR(768), nullable=True),
+        sa.Column("embedding", Vector(768), nullable=True),
         sa.Column(
             "processing_status",
             sa.String(16),
