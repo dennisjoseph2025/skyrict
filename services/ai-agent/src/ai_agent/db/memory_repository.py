@@ -176,6 +176,31 @@ class MemoryRepository:
         )
         return list(result.scalars().all())
 
+    async def list_users_with_uncompacted_episodic(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        before: datetime,
+    ) -> list[uuid.UUID]:
+        """Distinct users holding uncompacted, unexpired rows older than ``before``.
+
+        The compaction scheduler enumerates the per-tenant work set with this
+        query instead of iterating the platform user directory - episodic rows
+        are the only source of truth for who actually has a pending fold.
+        """
+        result = await self._session.execute(
+            select(AiEpisodicMemoryModel.user_id)
+            .where(
+                AiEpisodicMemoryModel.tenant_id == tenant_id,
+                AiEpisodicMemoryModel.expires_at > datetime.now(UTC),
+                AiEpisodicMemoryModel.compacted_at.is_(None),
+                AiEpisodicMemoryModel.created_at < before,
+            )
+            .distinct()
+            .order_by(AiEpisodicMemoryModel.user_id)
+        )
+        return list(result.scalars().all())
+
     async def mark_episodic_compacted(
         self,
         *,

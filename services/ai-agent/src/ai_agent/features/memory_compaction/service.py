@@ -35,8 +35,9 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("ai_agent.memory_compaction")
 
 # Fold rows older than this many days (weekly job keeps the window wide so a
-# user's recent pre-roll context survives between runs).
-_COMPACTION_AGE_DAYS = 7
+# user's recent pre-roll context survives between runs). Public - the scheduled
+# pass in api/scheduled uses the same age to enumerate the per-tenant work set.
+COMPACTION_AGE_DAYS = 7
 # Per-user batch cap per job run (bounded work per pass).
 _BATCH_LIMIT = 50
 # Maximum number of distilled facts kept per batch.
@@ -93,7 +94,7 @@ class MemoryCompactionService:
         user_id: uuid.UUID,
     ) -> CompactionSummary:
         """Run one compaction pass for a user's older episodic rows."""
-        before = datetime.now(UTC) - timedelta(days=_COMPACTION_AGE_DAYS)
+        before = datetime.now(UTC) - timedelta(days=COMPACTION_AGE_DAYS)
         rows = await self._repo.list_uncompacted_episodic(
             tenant_id=tenant_id,
             user_id=user_id,

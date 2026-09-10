@@ -14,10 +14,11 @@ AI providers are intentionally absent from this gate - see api/readiness.py.
 Shutdown: closes the gate so probes drain the pod, then disposes the DB
 engine and the Redis pool.
 
-Background jobs (SKY-68): suggestion expiry, anomaly auto-close, and anomaly
-scan run as asyncio tasks started after provider init and cancelled on shutdown.
-The scan lives in api/scheduled (not core/jobs) because it orchestrates feature
-services; repository-only jobs stay in core/jobs.
+Background jobs (SKY-68/SKY-90): suggestion expiry, anomaly auto-close, anomaly
+scan, Audit Guardian weekly reports, and memory compaction run as asyncio tasks
+started after provider init and cancelled on shutdown. The orchestrating jobs
+live in api/scheduled (not core/jobs) because they compose feature services;
+repository-only jobs stay in core/jobs.
 """
 
 from __future__ import annotations
@@ -158,6 +159,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from ai_agent.api.scheduled.anomaly_scan import run_scheduled_anomaly_scan
     from ai_agent.api.scheduled.crm_follow_up_scan import run_crm_follow_up_scan
     from ai_agent.api.scheduled.deal_health_sweep import run_deal_health_sweep
+    from ai_agent.api.scheduled.guardian_report import run_scheduled_guardian_report
+    from ai_agent.api.scheduled.memory_compaction import run_scheduled_memory_compaction
     from ai_agent.core.jobs.anomaly_autoclose import run_anomaly_autoclose_job
     from ai_agent.core.jobs.suggestion_expiry import run_suggestion_expiry_job
 
@@ -166,6 +169,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     bg_tasks.append(asyncio.create_task(run_scheduled_anomaly_scan()))
     bg_tasks.append(asyncio.create_task(run_crm_follow_up_scan()))
     bg_tasks.append(asyncio.create_task(run_deal_health_sweep()))
+    bg_tasks.append(asyncio.create_task(run_scheduled_guardian_report(llm_router=llm_router)))
+    bg_tasks.append(asyncio.create_task(run_scheduled_memory_compaction(llm_router=llm_router)))
     logger.info("background_jobs.started", count=len(bg_tasks))
 
     # Graceful shutdown: uvicorn owns SIGTERM/SIGINT handling; on signal it
