@@ -415,6 +415,17 @@ async def proxy_crm_deal_health(
     return await _proxy(request, client, f"/api/v1/ai/crm/opportunities/{opportunity_id}/health")
 
 
+@router.post("/crm/opportunities/sweep")
+async def proxy_crm_deal_health_sweep(
+    request: Request,
+    _invoke: _InvokeDep,
+    _crm_read: _CrmReadDep,
+    client: _ClientDep,
+) -> Response:
+    """Recheck deal health for all open opportunities -> ai-agent /api/v1/ai/crm/opportunities/sweep."""
+    return await _proxy(request, client, "/api/v1/ai/crm/opportunities/sweep")
+
+
 # --- NL report builder (SKY-80) ---------------------------------------------
 
 # generate builds a preview from report definitions the caller can already
