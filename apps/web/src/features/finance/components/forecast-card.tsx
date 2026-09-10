@@ -30,9 +30,9 @@ import {
     refreshRevenueForecast,
     type RevenueForecast,
 } from "@/lib/api/finance-api";
+import { sweepDealHealth } from "@/lib/api/crm-ai-api";
 import { formatMoney } from "@/lib/finance/format";
 import { WidgetCard } from "@/features/finance/components/automation-widgets";
-import { listOpportunities } from "@/lib/api/crm-api";
 
 type Status =
     | { state: "loading" }
@@ -62,59 +62,21 @@ function dateLabel(value: string): string {
     });
 }
 
-interface ForecastDeal {
-    id: string;
-    name: string;
-    amount: number;
-    probability: number;
-    expectedClose: string;
-    weighted: number;
-}
+// Deal-health band styling, mirroring the ai-agent health engine's green /
+// yellow / red output. Unassessed deals render in a neutral colour.
+const HEALTH_DOT: Record<string, { className: string; label: string }> = {
+    green: { className: "bg-emerald-500", label: "Healthy" },
+    yellow: { className: "bg-yellow-500", label: "At risk" },
+    red: { className: "bg-red-500", label: "Critical" },
+};
 
-const OPEN_STAGES = new Set([
-    "prospecting",
-    "qualified",
-    "proposal",
-    "negotiation",
-]);
+const HEALTH_NEUTRAL = {
+    className: "bg-muted-foreground/50",
+    label: "Not assessed",
+};
 
-// Mirrors the core forecast rule: an open deal with an amount and an expected
-// close date contributes probability/100 x amount to its closing month.
-// Deals without those fields are ignored.
-function groupDealsByMonth(
-    opportunities: {
-        id: string;
-        name: string;
-        stage: string;
-        amount: string | null;
-        probability: number;
-        expectedCloseDate: string | null;
-    }[],
-): Map<string, ForecastDeal[]> {
-    const byMonth = new Map<string, ForecastDeal[]>();
-    for (const opportunity of opportunities) {
-        if (
-            !OPEN_STAGES.has(opportunity.stage) ||
-            opportunity.amount == null ||
-            opportunity.expectedCloseDate == null
-        )
-            continue;
-        const amount = Number(opportunity.amount);
-        if (!Number.isFinite(amount)) continue;
-        const key = opportunity.expectedCloseDate.slice(0, 7);
-        const deals = byMonth.get(key);
-        const deal = {
-            id: opportunity.id,
-            name: opportunity.name,
-            amount,
-            probability: opportunity.probability,
-            expectedClose: opportunity.expectedCloseDate,
-            weighted: (amount * opportunity.probability) / 100,
-        };
-        if (deals) deals.push(deal);
-        else byMonth.set(key, [deal]);
-    }
-    return byMonth;
+function healthOf(health: string | null): { className: string; label: string } {
+    return health ? (HEALTH_DOT[health] ?? HEALTH_NEUTRAL) : HEALTH_NEUTRAL;
 }
 
 const axisTick = {
@@ -293,31 +255,17 @@ function ForecastExplainerDialog({
         null,
     );
     const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-    const [dealsByMonth, setDealsByMonth] = useState<
-        Map<string, ForecastDeal[]>
-    >(new Map());
-
-    useEffect(() => {
-        let cancelled = false;
-        listOpportunities({ limit: 200 })
-            .then(({ data }) => {
-                if (cancelled) return;
-                setDealsByMonth(groupDealsByMonth(data));
-            })
-            .catch(() => undefined);
-        return () => {
-            cancelled = true;
-        };
-    }, []);
 
     const active =
         points.find((point) => point.month === selectedMonth) ??
         biggest ??
         points[0] ??
         null;
-    const activeDeals = active
-        ? (dealsByMonth.get(active.month.slice(0, 7)) ?? [])
-        : [];
+    const activeDeals = active?.deals ?? [];
+    const dealsTotal = activeDeals.reduce(
+        (sum, deal) => sum + (deal.adjusted ?? 0),
+        0,
+    );
 
     const mape =
         forecast?.backtest_mape != null ? Number(forecast.backtest_mape) : null;
@@ -362,8 +310,10 @@ function ForecastExplainerDialog({
                             Deals your team is still working on — before they’ve
                             been won or lost. Each deal counts at its chance of
                             closing: a $100,000 deal with a 60% chance adds
-                            $60,000. Deals without an amount or a closing date
-                            are left out.
+                            $60,000. An AI health check watches each deal — a
+                            green deal counts in full, while a yellow or red
+                            deal is counted at a reduced value. Deals without an
+                            amount or a closing date are left out.
                         </IngredientCard>
                     </div>
 
@@ -422,41 +372,77 @@ function ForecastExplainerDialog({
                             </div>
                             {activeDeals.length > 0 ? (
                                 <div className="mt-3 border-t border-border/70 pt-3">
-                                    <h5 className="mb-2 text-xs font-semibold text-foreground uppercase">
-                                        Which deals, and when
-                                    </h5>
+                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                                        <h5 className="text-xs font-semibold text-foreground uppercase">
+                                            Which deals, and when
+                                        </h5>
+                                        <span className="text-[11px] text-muted-foreground">
+                                            Yellow/red deals count at a reduced
+                                            value
+                                        </span>
+                                    </div>
                                     <ul className="space-y-2">
-                                        {activeDeals.map((deal) => (
-                                            <li
-                                                key={deal.id}
-                                                className="flex items-baseline justify-between gap-3 text-sm"
-                                            >
-                                                <span className="min-w-0">
-                                                    <span className="block truncate font-medium text-foreground">
-                                                        {deal.name}
+                                        {activeDeals.map((deal) => {
+                                            const health = healthOf(
+                                                deal.health,
+                                            );
+                                            const scored = deal.factor !== 1;
+                                            return (
+                                                <li
+                                                    key={deal.id}
+                                                    className="flex items-baseline gap-3 text-sm"
+                                                >
+                                                    <span
+                                                        aria-hidden="true"
+                                                        title={health.label}
+                                                        className={`mt-1.5 size-2 shrink-0 rounded-full ${health.className}`}
+                                                    />
+                                                    <span className="flex min-w-0 flex-1 items-baseline justify-between gap-3">
+                                                        <span className="min-w-0">
+                                                            <span className="block truncate font-medium text-foreground">
+                                                                {deal.name}
+                                                            </span>
+                                                            <span className="block text-xs text-muted-foreground">
+                                                                Expected{" "}
+                                                                {dateLabel(
+                                                                    deal.expected_close_date,
+                                                                )}{" "}
+                                                                ·{" "}
+                                                                {deal.amount !=
+                                                                null
+                                                                    ? formatMoney(
+                                                                          deal.amount,
+                                                                      )
+                                                                    : "—"}{" "}
+                                                                ×{" "}
+                                                                {
+                                                                    deal.probability
+                                                                }
+                                                                %
+                                                                {scored
+                                                                    ? ` · counted at ${(
+                                                                          deal.factor *
+                                                                          100
+                                                                      ).toFixed(
+                                                                          0,
+                                                                      )}%`
+                                                                    : ""}
+                                                            </span>
+                                                        </span>
+                                                        <span className="shrink-0 font-semibold text-foreground tabular-nums">
+                                                            +
+                                                            {formatMoney(
+                                                                deal.adjusted,
+                                                            )}
+                                                        </span>
                                                     </span>
-                                                    <span className="block text-xs text-muted-foreground">
-                                                        Expected{" "}
-                                                        {dateLabel(
-                                                            deal.expectedClose,
-                                                        )}{" "}
-                                                        ·{" "}
-                                                        {formatMoney(
-                                                            deal.amount,
-                                                        )}{" "}
-                                                        × {deal.probability}%
-                                                    </span>
-                                                </span>
-                                                <span className="shrink-0 font-semibold text-foreground tabular-nums">
-                                                    +
-                                                    {formatMoney(deal.weighted)}
-                                                </span>
-                                            </li>
-                                        ))}
+                                                </li>
+                                            );
+                                        })}
                                     </ul>
                                     <p className="mt-2 text-xs text-muted-foreground">
                                         These {activeDeals.length} deals add up
-                                        to +{formatMoney(active.pipeline)}.
+                                        to +{formatMoney(dealsTotal)}.
                                     </p>
                                 </div>
                             ) : null}
@@ -542,6 +528,128 @@ function ForecastExplainerDialog({
                 </div>
             </DialogContent>
         </Dialog>
+    );
+}
+
+// Deal-health markers on the card itself, aggregated across the horizon. The
+// counts come from the per-deal health ratings the backend attaches to each
+// forecast month; without them (old backend payload) the strip stays hidden.
+const HEALTH_BAND_COLOR: Record<string, string> = {
+    green: "#22c55e",
+    yellow: "#eab308",
+    red: "#ef4444",
+};
+
+function dealHealthSummary(forecast: RevenueForecast | null): {
+    total: number;
+    healthy: number;
+    atRisk: number;
+    critical: number;
+    unassessed: number;
+} {
+    const summary = {
+        total: 0,
+        healthy: 0,
+        atRisk: 0,
+        critical: 0,
+        unassessed: 0,
+    };
+    for (const point of forecast?.points ?? []) {
+        for (const deal of point.deals ?? []) {
+            summary.total += 1;
+            if (deal.health === "green") summary.healthy += 1;
+            else if (deal.health === "yellow") summary.atRisk += 1;
+            else if (deal.health === "red") summary.critical += 1;
+            else summary.unassessed += 1;
+        }
+    }
+    return summary;
+}
+
+function DealHealthStrip({
+    forecast,
+    checker,
+}: {
+    forecast: RevenueForecast | null;
+    checker?: () => Promise<void>;
+}) {
+    const health = dealHealthSummary(forecast);
+    const [checking, setChecking] = useState(false);
+    const [checkError, setCheckError] = useState<string | null>(null);
+    if (health.total === 0) return null;
+
+    const runCheck = async () => {
+        setChecking(true);
+        setCheckError(null);
+        try {
+            await checker?.();
+        } catch (error) {
+            setCheckError(
+                error instanceof ApiError
+                    ? error.message
+                    : "Could not check deals.",
+            );
+        } finally {
+            setChecking(false);
+        }
+    };
+
+    return (
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Deal health</span>
+            <LegendChip
+                swatch="dot"
+                color={HEALTH_BAND_COLOR.green}
+                label={`${health.healthy} healthy`}
+            />
+            {health.atRisk > 0 ? (
+                <LegendChip
+                    swatch="dot"
+                    color={HEALTH_BAND_COLOR.yellow}
+                    label={`${health.atRisk} at risk`}
+                />
+            ) : null}
+            {health.critical > 0 ? (
+                <LegendChip
+                    swatch="dot"
+                    color={HEALTH_BAND_COLOR.red}
+                    label={`${health.critical} critical`}
+                />
+            ) : null}
+            {health.unassessed > 0 ? (
+                <LegendChip
+                    swatch="dot"
+                    color="var(--muted-foreground)"
+                    label={`${health.unassessed} not checked`}
+                />
+            ) : null}
+            <span>Flagged deals count at a reduced value</span>
+            {checker ? (
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto h-6 px-2 text-xs"
+                    onClick={() => void runCheck()}
+                    disabled={checking}
+                    aria-label="Check deal health now"
+                >
+                    {checking ? (
+                        <Loader2
+                            aria-hidden="true"
+                            className="mr-1 size-3 animate-spin"
+                        />
+                    ) : (
+                        <RefreshCw aria-hidden="true" className="mr-1 size-3" />
+                    )}
+                    Check deals
+                </Button>
+            ) : null}
+            {checkError ? (
+                <span className="basis-full text-destructive">
+                    {checkError}
+                </span>
+            ) : null}
+        </div>
     );
 }
 
@@ -710,6 +818,13 @@ export function RevenueForecastCard({ canRefresh }: { canRefresh: boolean }) {
             ) : (
                 <>
                     <AccuracySummary forecast={forecast} />
+                    <DealHealthStrip
+                        forecast={forecast}
+                        checker={async () => {
+                            await sweepDealHealth();
+                            await load();
+                        }}
+                    />
                     {biggestMonthCallout(forecast) ? (
                         <p className="mb-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm font-medium leading-relaxed text-foreground">
                             {biggestMonthCallout(forecast)}
