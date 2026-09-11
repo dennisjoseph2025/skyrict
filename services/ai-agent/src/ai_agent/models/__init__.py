@@ -24,6 +24,7 @@ from ai_agent.models.ai_audit_log import AiAuditLogModel
 from ai_agent.models.ai_coaching_suggestion import AiCoachingSuggestionModel
 from ai_agent.models.ai_conversation import AiConversation
 from ai_agent.models.ai_conversation_message import AiConversationMessage
+from ai_agent.models.ai_crm_anomaly import AiCrmAnomalyModel
 from ai_agent.models.ai_deal_health import AiDealHealthModel
 from ai_agent.models.ai_digest import AiDigestModel
 from ai_agent.models.ai_document_embeddings import AiDocumentEmbeddingModel
@@ -63,6 +64,7 @@ __all__ = [
     "AiCoachingSuggestionModel",
     "AiConversation",
     "AiConversationMessage",
+    "AiCrmAnomalyModel",
     "AiDealHealthModel",
     "AiDigestModel",
     "AiDocumentEmbeddingModel",
