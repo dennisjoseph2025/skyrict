@@ -207,7 +207,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0049", f"head is {version}, expected 0049"
+            assert version == "0050", f"head is {version}, expected 0050"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -1043,6 +1043,34 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                     )
                 ).scalar_one_or_none()
                 assert perm_row is not None, f"0048 must register {perm_key}"
+
+            # 0050: CRM transcript ingestion (SKY-91) - erp_crm_activities gets
+            # a nullable TEXT transcript column (nullable so existing rows and
+            # non-AI updates are unaffected; AI never writes analysis onto
+            # CRM rows, it lives in ai-agent's ai_transcript_analyses).
+            transcript_col = (
+                await conn.execute(
+                    text(
+                        "SELECT data_type FROM information_schema.columns "
+                        "WHERE table_schema = 'public' "
+                        "AND table_name = 'erp_crm_activities' "
+                        "AND column_name = 'transcript_text'"
+                    )
+                )
+            ).one_or_none()
+            assert transcript_col is not None, "0050 must add transcript_text"
+            assert transcript_col[0] == "text", transcript_col
+            transcript_nullable = (
+                await conn.execute(
+                    text(
+                        "SELECT is_nullable FROM information_schema.columns "
+                        "WHERE table_schema = 'public' "
+                        "AND table_name = 'erp_crm_activities' "
+                        "AND column_name = 'transcript_text'"
+                    )
+                )
+            ).scalar_one()
+            assert transcript_nullable == "YES", "0050 transcript_text must be nullable"
     finally:
         await engine.dispose()
 
