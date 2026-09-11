@@ -50,6 +50,10 @@ from core.features.revenue_forecast.models.forecast import ErpRevenueForecastMod
 
 logger = logging.getLogger(__name__)
 
+# Reported once per process: a core-only database (ai-agent chain not migrated)
+# must not emit a warning on every forecast recompute.
+_deal_health_absent_logged = False
+
 # ai-agent-owned deal-health feed (same shared DB, read-only in core). Read via
 # a local table definition so core never owns or migrates the table.
 _ai_deal_health = Table(
@@ -243,6 +247,8 @@ class RevenueForecastRepository:
         """
         if not opportunity_ids:
             return {}
+        if not await self._deal_health_table_present():
+            return {}
         try:
             result = await self._db.execute(
                 select(
@@ -256,17 +262,36 @@ class RevenueForecastRepository:
                 )
                 .order_by(_ai_deal_health.c.computed_at.desc())
             )
-        except ProgrammingError as exc:
-            logger.warning(
-                "revenue_forecast.pipeline.deal_health_unavailable: %s",
-                exc,
-            )
+        except ProgrammingError:
+            # Defensive: the table could be dropped between the probe and the
+            # query. A failed statement aborts the Postgres transaction, so the
+            # session MUST be rolled back before any later query in this request
+            # can run - otherwise it dies with InFailedSQLTransactionError.
+            await self._db.rollback()
             return {}
         latest: dict[uuid.UUID, tuple[str | None, float | None]] = {}
         for row in result.all():
             if row.opportunity_id not in latest:
                 latest[row.opportunity_id] = (row.health, row.confidence)
         return latest
+
+    async def _deal_health_table_present(self) -> bool:
+        """Whether the ai-agent's ``ai_deal_health`` relation exists.
+
+        ``to_regclass`` returns NULL for a missing relation instead of raising,
+        so a core-only database neither aborts the read transaction nor writes
+        an ERROR line to the Postgres log on every forecast call.
+        """
+        global _deal_health_absent_logged
+        result = await self._db.execute(select(func.to_regclass("ai_deal_health")))
+        present = result.scalar() is not None
+        if not present and not _deal_health_absent_logged:
+            logger.info(
+                "revenue_forecast.pipeline.deal_health_absent: ai_deal_health is "
+                "not migrated; deal weighting stays unmodulated"
+            )
+            _deal_health_absent_logged = True
+        return present
 
     async def replace_forecast(
         self,
