@@ -30,7 +30,7 @@ from core.core.audit_events import (
     FINANCE_AI_TAX_SUMMARY_REJECTED,
 )
 from core.core.audit_service import AuditService
-from core.core.exceptions import AiServiceUnavailableError, NotFoundError
+from core.core.exceptions import AiServiceUnavailableError, NotFoundError, ValidationError
 from core.features.ai_docs import ai_client as ai_client_mod
 from core.features.ai_docs import pdf_renderer, schemas, text_renderer
 from core.features.ai_docs.models.ai_doc import ErpAiDocModel
@@ -64,6 +64,10 @@ class AiDocService:
         entries = await self._repo.posted_entries_snapshot(
             tenant_id, period.start_date, period.end_date
         )
+        if not entries:
+            raise ValidationError(
+                f"Fiscal period '{period.name}' has no posted entries to summarize"
+            )
         period_info = {
             "id": str(period.id),
             "name": period.name,

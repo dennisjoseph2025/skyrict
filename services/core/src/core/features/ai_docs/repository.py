@@ -8,6 +8,7 @@ models; the service maps them to the response schemas.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -97,7 +98,8 @@ class AiDocRepository:
             entry["amount"] = sum(
                 (line["debit"] or 0) - (line["credit"] or 0) for line in entry["lines"]
             )
-        return entries
+        # json round-trip ensures UUID/datetime/Decimal are stringified for JSONB storage
+        return json.loads(json.dumps(entries, default=str))
 
     # ------------------------------------------------------------------ A6
     async def next_doc_version(

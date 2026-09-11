@@ -28,6 +28,8 @@ import {
     downloadFinanceDoc,
     generateFinanceDoc,
     generateTaxSummary,
+    getBalanceSheet,
+    getProfitAndLoss,
     listFinanceDocs,
     listFiscalPeriods,
     listTaxSummaries,
@@ -58,6 +60,9 @@ import {
     FinanceEmptyState,
     FinanceErrorState,
 } from "@/features/finance/components/state-cards";
+
+// Strip redundant card styling when rendering inside WidgetCard
+const NESTED_CARD = "border-0 bg-transparent rounded-none";
 
 // ---------------------------------------------------------------------------
 // Shared loading / error primitives for the four widgets
@@ -92,6 +97,11 @@ function WidgetCard({
             <div className="p-4">{children}</div>
         </section>
     );
+}
+
+function defaultPeriodId(periods: FiscalPeriod[]): string {
+    const closed = [...periods].reverse().find((period) => period.is_closed);
+    return (closed ?? periods[0])?.id ?? "";
 }
 
 function useBusyError() {
@@ -158,11 +168,7 @@ function ActionButton({
 // A5: tax summary
 // ---------------------------------------------------------------------------
 
-function TaxSummaryWidget({
-    canApprove,
-}: {
-    canApprove: boolean;
-}) {
+function TaxSummaryWidget({ canApprove }: { canApprove: boolean }) {
     const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
     const [summaries, setSummaries] = useState<TaxSummary[]>([]);
     const [periodId, setPeriodId] = useState("");
@@ -182,7 +188,7 @@ function TaxSummaryWidget({
             setPeriodId((current) =>
                 current && periodsData.some((p) => p.id === current)
                     ? current
-                    : (periodsData[0]?.id ?? ""),
+                    : defaultPeriodId(periodsData),
             );
         } catch (caught) {
             setError(
@@ -294,14 +300,18 @@ function TaxSummaryWidget({
                         busy={false}
                         label="Approve"
                         icon={FileCheck2}
-                        onClick={() => void setStatus(summary.id, approveTaxSummary)}
+                        onClick={() =>
+                            void setStatus(summary.id, approveTaxSummary)
+                        }
                     />
                     <ActionButton
                         busy={false}
                         label="Reject"
                         icon={X}
                         variant="default"
-                        onClick={() => void setStatus(summary.id, rejectTaxSummary)}
+                        onClick={() =>
+                            void setStatus(summary.id, rejectTaxSummary)
+                        }
                     />
                 </div>
             ) : null,
@@ -327,7 +337,10 @@ function TaxSummaryWidget({
                             </SelectTrigger>
                             <SelectContent>
                                 {periods.map((period) => (
-                                    <SelectItem key={period.id} value={period.id}>
+                                    <SelectItem
+                                        key={period.id}
+                                        value={period.id}
+                                    >
                                         {period.name}
                                     </SelectItem>
                                 ))}
@@ -343,16 +356,23 @@ function TaxSummaryWidget({
                     />
                 </div>
 
-                {error ? <FinanceErrorState message={error} /> : null}
+                {error ? (
+                    <FinanceErrorState
+                        className={NESTED_CARD}
+                        message={error}
+                    />
+                ) : null}
 
                 {summaries.length === 0 ? (
                     <FinanceEmptyState
+                        className={NESTED_CARD}
                         icon={FileText}
                         title="No tax summaries yet"
                         description="Generate one for a fiscal period to get per-category tax lines."
                     />
                 ) : (
                     <FinanceTable
+                        className={NESTED_CARD}
                         columns={[...columns, actionColumn]}
                         rows={summaries}
                         getKey={(summary) => summary.id}
@@ -371,6 +391,8 @@ function TaxSummaryWidget({
 
 function DocPacksWidget({ canApprove }: { canApprove: boolean }) {
     const [docs, setDocs] = useState<AiDoc[]>([]);
+    const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
+    const [periodId, setPeriodId] = useState("");
     const [docType, setDocType] = useState<"pnl" | "balance_sheet">("pnl");
     const [generating, setGenerating] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -379,7 +401,17 @@ function DocPacksWidget({ canApprove }: { canApprove: boolean }) {
     const load = useCallback(async () => {
         setLoadState("loading");
         try {
-            setDocs(await listFinanceDocs());
+            const [docsData, periodsData] = await Promise.all([
+                listFinanceDocs(),
+                listFiscalPeriods(),
+            ]);
+            setDocs(docsData);
+            setPeriods(periodsData);
+            setPeriodId((current) =>
+                current && periodsData.some((p) => p.id === current)
+                    ? current
+                    : defaultPeriodId(periodsData),
+            );
         } catch (caught) {
             setError(
                 caught instanceof ApiError
@@ -396,15 +428,32 @@ function DocPacksWidget({ canApprove }: { canApprove: boolean }) {
     }, [load]);
 
     async function generate() {
+        if (!periodId) return;
         setGenerating(true);
         setError(null);
         try {
-            // ponytail: snapshot_id/snapshot_data stubbed - wire a real ledger
-            // snapshot source when the P&L/BS snapshot feature lands.
+            const period = periods.find(
+                (candidate) => candidate.id === periodId,
+            );
+            if (!period) {
+                throw new ApiError(400, "Select a fiscal period first.");
+            }
+            const report = (docType === "pnl"
+                ? await getProfitAndLoss(period.start_date, period.end_date)
+                : await getBalanceSheet(period.end_date)) as unknown as Record<
+                string,
+                unknown
+            >;
+            const snapshot_data: Record<string, unknown> = {
+                period: period.name,
+                from_date: period.start_date,
+                to_date: period.end_date,
+                ...report,
+            };
             const created = await generateFinanceDoc({
                 doc_type: docType,
-                snapshot_id: crypto.randomUUID(),
-                snapshot_data: {},
+                snapshot_id: period.id,
+                snapshot_data,
             });
             setDocs((current) => [created, ...current]);
         } catch (caught) {
@@ -464,6 +513,12 @@ function DocPacksWidget({ canApprove }: { canApprove: boolean }) {
             label: "Type",
             render: (doc) =>
                 doc.doc_type === "pnl" ? "Profit & Loss" : "Balance Sheet",
+        },
+        {
+            label: "Fiscal period",
+            render: (doc) =>
+                periods.find((period) => period.id === doc.snapshot_id)?.name ??
+                "Unknown",
         },
         { label: "Version", render: (doc) => `v${doc.version}` },
         {
@@ -526,6 +581,28 @@ function DocPacksWidget({ canApprove }: { canApprove: boolean }) {
             <div className="space-y-4">
                 <div className="flex flex-wrap items-end gap-3">
                     <div className="space-y-1.5">
+                        <Label htmlFor="doc-period">Fiscal period</Label>
+                        <Select
+                            value={periodId}
+                            onValueChange={setPeriodId}
+                            disabled={generating}
+                        >
+                            <SelectTrigger id="doc-period" className="w-64">
+                                <SelectValue placeholder="Select a period" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {periods.map((period) => (
+                                    <SelectItem
+                                        key={period.id}
+                                        value={period.id}
+                                    >
+                                        {period.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-1.5">
                         <Label htmlFor="doc-type">Document type</Label>
                         <Select
                             value={docType}
@@ -556,16 +633,23 @@ function DocPacksWidget({ canApprove }: { canApprove: boolean }) {
                     />
                 </div>
 
-                {error ? <FinanceErrorState message={error} /> : null}
+                {error ? (
+                    <FinanceErrorState
+                        className={NESTED_CARD}
+                        message={error}
+                    />
+                ) : null}
 
                 {docs.length === 0 ? (
                     <FinanceEmptyState
+                        className={NESTED_CARD}
                         icon={BookOpen}
                         title="No document packs yet"
                         description="Generate a P&L or balance sheet PDF to review and approve."
                     />
                 ) : (
                     <FinanceTable
+                        className={NESTED_CARD}
                         columns={columns}
                         rows={docs}
                         getKey={(doc) => doc.id}
@@ -636,7 +720,12 @@ function AuditNarrationWidget() {
                     />
                 </div>
 
-                {error ? <FinanceErrorState message={error} /> : null}
+                {error ? (
+                    <FinanceErrorState
+                        className={NESTED_CARD}
+                        message={error}
+                    />
+                ) : null}
 
                 {narration ? (
                     <div className="space-y-3">
@@ -677,7 +766,8 @@ function AuditNarrationWidget() {
                                             </p>
                                             {risk.entry_id ? (
                                                 <p className="text-[11px] text-muted-foreground">
-                                                    Entry {risk.entry_id.slice(0, 8)}
+                                                    Entry{" "}
+                                                    {risk.entry_id.slice(0, 8)}
                                                 </p>
                                             ) : null}
                                         </div>
@@ -704,11 +794,14 @@ function AuditNarrationWidget() {
 function DocQaWidget() {
     const [question, setQuestion] = useState("");
     const [answer, setAnswer] = useState<DocQaAnswer | null>(null);
-    const { busy, error, run } = useBusyError();
+    const { busy, error, run, setError } = useBusyError();
 
     async function ask() {
         const trimmed = question.trim();
-        if (trimmed.length < 3) return;
+        if (trimmed.length < 3) {
+            setError("Enter at least 3 characters to ask a question.");
+            return;
+        }
         await run(async () => {
             setAnswer(await askFinanceDocs(trimmed));
         });
@@ -740,7 +833,12 @@ function DocQaWidget() {
                     onClick={() => void ask()}
                 />
 
-                {error ? <FinanceErrorState message={error} /> : null}
+                {error ? (
+                    <FinanceErrorState
+                        className={NESTED_CARD}
+                        message={error}
+                    />
+                ) : null}
 
                 {answer ? (
                     <div className="space-y-3">
@@ -797,14 +895,10 @@ export function FinanceAiDocs() {
                 description="AI-generated tax summaries, finance document packs, audit narration, and grounded document Q&A."
                 icon={Sparkles}
             />
-            <div className="grid gap-6 lg:grid-cols-2">
-                <TaxSummaryWidget canApprove={canApprove} />
-                <DocPacksWidget canApprove={canApprove} />
-            </div>
-            <div className="grid gap-6 lg:grid-cols-2">
-                <AuditNarrationWidget />
-                <DocQaWidget />
-            </div>
+            <TaxSummaryWidget canApprove={canApprove} />
+            <DocPacksWidget canApprove={canApprove} />
+            <AuditNarrationWidget />
+            <DocQaWidget />
         </div>
     );
 }
