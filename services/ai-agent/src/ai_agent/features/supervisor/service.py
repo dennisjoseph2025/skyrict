@@ -28,14 +28,18 @@ from ai_agent.core.exceptions import AiUnavailableError
 from ai_agent.core.providers import LlmRequest
 from ai_agent.features.attachments.processor import ProcessedAttachments, process_attachments
 from ai_agent.features.supervisor.delegates import (
+    AuditGuardianDelegator,
+    CoachSuggestionPort,
     CrmAssistantDelegator,
     Delegator,
     FinanceDelegator,
     ForecastPort,
+    GuardianReportPort,
     HrCopilotDelegator,
     HrCopilotPort,
     InventoryMonitorDelegator,
     RagSearchPort,
+    SalesCoachDelegator,
 )
 from ai_agent.features.supervisor.prompts import (
     ABSTENTION,
@@ -46,11 +50,13 @@ from ai_agent.features.supervisor.prompts import (
     not_provisioned_message,
 )
 from ai_agent.features.supervisor.schemas import (
+    AGENT_AUDIT_GUARDIAN,
     AGENT_CRM,
     AGENT_DISPLAY_NAMES,
     AGENT_FINANCE,
     AGENT_HR,
     AGENT_INVENTORY,
+    AGENT_SALES_COACH,
     AgentStartEvent,
     Citation,
     CitationsEvent,
@@ -128,6 +134,31 @@ _KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "accounting",
         ),
     ),
+    (
+        AGENT_SALES_COACH,
+        (
+            "coach",
+            "coaching",
+            "suggestion",
+            "follow up",
+            "follow-up",
+            "deal strategy",
+            "pipeline review",
+            "sales tips",
+            "improve my sales",
+        ),
+    ),
+    (
+        AGENT_AUDIT_GUARDIAN,
+        (
+            "audit",
+            "guardian",
+            "flagged",
+            "security finding",
+            "integrity report",
+            "suspicious activity",
+        ),
+    ),
 )
 
 
@@ -154,6 +185,8 @@ class SupervisorService:
         finance_gateway_factory: Callable[[], Awaitable[FinanceGatewayPort]] | None = None,
         memory_service: MemoryService | None = None,
         forecast: ForecastPort | None = None,
+        coach_suggestions: CoachSuggestionPort | None = None,
+        guardian_reports: GuardianReportPort | None = None,
         conversation_history: ConversationHistoryPort | None = None,
         provisioned: Mapping[str, bool],
         confidence_threshold: float = 0.75,
@@ -183,6 +216,16 @@ class SupervisorService:
             delegates[AGENT_FINANCE] = FinanceDelegator(
                 llm_router=llm_router,
                 finance_gateway_factory=finance_gateway_factory,
+            )
+        if coach_suggestions is not None:
+            delegates[AGENT_SALES_COACH] = SalesCoachDelegator(
+                llm_router=llm_router,
+                suggestions=coach_suggestions,
+            )
+        if guardian_reports is not None:
+            delegates[AGENT_AUDIT_GUARDIAN] = AuditGuardianDelegator(
+                llm_router=llm_router,
+                guardian_reports=guardian_reports,
             )
         self._delegates = delegates
 

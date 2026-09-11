@@ -11,8 +11,8 @@ Adds the two persistence tables behind the finance AI document features:
   ``snapshot`` of accounts + journal lines (and the report ``snapshot_id``)
   they were built from so a reviewer can trace the draft to its source.
 
-Revision ID: 0048
-Revises: 0047
+Revision ID: 0050
+Revises: 0049
 Create Date: 2026-09-10
 """
 
@@ -22,8 +22,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision = "0048"
-down_revision = "0047"
+revision = "0050"
+down_revision = "0049"
 branch_labels = None
 depends_on = None
 
