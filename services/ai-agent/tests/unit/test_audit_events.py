@@ -21,6 +21,9 @@ from ai_agent.core.audit_events import (
     AI_COACHING_SUGGESTION_CREATED,
     AI_COACHING_SUGGESTION_DISMISSED,
     AI_COACHING_SUGGESTION_VIEWED,
+    AI_CRM_ANOMALY_DETECTED,
+    AI_CRM_ANOMALY_DISMISSED,
+    AI_CRM_ANOMALY_RESOLVED,
     AI_DEAL_HEALTH_ASSESSED,
     AI_FOLLOW_UP_APPLIED,
     AI_FOLLOW_UP_DISMISSED,
@@ -37,6 +40,7 @@ from ai_agent.core.audit_events import (
     AI_SUGGESTION_APPROVED,
     AI_SUGGESTION_CREATED,
     AI_SUGGESTION_REJECTED,
+    AI_TRANSCRIPT_ANALYZED,
     ALL_AI_AUDIT_EVENTS,
 )
 
@@ -68,6 +72,12 @@ class TestAppendixBVocabulary:
         assert AI_FOLLOW_UP_GENERATED == "ai.crm.follow_up.generated"
         assert AI_FOLLOW_UP_APPLIED == "ai.crm.follow_up.applied"
         assert AI_FOLLOW_UP_DISMISSED == "ai.crm.follow_up.dismissed"
+        # SKY-91 transcript analysis events.
+        assert AI_TRANSCRIPT_ANALYZED == "ai.crm.transcript.analyzed"
+        # SKY-91 CRM anomaly lifecycle events.
+        assert AI_CRM_ANOMALY_DETECTED == "ai.crm.anomaly.detected"
+        assert AI_CRM_ANOMALY_RESOLVED == "ai.crm.anomaly.resolved"
+        assert AI_CRM_ANOMALY_DISMISSED == "ai.crm.anomaly.dismissed"
         # SKY-80 NL report builder events.
         assert AI_REPORT_GENERATED == "ai.report.generated"
         assert AI_REPORT_SAVED == "ai.report.saved"
@@ -100,6 +110,10 @@ class TestAppendixBVocabulary:
             audit_events.AI_FOLLOW_UP_GENERATED,
             audit_events.AI_FOLLOW_UP_APPLIED,
             audit_events.AI_FOLLOW_UP_DISMISSED,
+            audit_events.AI_TRANSCRIPT_ANALYZED,
+            audit_events.AI_CRM_ANOMALY_DETECTED,
+            audit_events.AI_CRM_ANOMALY_RESOLVED,
+            audit_events.AI_CRM_ANOMALY_DISMISSED,
             audit_events.AI_REPORT_GENERATED,
             audit_events.AI_REPORT_SAVED,
             audit_events.AI_COACHING_SUGGESTION_CREATED,
