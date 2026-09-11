@@ -257,3 +257,198 @@ class TestGetTranscriptAnalysis:
         )
 
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# CRM anomaly management (SKY-91)
+# ---------------------------------------------------------------------------
+
+_ANOMALY_ID = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+_OPPORTUNITY_ID = uuid.UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
+_ANOMALY_ROW = SimpleNamespace(
+    id=_ANOMALY_ID,
+    opportunity_id=_OPPORTUNITY_ID,
+    rule_id="stage_stall",
+    severity="critical",
+    status="open",
+    title="Deal stuck",
+    description="No movement for 45 days.",
+    context={"days_in_stage": 45},
+    detected_at=datetime(2026, 9, 11, 12, 0, 0, tzinfo=UTC),
+)
+
+_RESOLVED_ROW = SimpleNamespace(
+    id=_ANOMALY_ID,
+    opportunity_id=_OPPORTUNITY_ID,
+    rule_id="stage_stall",
+    severity="critical",
+    status="resolved",
+    title="Deal stuck",
+    description="No movement for 45 days.",
+    context={"days_in_stage": 45},
+    detected_at=datetime(2026, 9, 11, 12, 0, 0, tzinfo=UTC),
+)
+
+_DISMISSED_ROW = SimpleNamespace(
+    id=_ANOMALY_ID,
+    opportunity_id=_OPPORTUNITY_ID,
+    rule_id="stage_stall",
+    severity="critical",
+    status="dismissed",
+    title="Deal stuck",
+    description="No movement for 45 days.",
+    context={"days_in_stage": 45},
+    detected_at=datetime(2026, 9, 11, 12, 0, 0, tzinfo=UTC),
+)
+
+
+class FakeCrmAnomalyService:
+    """Scripted stand-in recording anomaly-management calls."""
+
+    def __init__(
+        self,
+        *,
+        items: list[Any] | None = None,
+        resolve_row: Any = None,
+        dismiss_row: Any = None,
+        resolve_error: Exception | None = None,
+        dismiss_error: Exception | None = None,
+    ) -> None:
+        self._items = items or []
+        self._resolve_row = resolve_row
+        self._dismiss_row = dismiss_row
+        self._resolve_error = resolve_error
+        self._dismiss_error = dismiss_error
+        self.list_calls: list[dict[str, Any]] = []
+        self.resolve_calls: list[dict[str, Any]] = []
+        self.dismiss_calls: list[dict[str, Any]] = []
+
+    async def list_open_crm_anomalies(self, *, tenant_id: uuid.UUID) -> list[Any]:
+        self.list_calls.append({"tenant_id": tenant_id})
+        return self._items
+
+    async def resolve_crm_anomaly(
+        self, *, tenant_id: uuid.UUID, anomaly_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Any:
+        self.resolve_calls.append(
+            {"tenant_id": tenant_id, "anomaly_id": anomaly_id, "user_id": user_id}
+        )
+        if self._resolve_error is not None:
+            raise self._resolve_error
+        return self._resolve_row or _RESOLVED_ROW
+
+    async def dismiss_crm_anomaly(
+        self, *, tenant_id: uuid.UUID, anomaly_id: uuid.UUID, user_id: uuid.UUID
+    ) -> Any:
+        self.dismiss_calls.append(
+            {"tenant_id": tenant_id, "anomaly_id": anomaly_id, "user_id": user_id}
+        )
+        if self._dismiss_error is not None:
+            raise self._dismiss_error
+        return self._dismiss_row or _DISMISSED_ROW
+
+
+class TestListCrmAnomalies:
+    def test_lists_open_anomalies_for_tenant(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        service = FakeCrmAnomalyService(items=[_ANOMALY_ROW])
+        client = _app_with_service(monkeypatch, service)
+
+        response = client.get(
+            "/api/v1/ai/crm/anomalies",
+            headers={"authorization": "Bearer t"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert len(payload) == 1
+        assert payload[0]["id"] == str(_ANOMALY_ID)
+        assert payload[0]["opportunity_id"] == str(_OPPORTUNITY_ID)
+        assert payload[0]["rule_id"] == "stage_stall"
+        assert payload[0]["severity"] == "critical"
+        assert payload[0]["status"] == "open"
+        assert payload[0]["title"] == "Deal stuck"
+        assert payload[0]["context"] == {"days_in_stage": 45}
+        assert payload[0]["detected_at"] == "2026-09-11T12:00:00Z"
+        assert service.list_calls == [{"tenant_id": _TENANT_ID}]
+
+    def test_empty_feed_returns_empty_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = _app_with_service(monkeypatch, FakeCrmAnomalyService(items=[]))
+
+        response = client.get(
+            "/api/v1/ai/crm/anomalies",
+            headers={"authorization": "Bearer t"},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+class TestResolveCrmAnomaly:
+    def test_resolves_and_returns_updated_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        service = FakeCrmAnomalyService()
+        client = _app_with_service(monkeypatch, service)
+
+        response = client.post(
+            f"/api/v1/ai/crm/anomalies/{_ANOMALY_ID}/resolve",
+            headers={"authorization": "Bearer t"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["id"] == str(_ANOMALY_ID)
+        assert payload["status"] == "resolved"
+        assert service.resolve_calls == [
+            {
+                "tenant_id": _TENANT_ID,
+                "anomaly_id": _ANOMALY_ID,
+                "user_id": _CALLER["user_id"],
+            }
+        ]
+
+    def test_missing_anomaly_is_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        service = FakeCrmAnomalyService(resolve_error=ValueError("CRM anomaly not found"))
+        client = _app_with_service(monkeypatch, service)
+
+        response = client.post(
+            f"/api/v1/ai/crm/anomalies/{_ANOMALY_ID}/resolve",
+            headers={"authorization": "Bearer t"},
+        )
+
+        assert response.status_code == 404
+        assert "CRM anomaly not found" in response.text
+
+
+class TestDismissCrmAnomaly:
+    def test_dismisses_and_returns_updated_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        service = FakeCrmAnomalyService()
+        client = _app_with_service(monkeypatch, service)
+
+        response = client.post(
+            f"/api/v1/ai/crm/anomalies/{_ANOMALY_ID}/dismiss",
+            headers={"authorization": "Bearer t"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["id"] == str(_ANOMALY_ID)
+        assert payload["status"] == "dismissed"
+        assert service.dismiss_calls == [
+            {
+                "tenant_id": _TENANT_ID,
+                "anomaly_id": _ANOMALY_ID,
+                "user_id": _CALLER["user_id"],
+            }
+        ]
+
+    def test_missing_anomaly_is_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        service = FakeCrmAnomalyService(dismiss_error=ValueError("CRM anomaly not found"))
+        client = _app_with_service(monkeypatch, service)
+
+        response = client.post(
+            f"/api/v1/ai/crm/anomalies/{_ANOMALY_ID}/dismiss",
+            headers={"authorization": "Bearer t"},
+        )
+
+        assert response.status_code == 404
+        assert "CRM anomaly not found" in response.text

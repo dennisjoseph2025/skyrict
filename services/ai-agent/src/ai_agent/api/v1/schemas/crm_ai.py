@@ -115,3 +115,33 @@ class TranscriptAnalysisResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
     model_version: str
     analyzed_at: datetime
+
+
+class CrmAnomalySeverity(StrEnum):
+    """CRM anomaly severities (matches the ai_crm_anomalies CHECK)."""
+
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+
+
+class CrmAnomalyStatus(StrEnum):
+    """CRM anomaly lifecycle states (matches the ai_crm_anomalies CHECK)."""
+
+    OPEN = "open"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+
+
+class CrmAnomalyItem(BaseModel):
+    """One detected CRM pipeline anomaly (GET /ai/crm/anomalies)."""
+
+    id: uuid.UUID
+    opportunity_id: uuid.UUID
+    rule_id: str
+    severity: CrmAnomalySeverity
+    status: CrmAnomalyStatus
+    title: str
+    description: str
+    context: dict[str, object]
+    detected_at: datetime

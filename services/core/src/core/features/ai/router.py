@@ -519,6 +519,48 @@ async def proxy_transcript_analysis(
     return relay_response(upstream)
 
 
+# --- CRM anomaly management (SKY-91) ---------------------------------------
+# The anomaly inbox reads the tenant-scoped feed; resolve/dismiss are the
+# human dispositions (write-like). Matrix: erp.ai.invoke + erp.crm.read for
+# the list, erp.ai.invoke + erp.crm.write for the terminal transitions -
+# same shape as the follow-up apply/dismiss proxies above.
+
+
+@router.get("/crm/anomalies")
+async def proxy_list_crm_anomalies(
+    request: Request,
+    _invoke: _InvokeDep,
+    _crm_read: _CrmReadDep,
+    client: _ClientDep,
+) -> Response:
+    """Open CRM pipeline anomaly feed -> ai-agent /api/v1/ai/crm/anomalies."""
+    return await _proxy(request, client, "/api/v1/ai/crm/anomalies")
+
+
+@router.post("/crm/anomalies/{anomaly_id}/resolve")
+async def proxy_resolve_crm_anomaly(
+    request: Request,
+    anomaly_id: uuid.UUID,
+    _invoke: _InvokeDep,
+    _crm_write: _CrmWriteDep,
+    client: _ClientDep,
+) -> Response:
+    """Resolve an open CRM anomaly -> ai-agent /api/v1/ai/crm/anomalies/{id}/resolve."""
+    return await _proxy(request, client, f"/api/v1/ai/crm/anomalies/{anomaly_id}/resolve")
+
+
+@router.post("/crm/anomalies/{anomaly_id}/dismiss")
+async def proxy_dismiss_crm_anomaly(
+    request: Request,
+    anomaly_id: uuid.UUID,
+    _invoke: _InvokeDep,
+    _crm_write: _CrmWriteDep,
+    client: _ClientDep,
+) -> Response:
+    """Dismiss a CRM anomaly as false positive -> ai-agent /api/v1/ai/crm/anomalies/{id}/dismiss."""
+    return await _proxy(request, client, f"/api/v1/ai/crm/anomalies/{anomaly_id}/dismiss")
+
+
 # --- NL report builder (SKY-80) ---------------------------------------------
 
 # generate builds a preview from report definitions the caller can already

@@ -754,3 +754,136 @@ class TestCrmTranscriptPermissionGate:
     def test_post_without_invoke_denied(self) -> None:
         self._grant(ERP_CRM_WRITE)
         assert self._post().status_code == 403
+
+
+class TestCrmAnomalyForwarding:
+    def test_list_forwards(self) -> None:
+        seen: list[httpx.Request] = []
+        client = _app_with_recorder(seen)
+
+        response = client.get(
+            "/api/v1/ai/crm/anomalies",
+            headers={"authorization": "Bearer tok"},
+        )
+
+        assert response.status_code == 200
+        assert seen[0].url.path == "/api/v1/ai/crm/anomalies"
+
+    def test_resolve_post_forwards_uuid(self) -> None:
+        seen: list[httpx.Request] = []
+        client = _app_with_recorder(seen)
+        anomaly_id = uuid.uuid4()
+
+        response = client.post(
+            f"/api/v1/ai/crm/anomalies/{anomaly_id}/resolve",
+            headers={"authorization": "Bearer tok"},
+        )
+
+        assert response.status_code == 200
+        assert seen[0].url.path == f"/api/v1/ai/crm/anomalies/{anomaly_id}/resolve"
+
+    def test_dismiss_post_forwards_uuid(self) -> None:
+        seen: list[httpx.Request] = []
+        client = _app_with_recorder(seen)
+        anomaly_id = uuid.uuid4()
+
+        response = client.post(
+            f"/api/v1/ai/crm/anomalies/{anomaly_id}/dismiss",
+            headers={"authorization": "Bearer tok"},
+        )
+
+        assert response.status_code == 200
+        assert seen[0].url.path == f"/api/v1/ai/crm/anomalies/{anomaly_id}/dismiss"
+
+    @pytest.mark.parametrize(
+        ("suffix", "bad_id"),
+        [
+            pytest.param("/resolve", "not-a-uuid", id="garbage"),
+            pytest.param("/dismiss", "x@evil.test", id="authority-like"),
+        ],
+    )
+    def test_malformed_id_rejected_before_any_forward(self, suffix: str, bad_id: str) -> None:
+        seen: list[httpx.Request] = []
+        client = _app_with_recorder(seen)
+
+        response = client.post(f"/api/v1/ai/crm/anomalies/{bad_id}{suffix}")
+
+        assert response.status_code == 422
+        assert seen == [], "malformed id must never reach ai-agent"
+
+
+class TestCrmAnomalyPermissionGate:
+    """List is read-like (invoke + crm read); resolve/dismiss are write-like
+    (invoke + crm write)."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_rbac(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        grants: list[str] = []
+        self._grants_box = grants
+
+        class _FakeRbac:
+            def __init__(self, session: object) -> None:
+                self.session = session
+
+            async def resolve_user_permissions(
+                self, *, user_id: object, tenant_id: object
+            ) -> list[str]:
+                return grants
+
+        monkeypatch.setattr(api_deps, "RbacRepository", _FakeRbac)
+
+    def _app(self) -> TestClient:
+        app = FastAPI()
+        app.add_exception_handler(SkyrictError, skyrict_error_handler)
+        app.include_router(ai_router.router, prefix="/api/v1")
+        app.dependency_overrides[get_current_user] = lambda: {
+            "user_id": str(uuid.uuid4()),
+            "tenant_id": str(uuid.uuid4()),
+        }
+        app.dependency_overrides[get_db] = lambda: object()
+        app.dependency_overrides[get_current_scope] = lambda: (DataScope.ALL, None)
+        app.dependency_overrides[ai_router.get_ai_client] = lambda: httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": True})),
+            base_url="http://ai.test",
+        )
+        return TestClient(app)
+
+    def _grant(self, *keys: str) -> None:
+        self._grants_box[:] = list(keys)
+
+    def _list(self) -> httpx.Response:
+        return self._app().get("/api/v1/ai/crm/anomalies")
+
+    def _resolve(self) -> httpx.Response:
+        return self._app().post(f"/api/v1/ai/crm/anomalies/{uuid.uuid4()}/resolve")
+
+    def _dismiss(self) -> httpx.Response:
+        return self._app().post(f"/api/v1/ai/crm/anomalies/{uuid.uuid4()}/dismiss")
+
+    def test_list_requires_invoke_and_crm_read(self) -> None:
+        self._grant(ERP_AI_INVOKE, ERP_CRM_READ)
+        assert self._list().status_code == 200
+
+    def test_list_without_crm_read_denied(self) -> None:
+        self._grant(ERP_AI_INVOKE)
+        assert self._list().status_code == 403
+
+    def test_list_without_invoke_denied(self) -> None:
+        self._grant(ERP_CRM_READ)
+        assert self._list().status_code == 403
+
+    def test_resolve_requires_invoke_and_crm_write(self) -> None:
+        self._grant(ERP_AI_INVOKE, ERP_CRM_WRITE)
+        assert self._resolve().status_code == 200
+
+    def test_resolve_without_crm_write_denied(self) -> None:
+        self._grant(ERP_AI_INVOKE)
+        assert self._resolve().status_code == 403
+
+    def test_resolve_without_invoke_denied(self) -> None:
+        self._grant(ERP_CRM_WRITE)
+        assert self._resolve().status_code == 403
+
+    def test_dismiss_requires_invoke_and_crm_write(self) -> None:
+        self._grant(ERP_AI_INVOKE, ERP_CRM_WRITE)
+        assert self._dismiss().status_code == 200

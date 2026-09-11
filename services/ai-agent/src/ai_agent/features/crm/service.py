@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 import structlog
 
 from ai_agent.core.audit_events import (
+    AI_CRM_ANOMALY_DISMISSED,
+    AI_CRM_ANOMALY_RESOLVED,
     AI_DEAL_HEALTH_ASSESSED,
     AI_FOLLOW_UP_APPLIED,
     AI_FOLLOW_UP_DISMISSED,
@@ -45,6 +47,7 @@ from ai_agent.features.crm.transcript_analysis import (
 from ai_agent.features.crm.transcript_analysis import (
     analyze_transcript as _run_transcript_analysis,
 )
+from ai_agent.models.ai_crm_anomaly import AiCrmAnomalyModel
 from ai_agent.models.ai_deal_health import AiDealHealthModel
 from ai_agent.models.ai_lead_score import AiLeadScoreModel
 from ai_agent.models.ai_transcript_analysis import AiTranscriptAnalysisModel
@@ -373,4 +376,84 @@ class CrmAiService:
             },
         )
 
+        return row
+
+    # --- CRM anomaly management (SKY-91) ------------------------------------
+
+    async def list_open_crm_anomalies(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+    ) -> list[AiCrmAnomalyModel]:
+        """List all open CRM pipeline anomalies for the tenant (newest first)."""
+        return await self._repo.list_open_crm_anomalies(tenant_id=tenant_id)
+
+    async def resolve_crm_anomaly(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        anomaly_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> AiCrmAnomalyModel:
+        """Resolve an open CRM anomaly (the rep acted on it).
+
+        Returns the updated row. Raises ``ValueError`` when the anomaly is not
+        found or is already terminal.
+        """
+        row = await self._repo.get_crm_anomaly_by_id(
+            tenant_id=tenant_id,
+            anomaly_id=anomaly_id,
+        )
+        if row is None:
+            raise ValueError("CRM anomaly not found")
+        if row.status != "open":
+            raise ValueError(f"CRM anomaly is already {row.status}")
+
+        await self._repo.mark_crm_anomaly_resolved(row=row)
+
+        await self._audit.log(
+            action=AI_CRM_ANOMALY_RESOLVED,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            input_payload={
+                "anomaly_id": str(anomaly_id),
+                "opportunity_id": str(row.opportunity_id),
+                "rule_id": row.rule_id,
+            },
+        )
+        return row
+
+    async def dismiss_crm_anomaly(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        anomaly_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> AiCrmAnomalyModel:
+        """Dismiss an open CRM anomaly as a false positive.
+
+        Returns the updated row. Raises ``ValueError`` when the anomaly is not
+        found or is already terminal.
+        """
+        row = await self._repo.get_crm_anomaly_by_id(
+            tenant_id=tenant_id,
+            anomaly_id=anomaly_id,
+        )
+        if row is None:
+            raise ValueError("CRM anomaly not found")
+        if row.status != "open":
+            raise ValueError(f"CRM anomaly is already {row.status}")
+
+        await self._repo.mark_crm_anomaly_dismissed(row=row)
+
+        await self._audit.log(
+            action=AI_CRM_ANOMALY_DISMISSED,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            input_payload={
+                "anomaly_id": str(anomaly_id),
+                "opportunity_id": str(row.opportunity_id),
+                "rule_id": row.rule_id,
+            },
+        )
         return row
