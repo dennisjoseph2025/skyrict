@@ -223,9 +223,10 @@ module = [
     "apscheduler",
     "apscheduler.schedulers.asyncio",
     "apscheduler.triggers.cron",
-    "tzlocal",
-]
-ignore_missing_imports = true
+      "tzlocal",
+      "openpyxl",
+  ]
+  ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # ragas is an optional, lazily-imported eval dependency (nightly workflow

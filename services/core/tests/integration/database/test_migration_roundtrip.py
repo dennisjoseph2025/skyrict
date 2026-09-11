@@ -2,9 +2,9 @@
 
 Closes the DoD's "migration applies up and down" checkbox for the WHOLE chain,
 not the newest link in isolation: identity base schema -> core ``upgrade head``
-(all 7 revisions) -> core ``downgrade base`` (all the way back to nothing) ->
-core ``upgrade head`` again - on a disposable scratch database created by the
-test and dropped afterwards.
+(all 8 revisions, 0001..0048) -> core ``downgrade base`` (all the way back to
+nothing) -> core ``upgrade head`` again - on a disposable scratch database
+created by the test and dropped afterwards.
 
 Why this exists: the thread that produced migration 0007 found a schema that
 had silently diverged from what the migration files claimed (``ref_id`` uuid
@@ -207,7 +207,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0047", f"head is {version}, expected 0047"
+            assert version == "0048", f"head is {version}, expected 0048"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (
@@ -986,6 +986,63 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
                 {"tenant": tenant_id},
             )
             await conn.commit()
+
+            # 0048: document management spine (SKY-87, docs/modules/documents.md) -
+            # the two tenant-scoped tables, RLS policies, the tags GIN index, and
+            # the erp.documents.* permission trio.
+            for table in ("erp_documents", "erp_document_versions"):
+                regclass = (
+                    await conn.execute(text("SELECT to_regclass(:t)"), {"t": f"public.{table}"})
+                ).scalar_one()
+                assert regclass is not None, f"0048 must create {table}"
+
+            for policy_name in (
+                "tenant_isolation_erp_documents",
+                "tenant_isolation_erp_document_versions",
+            ):
+                policy_count = (
+                    await conn.execute(
+                        text("SELECT count(*) FROM pg_policies WHERE policyname = :name"),
+                        {"name": policy_name},
+                    )
+                ).scalar_one()
+                assert policy_count == 1, f"0048 must create RLS policy {policy_name}"
+
+            tags_index_count = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_indexes "
+                        "WHERE schemaname = 'public' "
+                        "AND tablename = 'erp_documents' "
+                        "AND indexname = 'ix_erp_documents_tenant_tags'"
+                    )
+                )
+            ).scalar_one()
+            assert tags_index_count == 1, "0048 must create the tags GIN index"
+
+            document_fk = (
+                await conn.execute(
+                    text(
+                        "SELECT count(*) FROM pg_constraint "
+                        "WHERE conrelid = 'public.erp_document_versions'::regclass "
+                        "AND conname = 'fk_erp_document_versions_document_tenant'"
+                    )
+                )
+            ).scalar_one()
+            assert document_fk == 1, "0048 must add the document version composite FK"
+
+            for perm_key in (
+                "erp.documents.read",
+                "erp.documents.write",
+                "erp.documents.delete",
+            ):
+                perm_row = (
+                    await conn.execute(
+                        text("SELECT description FROM core_permissions WHERE key = :key"),
+                        {"key": perm_key},
+                    )
+                ).scalar_one_or_none()
+                assert perm_row is not None, f"0048 must register {perm_key}"
     finally:
         await engine.dispose()
 
@@ -1011,6 +1068,8 @@ async def _assert_downgraded_to_base(url: str) -> None:
                 "public.erp_suppliers",
                 "public.erp_supplier_performance",
                 "public.erp_revenue_forecast",
+                "public.erp_documents",
+                "public.erp_document_versions",
             ):
                 regclass = (await conn.execute(text(f"SELECT to_regclass('{table}')"))).scalar_one()
                 assert regclass is None, f"{table} still exists after downgrade base"

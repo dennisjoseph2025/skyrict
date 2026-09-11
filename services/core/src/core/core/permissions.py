@@ -74,6 +74,14 @@ ERP_PAYROLL_READ = "erp.payroll.read"
 ERP_PAYROLL_WRITE = "erp.payroll.write"
 ERP_PAYROLL_APPROVE = "erp.payroll.approve"
 
+# ERP Documents (SKY-87, docs/modules/documents.md). Read/upload gates for the
+# document management platform; delete gates hard deletes. Entity-linked
+# documents additionally require the owning module's read key (mirrored from
+# identity's catalog so role grants stay portable across the platform).
+ERP_DOCUMENTS_READ = "erp.documents.read"
+ERP_DOCUMENTS_WRITE = "erp.documents.write"
+ERP_DOCUMENTS_DELETE = "erp.documents.delete"
+
 # AI assistant (docs/modules/skyrict-ai/inventory-ai-features.md §6.3).
 # Gate checked by core BEFORE any /api/v1/ai/* request is forwarded to the
 # ai-agent microservice - permissionless calls never reach the AI service.
@@ -160,6 +168,9 @@ CATALOG: tuple[str, ...] = (
     ERP_PAYROLL_READ,
     ERP_PAYROLL_WRITE,
     ERP_PAYROLL_APPROVE,
+    ERP_DOCUMENTS_READ,
+    ERP_DOCUMENTS_WRITE,
+    ERP_DOCUMENTS_DELETE,
     ERP_AI_INVOKE,
     ERP_AI_NARRATOR_REFRESH,
     ERP_HR_AI_READ,
@@ -209,6 +220,11 @@ PERMISSION_MODULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("fx", "FX rates", (CORE_FX_READ, CORE_FX_WRITE)),
     ("hr", "HR", (ERP_HR_READ, ERP_HR_WRITE, ERP_HR_APPROVE)),
     ("payroll", "Payroll", (ERP_PAYROLL_READ, ERP_PAYROLL_WRITE, ERP_PAYROLL_APPROVE)),
+    (
+        "documents",
+        "Documents",
+        (ERP_DOCUMENTS_READ, ERP_DOCUMENTS_WRITE, ERP_DOCUMENTS_DELETE),
+    ),
     ("ai", "AI assistant", (ERP_AI_INVOKE, ERP_AI_NARRATOR_REFRESH)),
     (
         "hr_ai",
@@ -279,6 +295,9 @@ __all__ = [
     "ERP_AI_NARRATOR_REFRESH",
     "ERP_CRM_READ",
     "ERP_CRM_WRITE",
+    "ERP_DOCUMENTS_DELETE",
+    "ERP_DOCUMENTS_READ",
+    "ERP_DOCUMENTS_WRITE",
     "ERP_FINANCE_AI_READ",
     "ERP_FINANCE_AI_WRITE",
     "ERP_FINANCE_APPROVE",

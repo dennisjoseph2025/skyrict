@@ -18,6 +18,7 @@ from ai_agent.api.v1.routers.chat import router as chat_router
 from ai_agent.api.v1.routers.coaching import router as coaching_router
 from ai_agent.api.v1.routers.conversations import router as conversations_router
 from ai_agent.api.v1.routers.crm import router as crm_router
+from ai_agent.api.v1.routers.documents import router as documents_router
 from ai_agent.api.v1.routers.finance_ai import (
     anomaly_narrate_router,
     draft_entry_router,
@@ -63,3 +64,4 @@ api_router.include_router(anomaly_narrate_router)
 api_router.include_router(reminders_router)
 api_router.include_router(finance_lines_router)
 api_router.include_router(supplier_risk_router)
+api_router.include_router(documents_router)

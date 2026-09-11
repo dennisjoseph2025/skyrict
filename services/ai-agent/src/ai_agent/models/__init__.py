@@ -26,6 +26,7 @@ from ai_agent.models.ai_conversation import AiConversation
 from ai_agent.models.ai_conversation_message import AiConversationMessage
 from ai_agent.models.ai_deal_health import AiDealHealthModel
 from ai_agent.models.ai_digest import AiDigestModel
+from ai_agent.models.ai_document_embeddings import AiDocumentEmbeddingModel
 from ai_agent.models.ai_episodic_memory import AiEpisodicMemoryModel
 from ai_agent.models.ai_eval_run import AiEvalRunModel
 from ai_agent.models.ai_finance_eval_run import AiFinanceEvalRunModel
@@ -63,6 +64,7 @@ __all__ = [
     "AiConversationMessage",
     "AiDealHealthModel",
     "AiDigestModel",
+    "AiDocumentEmbeddingModel",
     "AiEpisodicMemoryModel",
     "AiEvalRunModel",
     "AiFinanceEvalRunModel",
