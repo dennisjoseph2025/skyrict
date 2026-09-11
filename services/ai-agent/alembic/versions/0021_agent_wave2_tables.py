@@ -15,8 +15,11 @@ compaction:
 Seeds the ``sales_coach`` and ``audit_guardian`` rows in ``agent_registry``
 (enabled, tools empty — the supervisor delegates handle streaming).
 
-Revision ID: 0020
-Revises: 0019
+Chains after dev's ``0020_ai_document_embeddings`` (SKY-87); both share the
+``0019`` parent, so this file was renumbered to ``0021`` on the merge.
+
+Revision ID: 0021
+Revises: 0020
 Create Date: 2026-09-10
 """
 
@@ -26,8 +29,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision = "0020"
-down_revision = "0019"
+revision = "0021"
+down_revision = "0020"
 branch_labels = None
 depends_on = None
 
