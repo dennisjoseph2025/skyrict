@@ -1,17 +1,20 @@
-"""CRM AI orchestration service (SKY-61 Part 11).
+"""CRM AI orchestration service (SKY-61 Part 11 / SKY-91 Part 13).
 
 Thin facade that wires the deterministic engines (scoring, deal health, follow-up)
-to persistence (``CrmAiRepository``) and audit (``AuditService``). The engines
-themselves are pure functions; this service handles:
+and the transcript analyzer to persistence (``CrmAiRepository``) and audit
+(``AuditService``). The engines themselves are pure functions; this service
+handles:
 
 - Loading entity + activity context from core via the gateway.
-- Running the deterministic engine.
+- Running the deterministic engine / transcript analysis.
 - Persisting the result row.
 - Recording the audit event.
 
-No LLM calls, no network I/O beyond core reads. The service is stateless per
-request; it depends on injected gateway and repository instances (keyword-only
-constructor, same pattern as ``AnomalyService``).
+Transcript analysis is the one flow that calls an LLM; it goes through the
+injected ``LlmRouter`` (PII redaction gate is inside the router), never a raw
+provider. No other network I/O beyond core reads. The service is stateless per
+request; it depends on injected gateway, repository, and audit instances
+(keyword-only constructor, same pattern as ``AnomalyService``).
 """
 
 from __future__ import annotations
@@ -27,19 +30,30 @@ from ai_agent.core.audit_events import (
     AI_FOLLOW_UP_APPLIED,
     AI_FOLLOW_UP_DISMISSED,
     AI_LEAD_SCORED,
+    AI_TRANSCRIPT_ANALYZED,
 )
+from ai_agent.core.exceptions import AiUnavailableError
 from ai_agent.features.crm.deal_health import (
     OpportunitySignals,
     assess_deal_health,
 )
 from ai_agent.features.crm.scoring import score_lead
+from ai_agent.features.crm.transcript_analysis import (
+    TRANSCRIPT_ANALYSIS_VERSION,
+    TranscriptAnalysis,
+)
+from ai_agent.features.crm.transcript_analysis import (
+    analyze_transcript as _run_transcript_analysis,
+)
 from ai_agent.models.ai_deal_health import AiDealHealthModel
 from ai_agent.models.ai_lead_score import AiLeadScoreModel
+from ai_agent.models.ai_transcript_analysis import AiTranscriptAnalysisModel
 
 if TYPE_CHECKING:
     import uuid
 
     from ai_agent.core.audit_service import AuditService
+    from ai_agent.core.llm_router import LlmRouter
     from ai_agent.features.crm.deal_health import DealHealth
     from ai_agent.features.crm.gateway import CrmGatewayPort
     from ai_agent.features.crm.repositories import CrmAiRepository
@@ -68,10 +82,12 @@ class CrmAiService:
         gateway: CrmGatewayPort,
         repo: CrmAiRepository,
         audit: AuditService,
+        llm_router: LlmRouter | None = None,
     ) -> None:
         self._gateway = gateway
         self._repo = repo
         self._audit = audit
+        self._llm = llm_router
 
     # --- lead scoring --------------------------------------------------------
 
@@ -197,6 +213,57 @@ class CrmAiService:
             at_risk=counts["yellow"],
             critical=counts["red"],
         )
+
+    # --- transcript analysis (SKY-91) ----------------------------------------
+
+    async def analyze_transcript(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        activity_id: uuid.UUID,
+        user_id: uuid.UUID,
+        transcript: str,
+    ) -> TranscriptAnalysis:
+        """Analyze a call/meeting transcript, persist, and audit.
+
+        The raw transcript was already written into core by the proxy endpoint
+        (``erp.crm.activities.transcript_text``) - this only produces and
+        stores the AI interpretation. No LLM provider configured -> 503, the
+        transcript itself is never lost (it lives in core).
+        """
+        if self._llm is None:
+            raise AiUnavailableError("No AI provider is configured")
+
+        result = await _run_transcript_analysis(transcript=transcript, llm=self._llm)
+
+        row = AiTranscriptAnalysisModel(
+            tenant_id=tenant_id,
+            activity_id=activity_id,
+            summary=result.summary,
+            objection_score=result.objection_score,
+            objections=result.objections,
+            next_best_action=result.next_best_action,
+            sentiment=result.sentiment,
+            key_topics=result.key_topics,
+            confidence=result.confidence,
+            model_version=TRANSCRIPT_ANALYSIS_VERSION,
+        )
+        await self._repo.save_transcript_analysis(row)
+
+        await self._audit.log(
+            action=AI_TRANSCRIPT_ANALYZED,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            input_payload={"activity_id": str(activity_id)},
+            output_payload={
+                "objection_score": result.objection_score,
+                "sentiment": result.sentiment,
+                "confidence": result.confidence,
+                "model_version": TRANSCRIPT_ANALYSIS_VERSION,
+            },
+        )
+
+        return result
 
     # --- follow-up management ------------------------------------------------
 

@@ -1,10 +1,11 @@
 """Database access for the CRM AI tables (SKY-61 Part 11 storage).
 
-Owns the three tenant-scoped CRUD concerns for ``ai_lead_scores``,
-``ai_deal_health``, and ``ai_follow_up_suggestions``. All writes are scoped by
-``tenant_id`` so RLS never sees a cross-tenant leak. The follow-up repository
-also implements the status lifecycle (pending -> sent|dismissed|expired) and
-the expiry sweep the hourly check consumes.
+Owns the tenant-scoped CRUD concerns for ``ai_lead_scores``,
+``ai_deal_health``, ``ai_follow_up_suggestions``, and (SKY-91)
+``ai_transcript_analyses``. All writes are scoped by ``tenant_id`` so RLS
+never sees a cross-tenant leak. The follow-up repository also implements the
+status lifecycle (pending -> sent|dismissed|expired) and the expiry sweep the
+hourly check consumes.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from sqlalchemy import delete, func, select, update
 from ai_agent.models.ai_deal_health import AiDealHealthModel
 from ai_agent.models.ai_follow_up_suggestion import AiFollowUpSuggestionModel
 from ai_agent.models.ai_lead_score import AiLeadScoreModel
+from ai_agent.models.ai_transcript_analysis import AiTranscriptAnalysisModel
 
 if TYPE_CHECKING:
     import uuid
@@ -90,6 +92,25 @@ class CrmAiRepository:
                 recommended_actions=recommended_actions,
             )
         )
+
+    # --- transcript analyses -------------------------------------------------
+    async def latest_transcript_analysis(
+        self, *, tenant_id: uuid.UUID, activity_id: uuid.UUID
+    ) -> AiTranscriptAnalysisModel | None:
+        stmt = (
+            select(AiTranscriptAnalysisModel)
+            .where(
+                AiTranscriptAnalysisModel.tenant_id == tenant_id,
+                AiTranscriptAnalysisModel.activity_id == activity_id,
+            )
+            .order_by(AiTranscriptAnalysisModel.analyzed_at.desc())
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def save_transcript_analysis(self, row: AiTranscriptAnalysisModel) -> None:
+        self._session.add(row)
 
     # --- follow-up suggestions -----------------------------------------------
     async def list_pending_for_user(

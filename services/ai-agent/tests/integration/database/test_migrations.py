@@ -76,6 +76,8 @@ _AI_TABLES = (
     "ai_lead_scores",
     "ai_deal_health",
     "ai_follow_up_suggestions",
+    # SKY-91 transcript analyses (migration 0022)
+    "ai_transcript_analyses",
 )
 _TENANT_SCOPED_TABLES = (
     "ai_query_log",
@@ -93,6 +95,8 @@ _TENANT_SCOPED_TABLES = (
     "ai_lead_scores",
     "ai_deal_health",
     "ai_follow_up_suggestions",
+    # SKY-91 transcript analyses carry RLS on current_tenant_id()
+    "ai_transcript_analyses",
 )
 # Demand stats carries composite FKs into core-owned erp_products/erp_warehouses
 # and NO direct FK to tenants (cross-service idiom); only the tables below are
@@ -119,6 +123,8 @@ _TENANT_FK_TABLES = (
     "ai_lead_scores",
     "ai_deal_health",
     "ai_follow_up_suggestions",
+    # SKY-91 transcript analyses are direct children of ``tenants``
+    "ai_transcript_analyses",
 )
 
 _EXPECTED_CHECKS = {
@@ -142,6 +148,10 @@ _EXPECTED_CHECKS = {
     "ck_ai_follow_up_type",
     "ck_ai_follow_up_status",
     "ck_ai_follow_up_confidence_range",
+    # SKY-91 transcript analysis constraints
+    "ck_ai_transcript_analyses_objection_score_range",
+    "ck_ai_transcript_analyses_sentiment",
+    "ck_ai_transcript_analyses_confidence_range",
 }
 
 

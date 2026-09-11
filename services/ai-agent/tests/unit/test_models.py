@@ -76,6 +76,8 @@ class TestRegistry:
             "ai_lead_scores",
             "ai_deal_health",
             "ai_follow_up_suggestions",
+            # SKY-91 CRM transcript analyses
+            "ai_transcript_analyses",
             # SKY-61 memory persistence
             "ai_semantic_memory",
             # Conversation persistence (SKY-60)
@@ -99,6 +101,8 @@ class TestRegistry:
             "ai_lead_scores",
             "ai_deal_health",
             "ai_follow_up_suggestions",
+            # SKY-91 transcript analyses share the composite PK
+            "ai_transcript_analyses",
             # SKY-61 memory persistence
             "ai_semantic_memory",
             # Agent wave 2 (SKY-90)
@@ -406,3 +410,31 @@ class TestAiFollowUpSuggestion:
         }
         # Only the tenant_id surrogate FK points at tenants.
         assert {column.name for column in foreign_keys} == {"tenant_id"}
+
+
+class TestAiTranscriptAnalysis:
+    def test_composite_pk(self) -> None:
+        pk = list(
+            Base.metadata.tables["ai_transcript_analyses"]
+            .primary_key.columns.keys()
+        )
+        assert pk == ["tenant_id", "id"]
+
+    def test_checks_present(self) -> None:
+        names = _check_names(
+            Base.metadata.tables["ai_transcript_analyses"]
+        )
+        assert "ck_ai_transcript_analyses_objection_score_range" in names
+        assert "ck_ai_transcript_analyses_sentiment" in names
+        assert "ck_ai_transcript_analyses_confidence_range" in names
+
+    def test_objections_and_key_topics_are_jsonb(self) -> None:
+        tbl = Base.metadata.tables["ai_transcript_analyses"]
+        assert type(tbl.c.objections.type).__name__ == "JSONB"
+        assert type(tbl.c.key_topics.type).__name__ == "JSONB"
+
+    def test_soft_links_have_no_foreign_keys(self) -> None:
+        """activity_id is a plain soft-link UUID, not an FK."""
+        tbl = Base.metadata.tables["ai_transcript_analyses"]
+        foreign_keys = {column.name for column in tbl.columns if column.foreign_keys}
+        assert foreign_keys == {"tenant_id"}
