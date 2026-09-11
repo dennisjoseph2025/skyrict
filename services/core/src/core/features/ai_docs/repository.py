@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,7 +99,7 @@ class AiDocRepository:
                 (line["debit"] or 0) - (line["credit"] or 0) for line in entry["lines"]
             )
         # json round-trip ensures UUID/datetime/Decimal are stringified for JSONB storage
-        return json.loads(json.dumps(entries, default=str))
+        return cast("list[dict[str, Any]]", json.loads(json.dumps(entries, default=str)))
 
     # ------------------------------------------------------------------ A6
     async def next_doc_version(

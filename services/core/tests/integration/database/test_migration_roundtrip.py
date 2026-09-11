@@ -2,7 +2,7 @@
 
 Closes the DoD's "migration applies up and down" checkbox for the WHOLE chain,
 not the newest link in isolation: identity base schema -> core ``upgrade head``
-(all 8 revisions, 0001..0048) -> core ``downgrade base`` (all the way back to
+(all 50 revisions, 0001..0050) -> core ``downgrade base`` (all the way back to
 nothing) -> core ``upgrade head`` again - on a disposable scratch database
 created by the test and dropped afterwards.
 
@@ -207,7 +207,7 @@ async def _assert_upgraded_schema(url: str, tenant_ids: list[str] | None = None)
             version = (
                 await conn.execute(text("SELECT version_num FROM alembic_version_core"))
             ).scalar_one()
-            assert version == "0049", f"head is {version}, expected 0049"
+            assert version == "0050", f"head is {version}, expected 0050"
 
             # 0018: erp.leave.self is a first-class catalog permission.
             perm_row = (

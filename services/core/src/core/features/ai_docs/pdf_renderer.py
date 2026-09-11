@@ -220,29 +220,66 @@ def render_report_pdf(
     d_total = ParagraphStyle("sh-total", parent=_label_style(), fontSize=10, alignment=TA_RIGHT)
 
     sections: list[tuple[str, list[list[Any]], dict[str, Any] | None]]
+    grand: dict[str, Any]
     if doc_type == "pnl":
         sections = [
             (
                 "Revenue",
                 [_line_item(r, "amount", side="credit") for r in snapshot_data.get("revenue", [])],
-                {"label": "Total Revenue", "amount": snapshot_data.get("total_revenue"), "side": "credit"},
+                {
+                    "label": "Total Revenue",
+                    "amount": snapshot_data.get("total_revenue"),
+                    "side": "credit",
+                },
             ),
             (
                 "Expenses",
                 [_line_item(r, "amount", side="debit") for r in snapshot_data.get("expenses", [])],
-                {"label": "Total Expenses", "amount": snapshot_data.get("total_expenses"), "side": "debit"},
+                {
+                    "label": "Total Expenses",
+                    "amount": snapshot_data.get("total_expenses"),
+                    "side": "debit",
+                },
             ),
         ]
         grand = {"label": "Net Income", "amount": snapshot_data.get("net_income"), "side": "credit"}
     else:
         sections = [
-            ("Assets", [_line_item(r, "balance", side="debit") for r in snapshot_data.get("assets", [])], {"label": "Total Assets", "amount": snapshot_data.get("total_assets"), "side": "debit"}),
-            ("Liabilities", [_line_item(r, "balance", side="credit") for r in snapshot_data.get("liabilities", [])], {"label": "Total Liabilities", "amount": snapshot_data.get("total_liabilities"), "side": "credit"}),
-            ("Equity", [_line_item(r, "balance", side="credit") for r in snapshot_data.get("equity", [])], {"label": "Total Equity", "amount": snapshot_data.get("total_equity"), "side": "credit"}),
+            (
+                "Assets",
+                [_line_item(r, "balance", side="debit") for r in snapshot_data.get("assets", [])],
+                {
+                    "label": "Total Assets",
+                    "amount": snapshot_data.get("total_assets"),
+                    "side": "debit",
+                },
+            ),
+            (
+                "Liabilities",
+                [
+                    _line_item(r, "balance", side="credit")
+                    for r in snapshot_data.get("liabilities", [])
+                ],
+                {
+                    "label": "Total Liabilities",
+                    "amount": snapshot_data.get("total_liabilities"),
+                    "side": "credit",
+                },
+            ),
+            (
+                "Equity",
+                [_line_item(r, "balance", side="credit") for r in snapshot_data.get("equity", [])],
+                {
+                    "label": "Total Equity",
+                    "amount": snapshot_data.get("total_equity"),
+                    "side": "credit",
+                },
+            ),
         ]
         grand = {
             "label": "Total Liabilities & Equity",
-            "amount": _num(snapshot_data.get("total_liabilities")) + _num(snapshot_data.get("total_equity")),
+            "amount": _num(snapshot_data.get("total_liabilities"))
+            + _num(snapshot_data.get("total_equity")),
             "side": "credit",
         }
 
@@ -250,11 +287,17 @@ def render_report_pdf(
         [Paragraph("Account", n_item), Paragraph("Debit", d_total), Paragraph("Credit", d_total)]
     ]
     for section_name, section_rows, summary in sections:
-        rows.append([Paragraph(section_name, _section_style()), Paragraph("", _section_style()), Paragraph("", _section_style())])
+        rows.append(
+            [
+                Paragraph(section_name, _section_style()),
+                Paragraph("", _section_style()),
+                Paragraph("", _section_style()),
+            ]
+        )
         rows += section_rows
         if summary:
-            rows.append(_total_row(summary["label"], summary["amount"], side=summary["side"]))  # type: ignore[arg-type]
-    rows.append(_total_row(grand["label"], grand["amount"], side=grand["side"]))  # type: ignore[arg-type]
+            rows.append(_total_row(summary["label"], summary["amount"], side=summary["side"]))
+    rows.append(_total_row(grand["label"], grand["amount"], side=grand["side"]))
 
     table = Table(rows, colWidths=[doc.width * 0.6, doc.width * 0.2, doc.width * 0.2], repeatRows=1)
     table.setStyle(
@@ -270,7 +313,7 @@ def render_report_pdf(
             ]
         )
     )
-    for (i, row) in enumerate(rows[1:], start=1):
+    for i, row in enumerate(rows[1:], start=1):
         if isinstance(row[0], Paragraph) and row[0].style.name == "pack-section":
             table.setStyle(
                 TableStyle(
