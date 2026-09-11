@@ -110,7 +110,9 @@ def upgrade() -> None:
         sa.Column("report_week_start", sa.Date(), nullable=False),
         sa.Column("report_week_end", sa.Date(), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.Column("total_events_scanned", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "total_events_scanned", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
         sa.Column("flagged_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column(
             "status",
