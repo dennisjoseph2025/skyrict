@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
@@ -53,7 +53,7 @@ _TAX_SYSTEM_PROMPT = (
     '"net" (number, equal to output_tax - input_tax)), '
     '"total_input" (sum of all input_tax), "total_output" (sum of all '
     'output_tax), "model_used" (your own model identifier) and "confidence" '
-    '(0 to 1). If there is nothing taxable, categories must be an empty array. '
+    "(0 to 1). If there is nothing taxable, categories must be an empty array. "
     "Amounts must be plain numbers, never strings."
 )
 
@@ -61,12 +61,12 @@ _AUDIT_SYSTEM_PROMPT = (
     "You are a financial auditor reviewing posted journal entries. "
     "Return ONLY strict JSON with keys: "
     '"narration" (a 2-4 sentence plain-English summary of the period\'s '
-    'transactions, quoting the most material figures), '
+    "transactions, quoting the most material figures), "
     '"risk_areas" (array of objects, each with "risk_type" (e.g. '
     '"round_trip", "unbalanced_batch", "unusual_high_value", '
     '"missing_source_ref"), "description" (what specifically looks risky and '
     'which entries), "severity" ("low", "medium" or "high"), and "entry_id" '
-    '(the matching entry id from the provided list, or omit if none) - empty '
+    "(the matching entry id from the provided list, or omit if none) - empty "
     'array if no risks) and "confidence" (0 to 1).'
 )
 
@@ -77,7 +77,7 @@ _QA_SYSTEM_PROMPT = (
     "answer grounded exclusively in the provided chunks; if the chunks do not "
     'cover the question, answer "I could not find this in the documents."), '
     '"citations" (array of objects, each with "source_ref" - MUST be one of '
-    'the source_refs provided in the evidence - avoided if unused) and '
+    "the source_refs provided in the evidence - avoided if unused) and "
     '"confidence" (0 to 1). Do not invent sources or figures.'
 )
 
@@ -198,7 +198,7 @@ async def narrate_audit(
         return None
 
     risk_areas: list[RiskArea] = []
-    for raw in payload.get("risk_areas") or []:
+    for raw in cast("list[Any]", payload.get("risk_areas") or []):
         if not isinstance(raw, dict):
             continue
         risk_type = str(raw.get("risk_type") or "").strip()
@@ -267,7 +267,7 @@ async def answer_question(
 
     by_ref = {str(e.get("source_ref")): e for e in evidence}
     citations: list[QaCitation] = []
-    for raw in payload.get("citations") or []:
+    for raw in cast("list[Any]", payload.get("citations") or []):
         if not isinstance(raw, dict):
             continue
         source_ref = str(raw.get("source_ref") or "").strip()

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
@@ -42,7 +43,7 @@ class AiDocRepository:
         return result.scalar_one_or_none()
 
     async def posted_entries_snapshot(
-        self, tenant_id: uuid.UUID, start_date, end_date
+        self, tenant_id: uuid.UUID, start_date: date, end_date: date
     ) -> list[dict[str, Any]]:
         """Posted journal entries (with lines + account refs) for a period."""
         entry_rows = await self._db.execute(
@@ -183,13 +184,13 @@ class AiDocRepository:
         tenant_id: uuid.UUID,
         period_id: uuid.UUID,
         period_name: str,
-        start_date,
-        end_date,
+        start_date: date,
+        end_date: date,
         snapshot_id: uuid.UUID | None,
         snapshot: dict[str, Any],
         categories: list[dict[str, Any]],
-        total_input,
-        total_output,
+        total_input: Decimal,
+        total_output: Decimal,
         model_used: str,
     ) -> ErpTaxSummaryModel:
         model = ErpTaxSummaryModel(

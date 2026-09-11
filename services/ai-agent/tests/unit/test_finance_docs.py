@@ -189,8 +189,7 @@ _EVIDENCE = [
 async def test_qa_parses_valid_answer_with_citations() -> None:
     llm = _router(
         _completion(
-            '{"answer": "Net terms are 30 days.", '
-            '"citations": [{"source_ref": "doc/ar/policy"}]}'
+            '{"answer": "Net terms are 30 days.", "citations": [{"source_ref": "doc/ar/policy"}]}'
         )
     )
     result = await answer_question(llm, question="What are net terms?", evidence=_EVIDENCE)

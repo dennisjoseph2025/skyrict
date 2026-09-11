@@ -151,9 +151,7 @@ async def _run_remind(llm_router: LlmRouter, case: dict[str, Any]) -> tuple[bool
     return (invoice_ok and amount_ok, result["model_used"])
 
 
-async def _run_tax_summary(
-    llm_router: LlmRouter, case: dict[str, Any]
-) -> tuple[bool | None, str]:
+async def _run_tax_summary(llm_router: LlmRouter, case: dict[str, Any]) -> tuple[bool | None, str]:
     result = await generate_tax_summary(
         llm_router, period=case.get("period"), entries=case["entries"]
     )
@@ -186,9 +184,7 @@ async def _run_audit_narration(
 
 async def _run_doc_qa(llm_router: LlmRouter, case: dict[str, Any]) -> tuple[bool | None, str]:
     evidence = case["evidence"]
-    result = await answer_question(
-        llm_router, question=case["question"], evidence=evidence
-    )
+    result = await answer_question(llm_router, question=case["question"], evidence=evidence)
     if case.get("expect_abstain"):
         return result is None, ""
     if result is None or not result.answer:

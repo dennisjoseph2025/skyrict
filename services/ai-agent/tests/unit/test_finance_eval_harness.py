@@ -32,17 +32,13 @@ def _router() -> MagicMock:
                 '"total_input": 0, "total_output": 250.0}'
             )
         if "financial auditor" in system:
-            return _completion(
-                '{"narration": "Sales reached $5,000 in Q1.", "risk_areas": []}'
-            )
+            return _completion('{"narration": "Sales reached $5,000 in Q1.", "risk_areas": []}')
         if "payment terms" in request.user_prompt:
             return _completion(
                 '{"answer": "Payment is due net 30.", "citations": [{"source_ref": '
                 '"INV-2026-00042-chunk-0"}]}'
             )
-        return _completion(
-            '{"answer": "I could not find this in the documents.", "citations": []}'
-        )
+        return _completion('{"answer": "I could not find this in the documents.", "citations": []}')
 
     router = MagicMock()
     router.complete = AsyncMock(side_effect=complete)
@@ -96,7 +92,11 @@ def _registry(tmp_path) -> str:
                         "id": "a12-cite",
                         "question": "What are the payment terms on invoice INV-2026-00042?",
                         "evidence": [
-                            {"source_ref": "INV-2026-00042-chunk-0", "chunk_text": "net 30", "score": 0.9}
+                            {
+                                "source_ref": "INV-2026-00042-chunk-0",
+                                "chunk_text": "net 30",
+                                "score": 0.9,
+                            }
                         ],
                         "expected_citations": True,
                     },
@@ -104,7 +104,11 @@ def _registry(tmp_path) -> str:
                         "id": "a12-nocite",
                         "question": "How many vacation days do employees get?",
                         "evidence": [
-                            {"source_ref": "INV-2026-00042-chunk-0", "chunk_text": "net 30", "score": 0.9}
+                            {
+                                "source_ref": "INV-2026-00042-chunk-0",
+                                "chunk_text": "net 30",
+                                "score": 0.9,
+                            }
                         ],
                         "expected_citations": False,
                     },

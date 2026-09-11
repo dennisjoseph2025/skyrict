@@ -35,7 +35,7 @@ def _fmt(value: Any) -> str:
     return f"{_num(value):,.2f}"
 
 
-def _cash_row(label: str, amount: Any) -> list:
+def _cash_row(label: str, amount: Any) -> list[Any]:
     return [Paragraph(label, _label_style()), Paragraph(_fmt(amount), _amount_style())]
 
 
@@ -57,7 +57,7 @@ def _amount_style() -> ParagraphStyle:
     )
 
 
-class _WatermarkCanvas(canvas.Canvas):
+class _WatermarkCanvas(canvas.Canvas):  # type: ignore[misc]  # reportlab canvas is untyped
     """Draws a translucent diagonal DRAFT overlay on every page."""
 
     def __init__(self, *args: Any, watermarked: bool, **kwargs: Any) -> None:
@@ -139,6 +139,7 @@ def render_report_pdf(
     if subtitle:
         story.append(Paragraph(subtitle, sub))
 
+    rows: list[list[Any]]
     if doc_type == "pnl":
         rows = [["Account", "Amount"]]
         rows += [
