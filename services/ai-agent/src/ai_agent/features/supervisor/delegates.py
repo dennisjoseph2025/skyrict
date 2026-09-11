@@ -25,6 +25,7 @@ Security notes:
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
@@ -42,21 +43,28 @@ from ai_agent.features.supervisor.prompts import (
     FINANCE_NO_ANSWER,
     FINANCE_SYSTEM_PROMPT,
     FINANCE_UNAVAILABLE,
+    GUARDIAN_NO_REPORT,
+    GUARDIAN_SYSTEM_PROMPT,
+    GUARDIAN_UNAVAILABLE,
     HR_NO_ANSWER,
     HR_UNAVAILABLE,
     INVENTORY_NO_DATA,
     INVENTORY_SYSTEM_PROMPT,
+    SALES_COACH_NO_SUGGESTIONS,
+    SALES_COACH_SYSTEM_PROMPT,
+    SALES_COACH_UNAVAILABLE,
 )
 from ai_agent.features.supervisor.schemas import (
+    AGENT_AUDIT_GUARDIAN,
     AGENT_CRM,
     AGENT_FINANCE,
     AGENT_HR,
     AGENT_INVENTORY,
+    AGENT_SALES_COACH,
     Citation,
 )
 
 if TYPE_CHECKING:
-    import uuid
     from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 
     from ai_agent.core.llm_router import LlmRouter
@@ -119,6 +127,35 @@ class Delegator(Protocol):
         user_id: uuid.UUID,
         citations: list[Citation],
     ) -> AsyncIterator[str]: ...
+
+
+class CoachSuggestionPort(Protocol):
+    """Read-only access to a rep's pending coaching suggestions."""
+
+    async def list_pending_for_rep(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        rep_user_id: uuid.UUID,
+    ) -> list[dict[str, object]]: ...
+
+
+class GuardianReportPort(Protocol):
+    """Read-only access to the latest weekly guardian report + flags."""
+
+    async def list_reports(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        limit: int = 1,
+    ) -> list[dict[str, object]]: ...
+
+    async def list_events_for_report(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        report_id: uuid.UUID,
+    ) -> list[dict[str, object]]: ...
 
 
 class InventoryMonitorDelegator:
@@ -796,6 +833,220 @@ class FinanceDelegator:
             return False
         months = {(invoice.invoice_date.year, invoice.invoice_date.month) for invoice in invoices}
         return len(months) >= _MIN_HISTORY_MONTHS
+
+
+class SalesCoachDelegator:
+    """Streams a rep's own pending coaching suggestions (SKY-90).
+
+    The delegate surfaces ONLY the acting rep's suggestions
+    (``rep_user_id == user_id``) — a coach question can never leak another
+    rep's data. Without providers it renders the suggestions deterministically
+    (title + body), and with providers it asks the LLM to turn them into a
+    short prioritized action plan grounded strictly in the context.
+    """
+
+    key = AGENT_SALES_COACH
+    display_name = "Sales Coach"
+
+    _MAX_SUGGESTIONS = 5
+    _MAX_CONTEXT_CHARS = 4000
+
+    def __init__(
+        self,
+        *,
+        llm_router: LlmRouter,
+        suggestions: CoachSuggestionPort,
+    ) -> None:
+        self._llm_router = llm_router
+        self._suggestions = suggestions
+
+    async def stream(
+        self,
+        *,
+        query: str,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        citations: list[Citation],
+    ) -> AsyncIterator[str]:
+        del citations
+        try:
+            rows = await self._suggestions.list_pending_for_rep(
+                tenant_id=tenant_id,
+                rep_user_id=user_id,
+            )
+        except Exception as exc:
+            logger.warning("supervisor.sales_coach_read_failed", error=str(exc))
+            for delta in _iter_text_deltas(SALES_COACH_UNAVAILABLE):
+                yield delta
+            return
+
+        pending = [row for row in rows if row.get("status") == "pending"][: self._MAX_SUGGESTIONS]
+        if not pending:
+            for delta in _iter_text_deltas(SALES_COACH_NO_SUGGESTIONS):
+                yield delta
+            return
+
+        context = self._render_suggestions(pending)
+        if not self._llm_router.has_providers:
+            for delta in _iter_text_deltas(context):
+                yield delta
+            return
+
+        try:
+            completion = await self._llm_router.complete(
+                LlmRequest(
+                    system_prompt=SALES_COACH_SYSTEM_PROMPT,
+                    user_prompt=(
+                        f"Question: {query.strip()}\n\n"
+                        f"Pending coaching suggestions:\n{context[: self._MAX_CONTEXT_CHARS]}"
+                    ),
+                    max_tokens=300,
+                    temperature=0.2,
+                )
+            )
+        except AiUnavailableError as exc:
+            logger.warning("supervisor.sales_coach_unavailable", error=str(exc))
+            for delta in _iter_text_deltas(SALES_COACH_UNAVAILABLE):
+                yield delta
+            return
+        answer = (completion.text or "").strip() or context
+        for delta in _iter_text_deltas(answer):
+            yield delta
+
+    def _render_suggestions(self, rows: list[dict[str, object]]) -> str:
+        """Deterministic rendering of pending suggestions (no LLM)."""
+        lines = ["You have these pending coaching suggestions:"]
+        for index, row in enumerate(rows, start=1):
+            title = str(row.get("title", ""))
+            body = str(row.get("body", ""))
+            lines.append(f"{index}. {title} — {body}")
+        return "\n".join(lines)
+
+
+class AuditGuardianDelegator:
+    """Streams the latest weekly integrity report + its flagged findings (SKY-90).
+
+    Only the report's own summary line and the sanitized finding fields
+    (severity, reason) are surfaced — the raw ``evidence`` payloads (which can
+    carry user/IP identifiers) are never rendered into chat or passed to the
+    LLM.
+    """
+
+    key = AGENT_AUDIT_GUARDIAN
+    display_name = "Audit Guardian"
+
+    _MAX_FLAGGED = 6
+    _MAX_CONTEXT_CHARS = 4000
+
+    def __init__(
+        self,
+        *,
+        llm_router: LlmRouter,
+        guardian_reports: GuardianReportPort,
+    ) -> None:
+        self._llm_router = llm_router
+        self._guardian_reports = guardian_reports
+
+    async def stream(
+        self,
+        *,
+        query: str,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        citations: list[Citation],
+    ) -> AsyncIterator[str]:
+        del user_id
+        try:
+            reports = await self._guardian_reports.list_reports(tenant_id=tenant_id, limit=1)
+        except Exception as exc:
+            logger.warning("supervisor.guardian_read_failed", error=str(exc))
+            for delta in _iter_text_deltas(GUARDIAN_UNAVAILABLE):
+                yield delta
+            return
+        if not reports:
+            for delta in _iter_text_deltas(GUARDIAN_NO_REPORT):
+                yield delta
+            return
+
+        report = reports[0]
+        report_id = report.get("id")
+        flagged: list[dict[str, object]] = []
+        if isinstance(report_id, uuid.UUID):
+            try:
+                rows = await self._guardian_reports.list_events_for_report(
+                    tenant_id=tenant_id,
+                    report_id=report_id,
+                )
+                flagged = list(rows)[: self._MAX_FLAGGED]
+            except Exception as exc:
+                logger.warning("supervisor.guardian_events_failed", error=str(exc))
+        else:
+            logger.warning("supervisor.guardian_report_missing_id")
+
+        context = self._render_context(report, flagged)
+        citations.append(
+            Citation(
+                source_ref=f"audit-guardian/report/{report.get('id', '')}",
+                module="audit_guardian",
+                title="Weekly audit integrity report",
+            )
+        )
+
+        if not self._llm_router.has_providers:
+            for delta in _iter_text_deltas(self._render_deterministic(report, flagged)):
+                yield delta
+            return
+
+        try:
+            completion = await self._llm_router.complete(
+                LlmRequest(
+                    system_prompt=GUARDIAN_SYSTEM_PROMPT,
+                    user_prompt=(
+                        f"Question: {query.strip()}\n\n"
+                        f"Latest report context:\n{context[: self._MAX_CONTEXT_CHARS]}"
+                    ),
+                    max_tokens=300,
+                    temperature=0.2,
+                )
+            )
+        except AiUnavailableError as exc:
+            logger.warning("supervisor.guardian_unavailable", error=str(exc))
+            for delta in _iter_text_deltas(GUARDIAN_UNAVAILABLE):
+                yield delta
+            return
+        answer = (completion.text or "").strip() or self._render_deterministic(report, flagged)
+        for delta in _iter_text_deltas(answer):
+            yield delta
+
+    def _render_context(self, report: dict[str, object], flagged: list[dict[str, object]]) -> str:
+        """Report summary line + sanitized finding list (evidence excluded)."""
+        lines = [str(report.get("summary", ""))]
+        if flagged:
+            lines.append("Flagged findings (severity, reason only):")
+            for f in flagged:
+                lines.append(
+                    f"- {f.get('severity')}: {f.get('reason')} "
+                    f"(source: {f.get('source_table')}, action: {f.get('event_action')})"
+                )
+        return "\n".join(lines)
+
+    def _render_deterministic(
+        self,
+        report: dict[str, object],
+        flagged: list[dict[str, object]],
+    ) -> str:
+        """Provider-free answer - report header + findings, no LLM."""
+        lines = [
+            f"Latest audit integrity report: {report.get('summary', '')}",
+            f"{report.get('total_events_scanned', 0)} events scanned, "
+            f"{report.get('flagged_count', 0)} flagged.",
+        ]
+        if flagged:
+            for f in flagged[: self._MAX_FLAGGED]:
+                lines.append(f"- {f.get('severity')}: {f.get('reason')}")
+        else:
+            lines.append("No flagged findings in the latest report.")
+        return "\n".join(lines)
 
 
 # Invoices that still represent an outstanding receivable (unpaid, not

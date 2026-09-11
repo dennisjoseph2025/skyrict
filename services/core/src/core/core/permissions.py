@@ -122,6 +122,18 @@ ERP_REPORTS_READ = "erp.reports.read"
 # Always paired with ERP_REPORTS_READ so a creator can run what they create.
 ERP_REPORTS_CREATE = "erp.reports.create"
 
+# Sales Coach AI (SKY-90 wave 2): read gates the pending coaching suggestion
+# queue for a tenant/rep; review gates the accept/dismiss decisions that flip
+# the suggestion status ledger. Seeded into core_permissions by migration 0048.
+ERP_AI_COACHING_READ = "erp.ai.coaching.read"
+ERP_AI_COACHING_REVIEW = "erp.ai.coaching.review"
+
+# Audit Guardian AI (SKY-90 wave 2): read gates the weekly integrity reports
+# and the detail view that exposes flagged-event evidence; review gates the
+# operator acknowledgement that marks a report reviewed. Seeded by 0048.
+ERP_AI_GUARDIAN_READ = "erp.ai.guardian.read"
+ERP_AI_GUARDIAN_REVIEW = "erp.ai.guardian.review"
+
 # Every catalogued permission, in catalog order.
 CATALOG: tuple[str, ...] = (
     ERP_INVENTORY_READ,
@@ -173,6 +185,10 @@ CATALOG: tuple[str, ...] = (
     ERP_PAYROLL_AI_APPROVE,
     ERP_REPORTS_READ,
     ERP_REPORTS_CREATE,
+    ERP_AI_COACHING_READ,
+    ERP_AI_COACHING_REVIEW,
+    ERP_AI_GUARDIAN_READ,
+    ERP_AI_GUARDIAN_REVIEW,
 )
 # Permission module groupings.
 # Each entry: (module_key, module_label, (permission_keys, ...))
@@ -237,6 +253,16 @@ PERMISSION_MODULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "Reporting & analytics",
         (ERP_REPORTS_READ, ERP_REPORTS_CREATE),
     ),
+    (
+        "ai_coaching",
+        "Sales Coach AI",
+        (ERP_AI_COACHING_READ, ERP_AI_COACHING_REVIEW),
+    ),
+    (
+        "ai_guardian",
+        "Audit Guardian AI",
+        (ERP_AI_GUARDIAN_READ, ERP_AI_GUARDIAN_REVIEW),
+    ),
 )
 
 
@@ -261,6 +287,10 @@ __all__ = [
     "CATALOG",
     "CORE_FX_READ",
     "CORE_FX_WRITE",
+    "ERP_AI_COACHING_READ",
+    "ERP_AI_COACHING_REVIEW",
+    "ERP_AI_GUARDIAN_READ",
+    "ERP_AI_GUARDIAN_REVIEW",
     "ERP_AI_INVOKE",
     "ERP_AI_NARRATOR_REFRESH",
     "ERP_CRM_READ",
