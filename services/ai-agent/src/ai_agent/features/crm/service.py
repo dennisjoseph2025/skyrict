@@ -265,6 +265,22 @@ class CrmAiService:
 
         return result
 
+    async def latest_transcript_analysis(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        activity_id: uuid.UUID,
+    ) -> AiTranscriptAnalysisModel | None:
+        """Load the most recent transcript analysis for an activity (or None).
+
+        Exposed for the GET badge endpoint - analysts re-open a past call and
+        see the same interpretation that was rendered when it landed.
+        """
+        return await self._repo.latest_transcript_analysis(
+            tenant_id=tenant_id,
+            activity_id=activity_id,
+        )
+
     # --- follow-up management ------------------------------------------------
 
     async def list_pending_follow_ups(
