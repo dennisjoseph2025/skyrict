@@ -414,16 +414,11 @@ class TestAiFollowUpSuggestion:
 
 class TestAiTranscriptAnalysis:
     def test_composite_pk(self) -> None:
-        pk = list(
-            Base.metadata.tables["ai_transcript_analyses"]
-            .primary_key.columns.keys()
-        )
+        pk = list(Base.metadata.tables["ai_transcript_analyses"].primary_key.columns.keys())
         assert pk == ["tenant_id", "id"]
 
     def test_checks_present(self) -> None:
-        names = _check_names(
-            Base.metadata.tables["ai_transcript_analyses"]
-        )
+        names = _check_names(Base.metadata.tables["ai_transcript_analyses"])
         assert "ck_ai_transcript_analyses_objection_score_range" in names
         assert "ck_ai_transcript_analyses_sentiment" in names
         assert "ck_ai_transcript_analyses_confidence_range" in names
