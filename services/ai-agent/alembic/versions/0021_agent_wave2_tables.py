@@ -58,8 +58,8 @@ def upgrade() -> None:
         sa.Column("suggestion_type", sa.String(50), nullable=False),
         sa.Column("title", sa.String(200), nullable=False),
         sa.Column("body", sa.Text(), nullable=False),
-        sa.Column("evidence", JSONB, nullable=False, server_default="'[]'"),
-        sa.Column("status", sa.String(20), nullable=False, server_default="'pending'"),
+        sa.Column("evidence", JSONB, nullable=False, server_default=sa.text("'[]'")),
+        sa.Column("status", sa.String(20), nullable=False, server_default=sa.text("'pending'")),
         sa.Column("reviewed_by", UUID(as_uuid=True), nullable=True),
         sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
@@ -110,13 +110,13 @@ def upgrade() -> None:
         sa.Column("report_week_start", sa.Date(), nullable=False),
         sa.Column("report_week_end", sa.Date(), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.Column("total_events_scanned", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("flagged_count", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("total_events_scanned", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column("flagged_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column(
             "status",
             sa.String(20),
             nullable=False,
-            server_default="'generated'",
+            server_default=sa.text("'generated'"),
         ),
         sa.Column(
             "generated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
@@ -163,7 +163,7 @@ def upgrade() -> None:
         sa.Column("event_action", sa.String(100), nullable=False),
         sa.Column("severity", sa.String(20), nullable=False),
         sa.Column("reason", sa.Text(), nullable=False),
-        sa.Column("evidence", JSONB, nullable=False, server_default="'{}'"),
+        sa.Column("evidence", JSONB, nullable=False, server_default=sa.text("'{}'")),
         sa.Column(
             "flagged_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
         ),
