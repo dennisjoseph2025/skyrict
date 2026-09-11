@@ -19,6 +19,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
+import structlog
 
 from core.core.audit_events import (
     FINANCE_AI_AUDIT_NARRATED,
@@ -31,10 +32,12 @@ from core.core.audit_events import (
 from core.core.audit_service import AuditService
 from core.core.exceptions import AiServiceUnavailableError, NotFoundError
 from core.features.ai_docs import ai_client as ai_client_mod
-from core.features.ai_docs import pdf_renderer, schemas
+from core.features.ai_docs import pdf_renderer, schemas, text_renderer
 from core.features.ai_docs.models.ai_doc import ErpAiDocModel
 from core.features.ai_docs.models.tax_summary import ErpTaxSummaryModel
 from core.features.ai_docs.repository import AiDocRepository
+
+logger = structlog.get_logger("core.finance.ai_docs")
 
 
 class AiDocService:
@@ -106,6 +109,23 @@ class AiDocService:
                 "status": "draft",
             },
         )
+        text = text_renderer.render_tax_summary_markdown(
+            period_name=period.name,
+            start_date=period.start_date,
+            end_date=period.end_date,
+            categories=categories,
+            total_input=ai.get("total_input"),
+            total_output=ai.get("total_output"),
+        )
+        await self._index_best_effort(
+            tenant_id=tenant_id,
+            client=client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            source_ref=f"tax-summary/{model.id}",
+            text=text,
+            page_title=f"Tax Summary - {period.name}",
+        )
         return _tax_summary_response(model)
 
     async def list_tax_summaries(
@@ -152,6 +172,9 @@ class AiDocService:
         doc_type: str,
         snapshot_id: uuid.UUID,
         snapshot_data: dict[str, Any],
+        client: httpx.AsyncClient,
+        authorization: str | None,
+        tenant_slug: str | None,
     ) -> schemas.AiDocResponse:
         if doc_type not in schemas.AI_DOC_TYPES:
             raise ValueError(f"Unsupported doc_type: {doc_type}")
@@ -174,6 +197,19 @@ class AiDocService:
             action=FINANCE_AI_DOC_GENERATED,
             target=f"ai_doc:{model.id}",
             details={"doc_type": doc_type, "version": version, "status": "draft"},
+        )
+        text = text_renderer.render_report_markdown(
+            doc_type=doc_type, snapshot_data=snapshot_data, revision=str(version)
+        )
+        title = "Profit & Loss" if doc_type == "pnl" else "Balance Sheet"
+        await self._index_best_effort(
+            tenant_id=tenant_id,
+            client=client,
+            authorization=authorization,
+            tenant_slug=tenant_slug,
+            source_ref=f"finance-doc/{model.id}/rev{version}",
+            text=text,
+            page_title=title,
         )
         return _doc_response(model)
 
@@ -288,6 +324,44 @@ class AiDocService:
             ],
             model_used=str(ai.get("model_used") or "").strip() or "unknown",
         )
+
+    async def _index_best_effort(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        client: httpx.AsyncClient,
+        authorization: str | None,
+        tenant_slug: str | None,
+        source_ref: str,
+        text: str,
+        page_title: str,
+    ) -> None:
+        """Push one generated document into RAG so A12 can cite it.
+
+        Best-effort by design: an indexing failure must never roll back or
+        block document generation - Q&A simply lags until the next generate.
+        """
+        try:
+            ok = await ai_client_mod.index_finance_doc_in_rag(
+                client,
+                authorization=authorization,
+                tenant_slug=tenant_slug,
+                source_ref=source_ref,
+                text=text,
+                page_title=page_title,
+            )
+            if not ok:
+                logger.warning(
+                    "finance_ai_docs.rag_index_refused",
+                    tenant_id=str(tenant_id),
+                    source_ref=source_ref,
+                )
+        except Exception:  # best-effort ingest, never block generation
+            logger.exception(
+                "finance_ai_docs.rag_index_failed",
+                tenant_id=str(tenant_id),
+                source_ref=source_ref,
+            )
 
 
 def _tax_summary_response(m: ErpTaxSummaryModel) -> schemas.TaxSummaryResponse:

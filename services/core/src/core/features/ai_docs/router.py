@@ -124,14 +124,20 @@ async def reject_tax_summary(
 )
 async def generate_doc(
     body: schemas.DocPackGenerateRequest,
+    request: Request,
     current_user: _AiWriteUser,
+    client: _ClientDep,
     svc: _SvcDep,
 ) -> ResponseEnvelope[schemas.AiDocResponse]:
+    auth, tenant_slug = _auth(request)
     result = await svc.generate_doc(
         tenant_id=_tenant_id(current_user),
         doc_type=body.doc_type,
         snapshot_id=body.snapshot_id,
         snapshot_data=body.snapshot_data,
+        client=client,
+        authorization=auth,
+        tenant_slug=tenant_slug,
     )
     return ResponseEnvelope(data=result)
 

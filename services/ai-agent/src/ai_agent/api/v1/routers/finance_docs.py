@@ -17,6 +17,7 @@ The A12 endpoint composes the shared RAG retrieval stack (same seam as
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
@@ -27,6 +28,8 @@ from ai_agent.api.deps import get_current_user, get_db
 from ai_agent.core.config import settings
 from ai_agent.core.embedding import build_embedding_provider
 from ai_agent.core.exceptions import AiUnavailableError
+from ai_agent.core.tenant_context import TenantContext
+from ai_agent.core.token_counter import TokenCounter
 from ai_agent.db.query_cache_repository import QueryCacheRepository
 from ai_agent.db.rag_repository import RagRepository
 from ai_agent.features.finance_docs.generate import (
@@ -38,6 +41,8 @@ from ai_agent.features.finance_docs.generate import (
 from ai_agent.features.finance_docs.generate import (
     narrate_audit as llm_narrate_audit,
 )
+from ai_agent.features.rag.ingest.loader import SourceDocument
+from ai_agent.features.rag.ingest.service import RagIngestService
 from ai_agent.features.rag.retrieval import RedisQueryCache
 from ai_agent.features.rag.retrieval.service import RagRetrievalService
 
@@ -216,6 +221,27 @@ def get_rag_retrieval_service(
     return _build_retrieval_service(request, session)
 
 
+def _build_ingest_service(session: AsyncSession) -> RagIngestService:
+    """Compose the RAG ingest stack (mirrors the ``ai-agent ingest`` runner)."""
+    provider = build_embedding_provider(settings)
+    if provider is None:
+        raise AiUnavailableError("No embedding provider configured - set AI_EMBEDDING_PROVIDER")
+    return RagIngestService(
+        counter=TokenCounter(),
+        embedding_provider=provider,
+        store=RagRepository(session),
+        child_tokens=settings.RAG_CHUNK_CHILD_TOKENS,
+        parent_tokens=settings.RAG_CHUNK_PARENT_TOKENS,
+        overlap_tokens=settings.RAG_CHUNK_OVERLAP_TOKENS,
+    )
+
+
+def _finance_source_document(source_ref: str, text: str, *, page_title: str = "") -> SourceDocument:
+    """Build one ``finance-docs`` document; optional heading prefixes the body."""
+    body = text if not page_title else f"## {page_title}\n\n{text}"
+    return SourceDocument(module="finance-docs", source_ref=source_ref, text=body)
+
+
 @doc_qa_router.post("/qa", response_model=QaResponse)
 async def doc_qa(
     body: QaPayload,
@@ -252,4 +278,54 @@ async def doc_qa(
             for c in result.citations
         ],
         model_used=result.model_used,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Finance-doc indexing into RAG (core pushes generated documents)
+# ---------------------------------------------------------------------------
+
+
+class FinanceDocIndexPayload(BaseModel):
+    source_ref: str = Field(min_length=1, max_length=255)
+    text: str = Field(min_length=10, max_length=200_000)
+    page_title: str = Field(default="", max_length=200)
+
+
+class FinanceDocIndexResponse(BaseModel):
+    source_ref: str
+    module: str
+    parents: int
+    children: int
+    tokens_embedded: int
+    model_used: str
+
+
+@doc_qa_router.post("/index-finance-doc", response_model=FinanceDocIndexResponse)
+async def index_finance_doc(
+    body: FinanceDocIndexPayload,
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> FinanceDocIndexResponse:
+    """Store one generated finance document into the caller tenant's RAG store.
+
+    Idempotent by ``source_ref`` (existing rows are replaced), so re-indexing a
+    regenerated document converges instead of stacking duplicates. The tenant
+    security context is pinned before any write, same as the ingest runner.
+    """
+    tenant_id = user["tenant_id"]
+    if not isinstance(tenant_id, uuid.UUID):
+        tenant_id = uuid.UUID(str(tenant_id))
+    TenantContext.set(str(tenant_id))
+
+    source = _finance_source_document(body.source_ref, body.text, page_title=body.page_title)
+    report = await _build_ingest_service(session).ingest(tenant_id=tenant_id, documents=[source])
+    await session.commit()
+    return FinanceDocIndexResponse(
+        source_ref=body.source_ref,
+        module=source.module,
+        parents=report.parents,
+        children=report.children,
+        tokens_embedded=report.tokens_embedded,
+        model_used=report.model_used,
     )

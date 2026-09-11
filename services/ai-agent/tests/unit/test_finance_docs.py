@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -112,6 +113,55 @@ async def test_tax_summary_abstains_on_unparseable() -> None:
         _router(_completion("no json here")), period=_PERIOD, entries=_ENTRIES
     )
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_tax_summary_uses_corrected_json_after_self_correction() -> None:
+    draft = json.dumps(
+        {
+            "categories": [
+                {
+                    "category": "purchases",
+                    "detail": "draft",
+                    "input_tax": 4080,
+                    "output_tax": 0,
+                    "net": 4080,
+                }
+            ],
+            "total_input": 4080,
+            "total_output": 0,
+        }
+    )
+    corrected = json.dumps(
+        {
+            "categories": [
+                {
+                    "category": "purchases",
+                    "detail": "tax on purchases",
+                    "input_tax": 4080,
+                    "output_tax": 0,
+                    "net": 4080,
+                },
+                {
+                    "category": "sales",
+                    "detail": "tax on sales",
+                    "input_tax": 0,
+                    "output_tax": 8160,
+                    "net": 8160,
+                },
+            ],
+            "total_input": 4080,
+            "total_output": 8160,
+        }
+    )
+    # llama-class LLMs occasionally emit a draft then a corrected object
+    # ("...became..."); the final object must win, not the greedy span.
+    completion = _completion(f"```json\n{draft}\n```\nbecame\n\n```json\n{corrected}\n```")
+    result = await generate_tax_summary(_router(completion), period=_PERIOD, entries=_ENTRIES)
+    assert result is not None
+    assert [c.category for c in result.categories] == ["purchases", "sales"]
+    assert result.total_input == 4080.0
+    assert result.total_output == 8160.0
 
 
 @pytest.mark.asyncio

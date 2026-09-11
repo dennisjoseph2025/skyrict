@@ -23,6 +23,7 @@ from core.features.ai.proxy import forward_to_ai_agent
 _TAX_UPSTREAM_PATH = "/api/v1/ai/tax-summary/generate"
 _NARRATION_UPSTREAM_PATH = "/api/v1/ai/audit/narration"
 _QA_UPSTREAM_PATH = "/api/v1/ai/rag/qa"
+_INDEX_UPSTREAM_PATH = "/api/v1/ai/rag/index-finance-doc"
 
 
 async def _relay(
@@ -39,7 +40,7 @@ async def _relay(
         upstream_path=upstream_path,
         authorization=authorization,
         tenant_slug=tenant_slug,
-        body=json.dumps(payload).encode("utf-8"),
+        body=json.dumps(payload, default=str).encode("utf-8"),
     )
     if upstream.status_code >= 400:
         return None
@@ -108,3 +109,28 @@ async def answer_question_with_ai(
         tenant_slug=tenant_slug,
         payload={"question": question},
     )
+
+
+async def index_finance_doc_in_rag(
+    client: httpx.AsyncClient,
+    *,
+    authorization: str | None,
+    tenant_slug: str | None,
+    source_ref: str,
+    text: str,
+    page_title: str = "",
+) -> bool:
+    """Index one generated finance document into the tenant's RAG store.
+
+    Best-effort from the caller's side: ``False`` on an upstream refusal, an
+    exception on transport failure - indexing must never block document
+    generation, so callers should swallow failures.
+    """
+    data = await _relay(
+        client,
+        upstream_path=_INDEX_UPSTREAM_PATH,
+        authorization=authorization,
+        tenant_slug=tenant_slug,
+        payload={"source_ref": source_ref, "text": text, "page_title": page_title},
+    )
+    return bool(data and data.get("source_ref"))
