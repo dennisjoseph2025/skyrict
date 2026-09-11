@@ -11,8 +11,8 @@ Composite PK ``(tenant_id, document_id)`` with a composite FK into core-owned
 ``erp_suppliers``): tenant_id stays the RLS column and integrity is enforced
 by the composite FK.
 
-Revision ID: 0018
-Revises: 0017
+Revision ID: 0020
+Revises: 0019
 Create Date: 2026-09-08
 """
 
@@ -23,8 +23,8 @@ from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import UUID
 
-revision = "0018"
-down_revision = "0017"
+revision = "0020"
+down_revision = "0019"
 branch_labels = None
 depends_on = None
 

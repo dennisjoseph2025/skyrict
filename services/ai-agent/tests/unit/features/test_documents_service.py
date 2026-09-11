@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
-
 from ai_agent.core.embedding import EmbeddingResult
 from ai_agent.features.documents.gateway import CoreDocument, OcrWriteResult
 from ai_agent.features.documents.service import DocumentOcrService
@@ -128,9 +126,7 @@ class TestProcessSuccessful:
         store = FakeStore()
         gateway = FakeGateway()
 
-        async def no_bytes(
-            tenant_slug: str, document_id: uuid.UUID
-        ) -> tuple[CoreDocument, bytes]:
+        async def no_bytes(tenant_slug: str, document_id: uuid.UUID) -> tuple[CoreDocument, bytes]:
             return (
                 CoreDocument(document_id=document_id, filename="x", mime_type="text/plain"),
                 b"",

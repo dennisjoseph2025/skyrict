@@ -92,6 +92,21 @@ class HttpDocumentGateway:
             "X-Tenant-Slug": tenant_slug,
         }
 
+    def _safe_document_id(self, document_id: uuid.UUID) -> str:
+        """Return the canonical UUID string - never interpolate raw input.
+
+        The document id is validated here (not just at the router edge) so the
+        id flowed into core's URL path is always a strict ``8-4-4-4-12`` hex
+        UUID. Core's base URL is pinned to the configured
+        ``CORE_DOCUMENT_URL`` and the request targets are fixed relative
+        paths, so user input can never steer the host or scheme (SSRF).
+        """
+        try:
+            parsed = uuid.UUID(str(document_id))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise AiUnavailableError(f"invalid document id: {document_id!r}") from exc
+        return str(parsed)
+
     async def fetch_document_bytes(
         self, tenant_slug: str, document_id: uuid.UUID
     ) -> tuple[CoreDocument, bytes]:
@@ -101,10 +116,12 @@ class HttpDocumentGateway:
         ai-agent always streams through the HTTP contract - never reaches into
         the storage adapter directly.
         """
-        url = f"{self._core_url}/documents/{document_id}/download"
+        doc_id = self._safe_document_id(document_id)
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.get(url, headers=self._headers(tenant_slug))
+            async with httpx.AsyncClient(base_url=self._core_url, timeout=self._timeout) as client:
+                resp = await client.get(
+                    f"/documents/{doc_id}/download", headers=self._headers(tenant_slug)
+                )
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise AiUnavailableError(
@@ -140,7 +157,7 @@ class HttpDocumentGateway:
         The callback is authenticated by core's ``require_ingest_m2m_or_permission``
         (either the shared sync token OR an api-key user with document write).
         """
-        url = f"{self._core_url}/documents/{document_id}/ocr/result"
+        doc_id = self._safe_document_id(document_id)
         payload: dict[str, object] = {"ocr_status": ocr_status}
         if extracted_text is not None:
             payload["extracted_text"] = extracted_text
@@ -151,8 +168,10 @@ class HttpDocumentGateway:
         headers = self._headers(tenant_slug)
         headers["Content-Type"] = "application/json"
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(url, headers=headers, json=payload)
+            async with httpx.AsyncClient(base_url=self._core_url, timeout=self._timeout) as client:
+                resp = await client.post(
+                    f"/documents/{doc_id}/ocr/result", headers=headers, json=payload
+                )
             if resp.status_code >= 400:
                 logger.warning(
                     "documents.ocr.write_failed",
@@ -175,10 +194,13 @@ class HttpDocumentGateway:
         limit: int,
     ) -> list[CoreDocument]:
         """List documents needing re-processing from core's list endpoint."""
-        url = f"{self._core_url}/documents?ocr_status={ocr_status}&page=1&page_size={limit}"
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.get(url, headers=self._headers(tenant_slug))
+            async with httpx.AsyncClient(base_url=self._core_url, timeout=self._timeout) as client:
+                resp = await client.get(
+                    "/documents",
+                    params={"ocr_status": ocr_status, "page": 1, "page_size": limit},
+                    headers=self._headers(tenant_slug),
+                )
             resp.raise_for_status()
             body = resp.json()
             data = (body or {}).get("data") or []

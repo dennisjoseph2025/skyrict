@@ -22,8 +22,8 @@ pulls; ``erp.documents.write`` gates uploads/version updates/tag edits;
 additionally require the owning module's read key (enforced at the service
 edge, not in SQL).
 
-Revision ID: 0039
-Revises: 0038
+Revision ID: 0048
+Revises: 0047
 Create Date: 2026-09-08
 """
 
@@ -32,8 +32,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0039"
-down_revision = "0038"
+revision = "0048"
+down_revision = "0047"
 branch_labels = None
 depends_on = None
 
@@ -63,7 +63,9 @@ def upgrade() -> None:
         sa.Column("mime_type", sa.String(127), nullable=True),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False, server_default=sa.text("0")),
         sa.Column("checksum_sha256", sa.String(64), nullable=False),
-        sa.Column("storage_backend", sa.String(32), nullable=False, server_default=sa.text("'local'")),
+        sa.Column(
+            "storage_backend", sa.String(32), nullable=False, server_default=sa.text("'local'")
+        ),
         sa.Column("storage_key", sa.String(512), nullable=False),
         sa.Column("module_ref", sa.String(32), nullable=True),
         sa.Column("entity_type", sa.String(64), nullable=True),
@@ -140,7 +142,9 @@ def upgrade() -> None:
         sa.Column("mime_type", sa.String(127), nullable=True),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False, server_default=sa.text("0")),
         sa.Column("checksum_sha256", sa.String(64), nullable=False),
-        sa.Column("storage_backend", sa.String(32), nullable=False, server_default=sa.text("'local'")),
+        sa.Column(
+            "storage_backend", sa.String(32), nullable=False, server_default=sa.text("'local'")
+        ),
         sa.Column("storage_key", sa.String(512), nullable=False),
         sa.Column("created_by", sa.Uuid(), nullable=True),
         sa.Column(
@@ -177,10 +181,7 @@ def upgrade() -> None:
         "erp_documents",
         ["tenant_id", "module_ref", "entity_type", "entity_id"],
     )
-    op.execute(
-        "CREATE INDEX ix_erp_documents_tenant_tags "
-        "ON public.erp_documents USING GIN (tags)"
-    )
+    op.execute("CREATE INDEX ix_erp_documents_tenant_tags ON public.erp_documents USING GIN (tags)")
     op.create_index(
         "ix_erp_document_versions_tenant_document",
         "erp_document_versions",

@@ -474,5 +474,7 @@ def documents_reindex(
                 )
 
     asyncio.run(_run())
+
+
 if __name__ == "__main__":
     app()

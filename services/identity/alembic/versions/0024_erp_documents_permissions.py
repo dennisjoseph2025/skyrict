@@ -2,7 +2,7 @@
 
 Ticket SKY-87 (docs/modules/documents.md): the three ``erp.documents.*`` keys
 gate the document management platform surface at the core edge. Core's
-``core_permissions`` catalog carries the same keys (migration 0039); this
+``core_permissions`` catalog carries the same keys (migration 0048); this
 migration mirrors them into identity's ``permissions`` table so role grants
 stay portable across the platform (same precedent as 0020 for ``erp.hr.ai.*``
 and 0023 for ``erp.payroll.ai.*``).
